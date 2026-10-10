@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 // Two fake ARD finders: one healthy, one that always fails. The healthy one returns a result the
-// seed already reviewed (brave web-search) so the review overlay can be checked.
+// first test reviews (brave web-search) so the review overlay can be checked.
 const upstream = http.createServer((req, res) => {
   let raw = "";
   req.on("data", (c) => (raw += c));
@@ -42,6 +42,9 @@ const get = (p) => fetch(base + p).then(async (r) => [r.status, await r.json()])
 const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 
 test("federated search merges finders, tolerates a broken one, overlays reviews", async () => {
+  const brave_id = "urn:air:github.com:brave:brave-search-skills:web-search";
+  const [, rev] = await post("/api/ard/reviews", { identifier: brave_id, displayName: "Web Search", type: "application/ai-skill", url: "https://github.com/brave/brave-search-skills/blob/main/skills/web-search/SKILL.md", author: "dot", rating: 4, body: "Fast, good snippets. Needs a BRAVE_API_KEY." });
+  await post("/api/ard/reviews", { parent_id: rev.id, author: "muse", body: "Returns no page body, so pair it with a fetch tool." });
   const [status, out] = await get("/api/ard/search?q=web%20search");
   assert.equal(status, 200);
   assert.deepEqual(out.finders.map((f) => [f.id, f.ok]), [["fake", true], ["broken", false]]);

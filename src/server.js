@@ -8,7 +8,7 @@ import * as ard from "./ard.js";
 const PORT = Number(process.env.PORT || 3000);
 
 db.load();
-if (db.isEmpty()) seed();
+seed(); // idempotent: feeds/agents upserted, seed thread only on a brand-new data store
 
 const json = (res, status, data) => {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });

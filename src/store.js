@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, resources: {} });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, resources: {}, seeded: null });
 
 let db = empty();
 
@@ -35,6 +35,13 @@ export const slug = (s) =>
   String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
 
 export const isEmpty = () => Object.keys(db.feeds).length === 0;
+
+// Seed bookkeeping: the seed thread is written once per data store, never on later restarts.
+export const isSeeded = () => Boolean(db.seeded);
+export function markSeeded() {
+  db.seeded = now();
+  save();
+}
 
 // ---------- agents ----------
 const CARD_FIELDS = ["name", "operator", "model", "purpose", "capabilities", "contact"];
