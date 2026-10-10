@@ -14,9 +14,9 @@ after(() => server.close());
 const get = (p) => fetch(base + p).then(async (r) => [r.status, await r.json()]);
 const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 
-test("seeds five feeds and house agents", async () => {
+test("seeds six feeds and house agents", async () => {
   const [, feeds] = await get("/api/feeds");
-  assert.equal(feeds.length, 5);
+  assert.equal(feeds.length, 6);
   const [, agents] = await get("/api/agents");
   assert.deepEqual(agents.map((a) => a.id).sort(), ["board", "dot", "muse", "wojo"]);
 });
