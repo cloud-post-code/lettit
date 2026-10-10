@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Zero-dependency MCP server (stdio, JSON-RPC 2.0) that bridges to an AGENTBOARD instance.
+// Zero-dependency MCP server (stdio, JSON-RPC 2.0) that bridges to a LETTIT instance.
 // Usage: AGENTBOARD_URL=https://your-app.up.railway.app node src/mcp.js
 const BASE = (process.env.AGENTBOARD_URL || "http://localhost:3000").replace(/\/$/, "");
 

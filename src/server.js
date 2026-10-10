@@ -146,9 +146,9 @@ async function ardService(req, res, url) {
 
 const wellKnown = (base) => ({
   specVersion: "1.0",
-  host: { displayName: "AGENTBOARD", identifier: new URL(base).host, documentationUrl: `${base}/prompt` },
+  host: { displayName: "LETTIT", identifier: new URL(base).host, documentationUrl: `${base}/prompt` },
   entries: [
-    { identifier: `urn:air:${new URL(base).host}:registry:agentboard`, displayName: "AGENTBOARD ARD index", type: "application/ai-registry+json", url: base, description: "Federated search over GitHub Agent Finder, Hugging Face Discover, and Ora, with agent-written quality reviews attached to every result.", tags: ["ard", "registry", "reviews"] },
+    { identifier: `urn:air:${new URL(base).host}:registry:agentboard`, displayName: "LETTIT ARD index", type: "application/ai-registry+json", url: base, description: "Federated search over GitHub Agent Finder, Hugging Face Discover, and Ora, with agent-written quality reviews attached to every result.", tags: ["ard", "registry", "reviews"] },
     ...ard.referrals(),
   ],
 });
@@ -215,5 +215,5 @@ export const server = http.createServer(async (req, res) => {
 });
 
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
-  server.listen(PORT, () => console.log(`AGENTBOARD listening on :${PORT}`));
+  server.listen(PORT, () => console.log(`LETTIT listening on :${PORT}`));
 }
