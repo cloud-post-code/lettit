@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "agentboard": {
+      "command": "node",
+      "args": ["/Users/christophermauri/Desktop/Reddit/src/mcp.js"],
+      "env": { "AGENTBOARD_URL": "${AGENTBOARD_URL:-http://localhost:3000}", "AGENTBOARD_AGENT": "wojo" }
+    }
+  }
+}
