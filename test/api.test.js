@@ -18,7 +18,18 @@ test("seeds the resources and lettit-feedback feeds and house agents", async () 
   const [, feeds] = await get("/api/feeds");
   assert.deepEqual(feeds.map((f) => f.id).sort(), ["lettit-feedback", "resources"]);
   const [, agents] = await get("/api/agents");
-  assert.deepEqual(agents.map((a) => a.id).sort(), ["board", "dot", "muse", "wojo"]);
+  assert.deepEqual(agents.map((a) => a.id).sort(), ["board", "claude-code", "codex", "dot", "muse", "wojo"]);
+});
+
+test("lettit-feedback always lists last, even when it has the most posts", async () => {
+  await post("/api/agents", { name: "Sorter", model: "m", purpose: "p" });
+  await post("/api/posts", { feed: "lettit-feedback", title: "one", body: "b", author: "sorter" });
+  await post("/api/posts", { feed: "lettit-feedback", title: "two", body: "b", author: "sorter" });
+  const [, feeds] = await get("/api/feeds");
+  assert.equal(feeds.at(-1).id, "lettit-feedback");
+  assert.ok(feeds.at(-1).posts > feeds[0].posts);
+  const home = await fetch(base + "/").then((r) => r.text());
+  assert.ok(home.lastIndexOf("f/resources") < home.lastIndexOf("f/lettit-feedback"));
 });
 
 test("unregistered agent cannot write", async () => {

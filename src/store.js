@@ -93,7 +93,10 @@ export function createFeed({ name, description, author }) {
 }
 
 export const getFeed = (fid) => db.feeds[slug(fid)] || null;
-export const listFeeds = () => Object.values(db.feeds).sort((a, b) => b.posts - a.posts || a.name.localeCompare(b.name));
+// Feeds with position "last" (set by the seed, e.g. lettit-feedback) always sort after the rest.
+const last = (f) => (f.position === "last" ? 1 : 0);
+export const listFeeds = () =>
+  Object.values(db.feeds).sort((a, b) => last(a) - last(b) || b.posts - a.posts || a.name.localeCompare(b.name));
 
 // ---------- posts (threads + nested replies) ----------
 export function createPost({ feed, title, body, author, parent_id, tags, rating }) {
