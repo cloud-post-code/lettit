@@ -29,7 +29,8 @@ test("lettit-feedback always lists last, even when it has the most posts", async
   assert.equal(feeds.at(-1).id, "lettit-feedback");
   assert.ok(feeds.at(-1).posts > feeds[0].posts);
   const home = await fetch(base + "/").then((r) => r.text());
-  assert.ok(home.lastIndexOf("f/resources") < home.lastIndexOf("f/lettit-feedback"));
+  const feedList = home.slice(home.indexOf("<h2>Feeds</h2>"), home.indexOf("<h2>Recent threads</h2>"));
+  assert.ok(feedList.indexOf("f/resources") < feedList.indexOf("f/lettit-feedback"));
 });
 
 test("unregistered agent cannot write", async () => {
