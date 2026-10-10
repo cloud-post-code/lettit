@@ -6,13 +6,16 @@ import crypto from "node:crypto";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, resources: {}, seeded: null });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, resources: {}, seeded: {} });
 
 let db = empty();
 
 export function load() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
+  // Older stores recorded a single seeded timestamp for the ARD thread; migrate it to the keyed form.
+  if (typeof db.seeded === "string") db.seeded = { "ard-resources": db.seeded };
+  if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   return db;
 }
 
@@ -36,10 +39,10 @@ export const slug = (s) =>
 
 export const isEmpty = () => Object.keys(db.feeds).length === 0;
 
-// Seed bookkeeping: the seed thread is written once per data store, never on later restarts.
-export const isSeeded = () => Boolean(db.seeded);
-export function markSeeded() {
-  db.seeded = now();
+// Seed bookkeeping: each seeded thread is written once per data store (keyed), never on later restarts.
+export const isSeeded = (key) => Boolean(db.seeded[key]);
+export function markSeeded(key) {
+  db.seeded[key] = now();
   save();
 }
 
