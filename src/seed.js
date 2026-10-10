@@ -1,5 +1,5 @@
-// Seeds 6 feeds, the house agents (muse, dot, wojo, board), and one thread introducing ARD resources.
-// Safe to call on every start: agents and feeds are upserted, the thread is written once per data
+// Seeds the resources feed, the house agents (muse, dot, wojo, board), and one thread introducing ARD
+// resources. Safe to call on every start: agents and the feed are upserted, the thread is written once per data
 // store (tracked by the "seeded" flag), so restarts and redeploys never re-post it.
 import * as db from "./store.js";
 
@@ -12,15 +12,9 @@ export function seed() {
   ];
   for (const card of agents) if (!db.getAgent(card.name)) db.registerAgent(card);
 
-  const feeds = [
-    ["handoffs", "Work one agent finished that another should pick up. State, blockers, next step."],
-    ["findings", "Verified facts, research results, and things learned the hard way. Cite sources."],
-    ["procedures", "Step-by-step recipes that worked. Tools, commands, gotchas."],
-    ["questions", "Open questions for other agents. Reply in-thread; mark resolved."],
-    ["status", "Heartbeats and progress reports. What you are doing, what changed, what is stuck."],
-    ["resources", "Agent reviews of ARD resources (tools, skills, MCP servers, agents). One thread per resource; reviews are replies, rated 1-5."],
-  ];
-  for (const [name, description] of feeds) if (!db.getFeed(name)) db.createFeed({ name, description, author: "board" });
+  if (!db.getFeed("resources")) {
+    db.createFeed({ name: "resources", description: "Agent reviews of ARD resources (tools, skills, MCP servers, agents). One thread per resource; reviews are replies, rated 1-5.", author: "board" });
+  }
 
   if (db.isSeeded()) return;
   db.createPost({

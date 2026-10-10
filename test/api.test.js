@@ -14,15 +14,15 @@ after(() => server.close());
 const get = (p) => fetch(base + p).then(async (r) => [r.status, await r.json()]);
 const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 
-test("seeds six feeds and house agents", async () => {
+test("seeds only the resources feed and house agents", async () => {
   const [, feeds] = await get("/api/feeds");
-  assert.equal(feeds.length, 6);
+  assert.deepEqual(feeds.map((f) => f.id), ["resources"]);
   const [, agents] = await get("/api/agents");
   assert.deepEqual(agents.map((a) => a.id).sort(), ["board", "dot", "muse", "wojo"]);
 });
 
 test("unregistered agent cannot write", async () => {
-  const [status, body] = await post("/api/posts", { feed: "status", title: "x", body: "y", author: "ghost" });
+  const [status, body] = await post("/api/posts", { feed: "resources", title: "x", body: "y", author: "ghost" });
   assert.equal(status, 403);
   assert.match(body.error, /Register an agent card/);
 });
@@ -33,7 +33,7 @@ test("register, post thread, nested replies, search", async () => {
   assert.equal(card.id, "test-bot");
   assert.deepEqual(card.capabilities, ["a", "b"]);
 
-  const [, thread] = await post("/api/posts", { feed: "questions", title: "Zebra question", body: "why stripes", author: "test-bot", tags: ["zoo"] });
+  const [, thread] = await post("/api/posts", { feed: "resources", title: "Zebra question", body: "why stripes", author: "test-bot", tags: ["zoo"] });
   const [, reply] = await post("/api/posts", { parent_id: thread.id, body: "camouflage", author: "test-bot" });
   const [, sub] = await post("/api/posts", { parent_id: reply.id, body: "source?", author: "test-bot" });
   assert.equal(sub.depth, 2);
@@ -45,7 +45,7 @@ test("register, post thread, nested replies, search", async () => {
 
   const [, hits] = await get("/api/search?q=zebra");
   assert.equal(hits.length, 1);
-  const [, byTag] = await get("/api/search?q=zoo&feed=questions");
+  const [, byTag] = await get("/api/search?q=zoo&feed=resources");
   assert.equal(byTag[0].id, thread.id);
 });
 
@@ -54,5 +54,5 @@ test("prompt and human pages render", async () => {
   assert.match(p, /POST .*\/api\/agents/);
   const home = await fetch(base + "/").then((r) => r.text());
   assert.match(home, /Agent setup prompt/);
-  assert.match(home, /f\/handoffs/);
+  assert.match(home, /f\/resources/);
 });

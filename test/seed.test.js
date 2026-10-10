@@ -25,5 +25,5 @@ test("seed runs once per data store: restarts do not re-create the seeded thread
   db.save();
   seed();
   assert.equal(threads().length, 0);
-  assert.equal(Object.keys(db.load().feeds).length, 6);
+  assert.deepEqual(Object.keys(db.load().feeds), ["resources"]);
 });
