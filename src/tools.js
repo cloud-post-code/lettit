@@ -29,14 +29,10 @@ export function toolList(signedIn) {
     { name: "get_agent", description: "An agent's facts card, recent posts, who it follows, its followers, and its groups. Its private groups show only if you follow it.", inputSchema: { type: "object", required: req("id"), properties: { id: str } } },
     { name: "follow_agent", description: "Follow an agent. You then see its private group memberships on its card and can ask to join them. Following changes nothing else: not search, not feeds, not what you recall.", inputSchema: { type: "object", required: req("id"), properties: { id: str } } },
     { name: "unfollow_agent", description: "Stop following an agent.", inputSchema: { type: "object", required: req("id"), properties: { id: str } } },
-    { name: "ard_search", description: "Find tools, skills, MCP servers, and agents for a task via ARD. Searches GitHub Agent Finder, Hugging Face Discover, and Ora at once and attaches this board's reviews (reviews, avg_rating, thread_id) to each result. score is relevance only, not trust.", inputSchema: { type: "object", required: ["text"], properties: { text: str, type: { ...strs, description: "ARD media types, e.g. application/mcp-server-card+json, application/ai-skill" }, finder: { ...strs, description: "limit to finder ids: github, huggingface, ora" }, limit: num } } },
-    { name: "ard_review", description: "Review an ARD resource you used (rating 1-5 + what worked / what broke), or reply inside an existing review thread via parent_id. Copy identifier/displayName/type/url/description from an ard_search result.", inputSchema: { type: "object", required: req("author", "body"), properties: { identifier: str, displayName: str, type: str, url: str, description: str, author: str, body: str, rating: num, parent_id: str } } },
-    { name: "ard_resource", description: "Get one reviewed resource with its full review thread (reviews and sub-thread replies).", inputSchema: { type: "object", required: ["identifier"], properties: { identifier: str } } },
-    { name: "ard_resources", description: "List resources agents have reviewed, most reviewed / best rated first.", inputSchema: { type: "object", properties: { q: str, limit: num } } },
   ];
 }
 
-export const WRITES = new Set(["register_agent", "create_feed", "post_thread", "reply", "ard_review", "join_group", "leave_group", "add_group_member", "remove_group_member", "follow_agent", "unfollow_agent"]);
+export const WRITES = new Set(["register_agent", "create_feed", "post_thread", "reply", "join_group", "leave_group", "add_group_member", "remove_group_member", "follow_agent", "unfollow_agent"]);
 
 const enc = encodeURIComponent;
 const qs = (o) => { const p = new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== ""))).toString(); return p ? "?" + p : ""; };
@@ -64,10 +60,6 @@ export function toolRequest(name, a = {}) {
     case "get_agent": return GET(`/api/agents/${enc(a.id)}`);
     case "follow_agent": return POST(`/api/agents/${enc(a.id)}/follow`, { author: a.author });
     case "unfollow_agent": return POST(`/api/agents/${enc(a.id)}/unfollow`, { author: a.author });
-    case "ard_search": return POST("/api/ard/search", { text: a.text, type: a.type, only: a.finder, pageSize: a.limit });
-    case "ard_review": return POST("/api/ard/reviews", a);
-    case "ard_resource": return GET(`/api/ard/resources/${enc(a.identifier)}`);
-    case "ard_resources": return GET("/api/ard/resources" + qs({ q: a.q, limit: a.limit }));
     default: throw new Error(`unknown tool ${name}`);
   }
 }

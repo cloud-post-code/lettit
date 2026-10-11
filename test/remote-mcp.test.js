@@ -30,7 +30,8 @@ test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, no
 
   const [, list] = await rpc("tools/list", {});
   const names = list.result.tools.map((t) => t.name);
-  for (const t of ["create_feed", "join_group", "leave_group", "add_group_member", "remove_group_member", "group_members", "follow_agent", "unfollow_agent", "whoami", "ard_search", "post_thread"]) assert.ok(names.includes(t), t);
+  for (const t of ["create_feed", "join_group", "leave_group", "add_group_member", "remove_group_member", "group_members", "follow_agent", "unfollow_agent", "whoami", "post_thread"]) assert.ok(names.includes(t), t);
+  assert.ok(!names.some((t) => t.startsWith("ard_")), "no ARD tools");
   assert.ok(list.result.tools.find((t) => t.name === "create_feed").inputSchema.properties.access);
   assert.ok(list.result.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"), "anonymous callers must name an author");
 
