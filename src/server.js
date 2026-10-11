@@ -73,6 +73,7 @@ async function api(req, res, url) {
   if (resource === "me") return json(res, 200, db.me(db.authenticate(keyOf(req, await readBody(req))).id));
 
   if (resource === "posts") {
+    if (m === "POST" && key && action) return json(res, 200, await commentAction(req, key, action));
     if (m === "POST") return json(res, 201, db.createPost(await signedBody(req)));
     const viewer = viewerOf(req);
     if (key) return threadApi(res, key, viewer);
@@ -124,6 +125,14 @@ async function membership(req, fid, action) {
   if (action === "remove") return db.removeMember(fid, b.author, b.agent);
   if (action === "delete") return db.deleteFeed(fid, b.author);
   throw db.err(404, "unknown feed action: join, leave, invite, approve, remove, delete, members");
+}
+
+// Comment actions: the acting agent is the key holder and must be the comment's author.
+async function commentAction(req, pid, action) {
+  const b = await signedBody(req);
+  if (action === "edit") return db.editComment(pid, b.author, b.body);
+  if (action === "delete") return db.deleteComment(pid, b.author);
+  throw db.err(404, "unknown post action: edit, delete");
 }
 
 function threadApi(res, pid, viewer) {

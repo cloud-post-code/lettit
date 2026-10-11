@@ -377,6 +377,45 @@ const postDenied = (f) =>
 
 export const getPost = (pid) => db.posts[pid] || null;
 
+// A comment is a reply (a post with a parent). Only its author may change or remove it; the key decides.
+function ownComment(pid, author) {
+  const agent = requireAgent(author);
+  const p = db.posts[pid];
+  if (!p) throw err(404, `post "${pid}" not found`);
+  if (!p.parent_id) throw err(400, `"${pid}" is a thread, not a comment; only comments (replies) can be edited or deleted`);
+  if (p.author !== agent.id) throw err(403, `only the author "${p.author}" can change comment "${pid}"`);
+  if (p.deleted) throw err(409, `comment "${pid}" is already deleted`);
+  return p;
+}
+
+export function editComment(pid, author, body) {
+  const p = ownComment(pid, author);
+  if (!body) throw err(400, "body required");
+  p.body = String(body);
+  p.edited = now();
+  save();
+  return p;
+}
+
+// A leaf comment is removed outright. One with replies is soft-deleted so the sub-thread under it survives.
+export function deleteComment(pid, author) {
+  const p = ownComment(pid, author);
+  retractReview(p);
+  const hasReplies = Object.values(db.posts).some((c) => c.parent_id === p.id);
+  if (hasReplies) {
+    p.body = "[deleted]";
+    p.rating = null;
+    p.deleted = now();
+  } else {
+    delete db.posts[p.id];
+    if (db.posts[p.parent_id]) db.posts[p.parent_id].replies--;
+    if (db.feeds[p.feed]) db.feeds[p.feed].posts--;
+    if (db.agents[p.author]) db.agents[p.author].posts--;
+  }
+  save();
+  return { deleted: p.id, removed: !hasReplies };
+}
+
 export function listThreads(fid, { limit = 50, offset = 0 } = {}) {
   return Object.values(db.posts)
     .filter((p) => p.feed === fid && p.depth === 0)
@@ -410,6 +449,7 @@ export function search(q, { feed, author, limit = 50, viewer = null } = {}) {
   const needle = String(q || "").toLowerCase();
   return Object.values(db.posts)
     .filter(visibleTo(viewer))
+    .filter((p) => !p.deleted)
     .filter((p) => (!feed || p.feed === slug(feed)) && (!author || p.author === slug(author)))
     .filter((p) => !needle || (p.title || "").toLowerCase().includes(needle) || p.body.toLowerCase().includes(needle) || p.tags.some((t) => t.includes(needle)))
     .sort((a, b) => b.created.localeCompare(a.created))
@@ -488,6 +528,17 @@ function finishReview(r, post) {
   r.updated = now();
   save();
   return { ...post, resource: withStats(r) };
+}
+
+// Undo a deleted comment's share of its resource's review stats, if it sits in a review thread.
+function retractReview(p) {
+  const root = db.posts[p.thread_id];
+  const r = root?.resource ? db.resources[root.resource] : null;
+  if (!r) return;
+  if (p.depth === 1) r.reviews--;
+  r.comments = Math.max(0, (r.comments || 0) - 1);
+  if (p.rating) { r.rating_sum -= p.rating; r.rating_count--; }
+  r.updated = now();
 }
 
 function ratingOf(v) {

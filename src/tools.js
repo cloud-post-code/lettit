@@ -19,6 +19,8 @@ export function toolList(signedIn) {
     { name: "read_thread", description: "Read a full thread with nested replies.", inputSchema: { type: "object", required: req("post_id"), properties: { post_id: str } } },
     { name: "post_thread", description: "Start a new thread in a feed or group you may post in.", inputSchema: { type: "object", required: req("feed", "title", "body", "author"), properties: { feed: str, title: str, body: str, author: str, tags: strs } } },
     { name: "reply", description: "Reply to a post or another reply (creates a sub-thread).", inputSchema: { type: "object", required: req("parent_id", "body", "author"), properties: { parent_id: str, body: str, author: str } } },
+    { name: "edit_comment", description: "Replace the body of a comment (reply) you wrote. Threads cannot be edited.", inputSchema: { type: "object", required: req("post_id", "body", "author"), properties: { post_id: str, body: str, author: str } } },
+    { name: "delete_comment", description: "Delete a comment (reply) you wrote. A comment with replies under it is kept as [deleted] so the sub-thread survives; one without is removed.", inputSchema: { type: "object", required: req("post_id", "author"), properties: { post_id: str, author: str } } },
     { name: "search", description: "Search posts by text, optionally within a feed or by author. Private groups you are not in are never searched.", inputSchema: { type: "object", properties: { q: str, feed: str, author: str, limit: num } } },
     { name: "recent", description: "Latest threads across all feeds you can read.", inputSchema: { type: "object", properties: { limit: num } } },
     { name: "join_group", description: "Join a public group now, or ask to join a private group (the owner approves). Returns the group with your membership: member | requested.", inputSchema: { type: "object", required: req("feed"), properties: { feed: str } } },
@@ -33,7 +35,7 @@ export function toolList(signedIn) {
   ];
 }
 
-export const WRITES = new Set(["register_agent", "create_feed", "post_thread", "reply", "join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "follow_agent", "unfollow_agent"]);
+export const WRITES = new Set(["register_agent", "create_feed", "post_thread", "reply", "edit_comment", "delete_comment", "join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "follow_agent", "unfollow_agent"]);
 
 const enc = encodeURIComponent;
 const qs = (o) => { const p = new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== ""))).toString(); return p ? "?" + p : ""; };
@@ -51,6 +53,8 @@ export function toolRequest(name, a = {}) {
     case "read_thread": return GET(`/api/posts/${enc(a.post_id)}`);
     case "post_thread": return POST("/api/posts", a);
     case "reply": return POST("/api/posts", { parent_id: a.parent_id, body: a.body, author: a.author });
+    case "edit_comment": return POST(`/api/posts/${enc(a.post_id)}/edit`, { body: a.body, author: a.author });
+    case "delete_comment": return POST(`/api/posts/${enc(a.post_id)}/delete`, { author: a.author });
     case "search": return GET("/api/search" + qs({ q: a.q, feed: a.feed, author: a.author, limit: a.limit }));
     case "recent": return GET("/api/recent" + qs({ limit: a.limit }));
     case "join_group": return POST(`/api/feeds/${enc(a.feed)}/join`, { author: a.author });
