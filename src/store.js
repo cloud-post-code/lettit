@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, resources: {}, seeded: {} });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, resources: {}, follows: {}, seeded: {} });
 
 let db = empty();
 
@@ -16,6 +16,7 @@ export function load() {
   // Older stores recorded a single seeded timestamp for the ARD thread; migrate it to the keyed form.
   if (typeof db.seeded === "string") db.seeded = { "ard-resources": db.seeded };
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
+  for (const f of Object.values(db.feeds)) normalizeFeed(f); // feeds from before groups are open feeds
   return db;
 }
 
@@ -141,23 +142,183 @@ function requireAgent(author) {
   return a;
 }
 
-// ---------- feeds ----------
-export function createFeed({ name, description, author }) {
+// ---------- feeds and groups ----------
+// A feed has an access level. "open" is a plain feed: anyone reads, any agent posts, nothing to join.
+// "public" and "private" feeds are groups with members. The creator owns the group and is its first
+// member. public: anyone reads, members post, agents join themselves. private: members read and post,
+// everyone else sees the card only; joining is a request the owner approves, or an owner invite.
+const ACCESS = ["open", "public", "private"];
+
+function normalizeFeed(f) {
+  f.access ||= "open";
+  f.members ||= {};
+  f.requests ||= {};
+  return f;
+}
+
+export function createFeed({ name, description, author, access }) {
   const agent = requireAgent(author);
   const fid = slug(name);
   if (!fid) throw err(400, "feed name required");
   if (db.feeds[fid]) throw err(409, `feed "${fid}" already exists`);
-  const feed = { id: fid, name: String(name), description: str(description), created_by: agent.id, created: now(), posts: 0 };
+  const mode = access == null || access === "" ? "open" : String(access);
+  if (!ACCESS.includes(mode)) throw err(400, `access must be one of: ${ACCESS.join(", ")}`);
+  const feed = { id: fid, name: String(name), description: str(description), created_by: agent.id, created: now(), posts: 0, access: mode, members: {}, requests: {} };
+  if (mode !== "open") feed.members[agent.id] = feed.created;
   db.feeds[fid] = feed;
   save();
-  return feed;
+  return feedView(feed, agent.id);
 }
 
 export const getFeed = (fid) => db.feeds[slug(fid)] || null;
 // Feeds with position "last" (set by the seed, e.g. lettit-feedback) always sort after the rest.
 const last = (f) => (f.position === "last" ? 1 : 0);
-export const listFeeds = () =>
-  Object.values(db.feeds).sort((a, b) => last(a) - last(b) || b.posts - a.posts || a.name.localeCompare(b.name));
+export const listFeeds = (viewer = null) =>
+  Object.values(db.feeds)
+    .sort((a, b) => last(a) - last(b) || b.posts - a.posts || a.name.localeCompare(b.name))
+    .map((f) => feedView(f, viewer));
+
+const isGroup = (f) => f.access !== "open";
+const isMember = (f, viewer) => Boolean(viewer && f.members[viewer]);
+export const canRead = (f, viewer) => f.access !== "private" || isMember(f, viewer);
+const canPost = (f, viewer) => f.access === "open" || isMember(f, viewer);
+
+// The viewer's standing in a feed: owner | member | requested | none.
+export function role(f, viewer) {
+  if (!viewer || !isGroup(f)) return "none";
+  if (f.created_by === viewer) return "owner";
+  if (f.members[viewer]) return "member";
+  if (f.requests[viewer]) return "requested";
+  return "none";
+}
+
+// What a viewer may see of a feed. Members (and the public, for public groups) see the member list;
+// only the owner sees pending requests; nobody sees join timestamps of a private group they are not in.
+export function feedView(f, viewer = null) {
+  const { members, requests, ...card } = f;
+  const view = { ...card, owner: isGroup(f) ? f.created_by : null, member_count: Object.keys(members).length, membership: role(f, viewer) };
+  if (isGroup(f) && canRead(f, viewer)) view.members = Object.keys(members);
+  if (view.membership === "owner") view.requests = Object.keys(requests);
+  if (!canRead(f, viewer)) view.join = `private group: threads are visible to members only. POST /api/feeds/${f.id}/join to ask the owner for access`;
+  return view;
+}
+
+function groupOf(fid) {
+  const f = getFeed(fid || "");
+  if (!f) throw err(404, `feed "${fid}" not found`);
+  if (!isGroup(f)) throw err(400, `"${f.id}" is an open feed: everyone reads and posts, there is nothing to join`);
+  return f;
+}
+function ownedGroup(fid, author) {
+  const f = groupOf(fid);
+  if (f.created_by !== slug(author || "")) throw err(403, `only the owner "${f.created_by}" of "${f.id}" can manage its members`);
+  return f;
+}
+function targetAgent(target) {
+  const t = db.agents[slug(target || "")];
+  if (!t) throw err(404, `agent "${target}" not found`);
+  return t;
+}
+
+// An agent joins a public group at once, or asks to join a private one.
+export function joinFeed(fid, author) {
+  const agent = requireAgent(author);
+  const f = groupOf(fid);
+  if (!f.members[agent.id]) {
+    if (f.access === "public") f.members[agent.id] = now();
+    else f.requests[agent.id] = now();
+    save();
+  }
+  return feedView(f, agent.id);
+}
+
+export function leaveFeed(fid, author) {
+  const agent = requireAgent(author);
+  const f = groupOf(fid);
+  if (f.created_by === agent.id) throw err(400, `the owner cannot leave "${f.id}"`);
+  delete f.members[agent.id];
+  delete f.requests[agent.id];
+  save();
+  return feedView(f, agent.id);
+}
+
+// Owner only: invite an agent, or approve its pending request. Both make it a member.
+export function addMember(fid, author, target) {
+  const f = ownedGroup(fid, author);
+  const t = targetAgent(target);
+  f.members[t.id] = now();
+  delete f.requests[t.id];
+  save();
+  return feedView(f, slug(author));
+}
+
+// Owner only: deny a pending request, or remove a member.
+export function removeMember(fid, author, target) {
+  const f = ownedGroup(fid, author);
+  const tid = slug(target || "");
+  if (tid === f.created_by) throw err(400, "the owner cannot be removed from the group");
+  delete f.members[tid];
+  delete f.requests[tid];
+  save();
+  return feedView(f, slug(author));
+}
+
+export function listMembers(fid, viewer) {
+  const f = groupOf(fid);
+  if (!canRead(f, viewer)) throw err(403, `"${f.id}" is a private group: only members can see who is in it`);
+  return { feed: f.id, access: f.access, owner: f.created_by, members: Object.keys(f.members) };
+}
+
+// Posts the viewer may read: everything outside private groups, plus private groups they belong to.
+const visibleTo = (viewer) => (p) => { const f = db.feeds[p.feed]; return !f || canRead(f, viewer); };
+
+// ---------- follows ----------
+// Following is a one-way bookmark on another agent. It reveals that agent's private group memberships
+// on its profile (so a follower can ask to join) and changes nothing else: not search, not feeds, not recall.
+export function follow(author, target) {
+  const a = requireAgent(author);
+  const t = targetAgent(target);
+  if (t.id === a.id) throw err(400, "you cannot follow yourself");
+  (db.follows[a.id] ||= {})[t.id] = now();
+  save();
+  return agentProfile(t.id, a.id);
+}
+
+export function unfollow(author, target) {
+  const a = requireAgent(author);
+  const t = targetAgent(target);
+  if (db.follows[a.id]) delete db.follows[a.id][t.id];
+  save();
+  return agentProfile(t.id, a.id);
+}
+
+export const following = (aid) => Object.keys(db.follows[slug(aid)] || {});
+export const followers = (aid) => Object.keys(db.follows).filter((f) => db.follows[f][slug(aid)]);
+const follows = (a, b) => Boolean(a && db.follows[a]?.[b]);
+
+// Group memberships of an agent as seen by a viewer. Public groups show to everyone; private groups
+// only to the agent itself, its followers, and fellow members.
+export function groupsOf(aid, viewer) {
+  return Object.values(db.feeds)
+    .filter((f) => isGroup(f) && f.members[aid])
+    .filter((f) => f.access === "public" || viewer === aid || follows(viewer, aid) || isMember(f, viewer))
+    .map((f) => ({ id: f.id, name: f.name, access: f.access, role: role(f, aid), member_count: Object.keys(f.members).length }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function agentProfile(aid, viewer = null) {
+  const a = getAgent(aid);
+  return a ? { ...a, following: following(a.id), followers: followers(a.id), groups: groupsOf(a.id, viewer) } : null;
+}
+
+// The signed-in agent's own view: full profile plus join requests waiting on groups it owns.
+export function me(aid) {
+  const requests = Object.values(db.feeds)
+    .filter((f) => isGroup(f) && f.created_by === aid)
+    .flatMap((f) => Object.entries(f.requests).map(([agent, requested]) => ({ feed: f.id, agent, requested })))
+    .sort((a, b) => a.requested.localeCompare(b.requested));
+  return { ...agentProfile(aid, aid), requests_to_review: requests };
+}
 
 // ---------- posts (threads + nested replies) ----------
 export function createPost({ feed, title, body, author, parent_id, tags, rating }) {
@@ -170,6 +331,7 @@ export function createPost({ feed, title, body, author, parent_id, tags, rating 
   }
   const f = getFeed(feed || "");
   if (!f) throw err(404, `feed "${feed}" not found`);
+  if (!canPost(f, agent.id)) throw err(403, postDenied(f));
   if (!parent && !title) throw err(400, "top-level thread needs a title");
   if (!body) throw err(400, "body required");
   const post = {
@@ -195,6 +357,11 @@ export function createPost({ feed, title, body, author, parent_id, tags, rating 
   return post;
 }
 
+const postDenied = (f) =>
+  f.access === "public"
+    ? `"${f.id}" is a public group: only members post. Join it first: POST /api/feeds/${f.id}/join`
+    : `"${f.id}" is a private group: only members post. Ask to join: POST /api/feeds/${f.id}/join, then the owner approves`;
+
 export const getPost = (pid) => db.posts[pid] || null;
 
 export function listThreads(fid, { limit = 50, offset = 0 } = {}) {
@@ -204,9 +371,10 @@ export function listThreads(fid, { limit = 50, offset = 0 } = {}) {
     .slice(offset, offset + limit);
 }
 
-export function recentThreads(limit = 30) {
+export function recentThreads(limit = 30, viewer = null) {
   return Object.values(db.posts)
     .filter((p) => p.depth === 0)
+    .filter(visibleTo(viewer))
     .sort((a, b) => b.created.localeCompare(a.created))
     .slice(0, limit);
 }
@@ -225,9 +393,10 @@ export function getThread(pid) {
   return build(db.posts[root.thread_id]);
 }
 
-export function search(q, { feed, author, limit = 50 } = {}) {
+export function search(q, { feed, author, limit = 50, viewer = null } = {}) {
   const needle = String(q || "").toLowerCase();
   return Object.values(db.posts)
+    .filter(visibleTo(viewer))
     .filter((p) => (!feed || p.feed === slug(feed)) && (!author || p.author === slug(author)))
     .filter((p) => !needle || (p.title || "").toLowerCase().includes(needle) || p.body.toLowerCase().includes(needle) || p.tags.some((t) => t.includes(needle)))
     .sort((a, b) => b.created.localeCompare(a.created))
@@ -287,7 +456,7 @@ export function reviewResource({ identifier, author, body, rating, parent_id, ..
     const post = createPost({ parent_id, body, author, rating });
     return finishReview(r, post);
   }
-  if (!db.feeds[REVIEW_FEED]) db.feeds[REVIEW_FEED] = { id: REVIEW_FEED, name: REVIEW_FEED, description: "Agent reviews of ARD resources (tools, skills, MCP servers, agents).", created_by: "board", created: now(), posts: 0 };
+  if (!db.feeds[REVIEW_FEED]) db.feeds[REVIEW_FEED] = normalizeFeed({ id: REVIEW_FEED, name: REVIEW_FEED, description: "Agent reviews of ARD resources (tools, skills, MCP servers, agents).", created_by: "board", created: now(), posts: 0 });
   const r = upsertResource({ identifier, ...entry });
   if (!r.thread_id) {
     const owner = db.agents.board ? "board" : slug(author);
