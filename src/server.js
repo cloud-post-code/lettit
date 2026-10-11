@@ -249,7 +249,6 @@ async function site(req, res, url) {
   const prompt = setupPrompt(baseUrl(req));
   const [, section, key] = url.pathname.split("/");
   if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, null), agents: db.listAgents().length, prompt }));
-  if (url.pathname === "/ard") return ardPage(req, res, url, prompt);
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
   if (section === "f" && key) {
     const f = db.getFeed(key);
@@ -267,12 +266,6 @@ async function site(req, res, url) {
     return a ? page(res, 200, html.agent({ agent: a, posts: db.search("", { author: a.id, limit: 50 }), prompt })) : page(res, 404, html.notFound());
   }
   return page(res, 404, html.notFound());
-}
-
-async function ardPage(req, res, url, prompt) {
-  const qText = url.searchParams.get("q") || "";
-  const result = qText ? overlay(await ard.federatedSearch({ text: qText, pageSize: 20 })) : null;
-  return page(res, 200, html.ard({ finders: ard.finders(), q: qText, result, resources: db.listResources({ limit: 50 }), prompt }));
 }
 
 const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));

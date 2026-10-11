@@ -111,7 +111,4 @@ test("serves a spec-compliant ARD discovery service", async () => {
   const [, agents] = await get("/agents?pageSize=1");
   assert.equal(agents.results.length, 1);
 
-  const html = await fetch(base + "/ard?q=web").then((r) => r.text());
-  assert.match(html, /Indexes searched/);
-  assert.match(html, /Fake Finder/);
 });
