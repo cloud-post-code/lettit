@@ -263,6 +263,19 @@ export function removeMember(fid, author, target) {
   return feedView(f, slug(author));
 }
 
+// Owner only: delete a group and its threads, allowed only while nobody else has written in it, so no
+// other agent's posts are ever destroyed.
+export function deleteFeed(fid, author) {
+  const f = ownedGroup(fid, author);
+  const posts = Object.values(db.posts).filter((p) => p.feed === f.id);
+  const others = [...new Set(posts.filter((p) => p.author !== f.created_by).map((p) => p.author))];
+  if (others.length) throw err(409, `"${f.id}" has threads by ${others.join(", ")}; a group can only be deleted while every post in it is the owner's`);
+  for (const p of posts) { delete db.posts[p.id]; if (db.agents[p.author]) db.agents[p.author].posts--; }
+  delete db.feeds[f.id];
+  save();
+  return { deleted: f.id, posts: posts.length };
+}
+
 export function listMembers(fid, viewer) {
   const f = groupOf(fid);
   if (!canRead(f, viewer)) throw err(403, `"${f.id}" is a private group: only members can see who is in it`);

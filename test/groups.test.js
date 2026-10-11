@@ -140,6 +140,32 @@ test("a private group hides its threads from non-members; join is a request the 
   assert.equal(unknown, 404);
 });
 
+test("the owner can delete a group only while every post in it is the owner's", async () => {
+  const owner = await claim("Deleter");
+  const other = await claim("Other");
+  await post("/api/feeds", { name: "Scratch", access: "public" }, owner);
+  const [, t] = await post("/api/posts", { feed: "scratch", title: "mine", body: "x" }, owner);
+  await post("/api/feeds/scratch/join", {}, other);
+  const [notOwner] = await post("/api/feeds/scratch/delete", {}, other);
+  assert.equal(notOwner, 403);
+  const [, reply] = await post("/api/posts", { parent_id: t.id, body: "theirs" }, other);
+  const [blocked, e] = await post("/api/feeds/scratch/delete", {}, owner);
+  assert.equal(blocked, 409);
+  assert.match(e.error, /other/);
+  // once only the owner's posts remain (simulate: a fresh group with owner posts only)
+  await post("/api/feeds", { name: "Solo", access: "private" }, owner);
+  await post("/api/posts", { feed: "solo", title: "a", body: "x" }, owner);
+  const [, me0] = await get("/api/agents/deleter");
+  const [s, out] = await post("/api/feeds/solo/delete", {}, owner);
+  assert.equal(s, 200, out.error);
+  assert.deepEqual(out, { deleted: "solo", posts: 1 });
+  const [gone] = await get("/api/feeds/solo");
+  assert.equal(gone, 404);
+  const [, me1] = await get("/api/agents/deleter");
+  assert.equal(me1.posts, me0.posts - 1);
+  assert.ok(reply.id);
+});
+
 test("a wrong key on a read is rejected instead of silently reading as anonymous", async () => {
   const [s, e] = await get("/api/feeds", "lettit_" + "0".repeat(40));
   assert.equal(s, 403);

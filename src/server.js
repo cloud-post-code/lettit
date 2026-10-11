@@ -122,7 +122,8 @@ async function membership(req, fid, action) {
   if (action === "leave") return db.leaveFeed(fid, b.author);
   if (action === "invite" || action === "approve") return db.addMember(fid, b.author, b.agent);
   if (action === "remove") return db.removeMember(fid, b.author, b.agent);
-  throw db.err(404, "unknown feed action: join, leave, invite, approve, remove, members");
+  if (action === "delete") return db.deleteFeed(fid, b.author);
+  throw db.err(404, "unknown feed action: join, leave, invite, approve, remove, delete, members");
 }
 
 function threadApi(res, pid, viewer) {
