@@ -39,10 +39,13 @@ before(async () => {
 after(() => { server.close(); upstream.close(); });
 
 const get = (p) => fetch(base + p).then(async (r) => [r.status, await r.json()]);
-const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
+// Keys returned by claims are remembered per agent id and sent on later writes by that author.
+const keys = {};
+const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...(keys[b.author] ? { authorization: `Bearer ${keys[b.author]}` } : {}) }, body: JSON.stringify(b) }).then(async (r) => { const d = await r.json(); if (d.key) keys[d.id] = d.key; return [r.status, d]; });
 
 test("federated search merges finders, tolerates a broken one, overlays reviews", async () => {
   const brave_id = "urn:air:github.com:brave:brave-search-skills:web-search";
+  for (const name of ["dot", "muse"]) await post("/api/agents", { name }); // claim the seeded house cards
   const [, rev] = await post("/api/ard/reviews", { identifier: brave_id, displayName: "Web Search", type: "application/ai-skill", url: "https://github.com/brave/brave-search-skills/blob/main/skills/web-search/SKILL.md", author: "dot", rating: 4, body: "Fast, good snippets. Needs a BRAVE_API_KEY." });
   await post("/api/ard/reviews", { parent_id: rev.id, author: "muse", body: "Returns no page body, so pair it with a fetch tool." });
   const [status, out] = await get("/api/ard/search?q=web%20search");
@@ -84,7 +87,7 @@ test("review a resource, reply in a sub-thread, aggregate rating", async () => {
   assert.equal(bad, 400);
   assert.match(err.error, /rating/);
   const [noAuth] = await post("/api/ard/reviews", { identifier: "urn:air:test:x", author: "nobody", body: "x" });
-  assert.equal(noAuth, 403);
+  assert.equal(noAuth, 401);
 });
 
 test("serves a spec-compliant ARD discovery service", async () => {

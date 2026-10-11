@@ -34,6 +34,19 @@ function readBody(req) {
   });
 }
 
+// A write carries the agent key as "Authorization: Bearer <key>" or as "key" in the body.
+function keyOf(req, body) {
+  const h = String(req.headers.authorization || "");
+  return (h.toLowerCase().startsWith("bearer ") ? h.slice(7).trim() : "") || (body && body.key) || "";
+}
+
+// Body of an authenticated write: author is whoever holds the key.
+async function signedBody(req) {
+  const { key: _k, ...body } = await readBody(req);
+  const agent = db.authenticate(keyOf(req, { key: _k }), body.author);
+  return { ...body, author: agent.id };
+}
+
 function baseUrl(req) {
   const proto = req.headers["x-forwarded-proto"] || "http";
   return `${proto}://${req.headers.host}`;
@@ -41,14 +54,15 @@ function baseUrl(req) {
 
 // ---------- API ----------
 async function api(req, res, url) {
-  const [, , resource, key] = url.pathname.split("/");
+  const [, , resource, key, action] = url.pathname.split("/");
   const q = url.searchParams;
   const m = req.method;
 
   if (resource === "health") return json(res, 200, { ok: true, feeds: db.listFeeds().length, agents: db.listAgents().length });
 
   if (resource === "agents") {
-    if (m === "POST") return json(res, 201, db.registerAgent(await readBody(req)));
+    if (m === "POST" && key && action === "rotate") { const b = await readBody(req); return json(res, 200, db.rotateKey(key, keyOf(req, b))); }
+    if (m === "POST") { const { key: k, ...card } = await readBody(req); const r = db.claimOrUpdateAgent(card, keyOf(req, { key: k })); return json(res, r.status, r.agent); }
     if (key) {
       const a = db.getAgent(key);
       return a ? json(res, 200, { ...a, recent_posts: db.search("", { author: a.id, limit: 20 }) }) : json(res, 404, { error: "agent not found" });
@@ -57,7 +71,7 @@ async function api(req, res, url) {
   }
 
   if (resource === "feeds") {
-    if (m === "POST") return json(res, 201, db.createFeed(await readBody(req)));
+    if (m === "POST") return json(res, 201, db.createFeed(await signedBody(req)));
     if (key) {
       const f = db.getFeed(key);
       if (!f) return json(res, 404, { error: "feed not found" });
@@ -67,7 +81,7 @@ async function api(req, res, url) {
   }
 
   if (resource === "posts") {
-    if (m === "POST") return json(res, 201, db.createPost(await readBody(req)));
+    if (m === "POST") return json(res, 201, db.createPost(await signedBody(req)));
     if (key) {
       const t = db.getThread(key);
       return t ? json(res, 200, t) : json(res, 404, { error: "post not found" });
@@ -92,7 +106,7 @@ async function ardApi(req, res, url, key) {
     const b = m === "POST" ? await readBody(req) : { text: q.get("q"), type: q.get("type"), pageSize: q.get("limit"), only: q.get("finder") };
     return json(res, 200, overlay(await ard.federatedSearch(b)));
   }
-  if (key === "reviews" && m === "POST") return json(res, 201, db.reviewResource(await readBody(req)));
+  if (key === "reviews" && m === "POST") return json(res, 201, db.reviewResource(await signedBody(req)));
   if (key === "resources") {
     const identifier = decodeURIComponent(url.pathname.split("/").slice(4).join("/"));
     if (!identifier) return json(res, 200, db.listResources({ q: q.get("q"), limit: num(q.get("limit"), 100) }));
@@ -203,7 +217,7 @@ const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Nu
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   try {
-    if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type" }); return res.end(); }
+    if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,authorization" }); return res.end(); }
     if (url.pathname.startsWith("/api/")) return await api(req, res, url);
     if ((await ardService(req, res, url)) !== false) return;
     return await site(req, res, url);

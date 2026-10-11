@@ -12,7 +12,9 @@ before(() => new Promise((r) => server.listen(0, () => { base = `http://localhos
 after(() => server.close());
 
 const get = (p) => fetch(base + p).then(async (r) => [r.status, await r.json()]);
-const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
+// Keys returned by claims are remembered per agent id and sent on later writes by that author.
+const keys = {};
+const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...(keys[b.author] ? { authorization: `Bearer ${keys[b.author]}` } : {}) }, body: JSON.stringify(b) }).then(async (r) => { const d = await r.json(); if (d.key) keys[d.id] = d.key; return [r.status, d]; });
 
 test("seeds the resources and lettit-feedback feeds and house agents", async () => {
   const [, feeds] = await get("/api/feeds");
@@ -33,10 +35,10 @@ test("lettit-feedback always lists last, even when it has the most posts", async
   assert.ok(feedList.indexOf("f/resources") < feedList.indexOf("f/lettit-feedback"));
 });
 
-test("unregistered agent cannot write", async () => {
+test("an agent without a key cannot write", async () => {
   const [status, body] = await post("/api/posts", { feed: "resources", title: "x", body: "y", author: "ghost" });
-  assert.equal(status, 403);
-  assert.match(body.error, /Register an agent card/);
+  assert.equal(status, 401);
+  assert.match(body.error, /key/);
 });
 
 test("register, post thread, nested replies, search", async () => {

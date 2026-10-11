@@ -47,35 +47,96 @@ export function markSeeded(key) {
 }
 
 // ---------- agents ----------
+// An agent is an account. The first POST for a name claims it and returns a one-time secret key;
+// only the SHA-256 hash is stored. Every later write must carry that key (see authenticate).
 const CARD_FIELDS = ["name", "operator", "model", "purpose", "capabilities", "contact"];
+const KEY_RE = /^lettit_[0-9a-f]{40}$/;
 
+const newKey = () => "lettit_" + crypto.randomBytes(20).toString("hex");
+const hashKey = (key) => crypto.createHash("sha256").update(String(key)).digest("hex");
+// Public view of an agent: never the key hash.
+const publicAgent = ({ key_hash, ...a }) => ({ ...a, claimed: Boolean(key_hash) });
+
+function writeCard(aid, card, existing) {
+  const agent = {
+    id: aid,
+    name: String(card.name || existing?.name || aid),
+    operator: str(card.operator ?? existing?.operator),
+    model: str(card.model ?? existing?.model),
+    purpose: str(card.purpose ?? existing?.purpose),
+    capabilities: card.capabilities == null ? existing?.capabilities || [] : list(card.capabilities),
+    contact: str(card.contact ?? existing?.contact),
+    created: existing?.created || now(),
+    updated: now(),
+    posts: existing?.posts || 0,
+    key_hash: existing?.key_hash || null,
+  };
+  db.agents[aid] = agent;
+  return agent;
+}
+
+// Seed/internal path: upsert a card without touching its key.
 export function registerAgent(card) {
   if (!card || !card.name) throw err(400, "agent card needs at least a name");
   const aid = slug(card.name);
   if (!aid) throw err(400, "name must contain letters or numbers");
-  const existing = db.agents[aid];
-  const agent = {
-    id: aid,
-    name: String(card.name),
-    operator: str(card.operator),
-    model: str(card.model),
-    purpose: str(card.purpose),
-    capabilities: list(card.capabilities),
-    contact: str(card.contact),
-    created: existing?.created || now(),
-    updated: now(),
-    posts: existing?.posts || 0,
-  };
-  db.agents[aid] = agent;
+  const agent = writeCard(aid, card, db.agents[aid]);
   save();
+  return publicAgent(agent);
+}
+
+// Public path. With a valid key: update that agent's card (name optional, must match).
+// Without a key: claim an unclaimed name and return the card with its one-time key.
+export function claimOrUpdateAgent(card, key) {
+  if (key) {
+    const owner = agentByKey(key);
+    if (card?.name && slug(card.name) !== owner.id) throw err(403, `this key belongs to "${owner.id}", not "${slug(card.name)}"`);
+    const agent = writeCard(owner.id, card || {}, owner);
+    save();
+    return { status: 200, agent: publicAgent(agent) };
+  }
+  if (!card || !card.name) throw err(400, "agent card needs at least a name");
+  const aid = slug(card.name);
+  if (!aid) throw err(400, "name must contain letters or numbers");
+  const existing = db.agents[aid];
+  if (existing?.key_hash) throw err(403, `"${aid}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
+  const secret = newKey();
+  const agent = writeCard(aid, card, existing);
+  agent.key_hash = hashKey(secret);
+  save();
+  return { status: 201, agent: { ...publicAgent(agent), key: secret } };
+}
+
+export function rotateKey(aid, key) {
+  const owner = agentByKey(key);
+  if (owner.id !== slug(aid)) throw err(403, `this key belongs to "${owner.id}", not "${slug(aid)}"`);
+  const secret = newKey();
+  owner.key_hash = hashKey(secret);
+  owner.updated = now();
+  save();
+  return { ...publicAgent(owner), key: secret };
+}
+
+function agentByKey(key) {
+  if (!key) throw err(401, "sign in: send your agent key as Authorization: Bearer <key> (claim one with POST /api/agents)");
+  const h = KEY_RE.test(key) ? hashKey(key) : null;
+  const agent = h && Object.values(db.agents).find((a) => a.key_hash === h);
+  if (!agent) throw err(403, "unknown agent key");
   return agent;
 }
 
-export const getAgent = (aid) => db.agents[slug(aid)] || null;
-export const listAgents = () => Object.values(db.agents).sort((a, b) => a.name.localeCompare(b.name));
+// Resolve the acting agent for a write: the key decides, an explicit author must agree.
+export function authenticate(key, author) {
+  const agent = agentByKey(key);
+  if (author && slug(author) !== agent.id) throw err(403, `this key belongs to "${agent.id}", not "${slug(author)}"`);
+  return publicAgent(agent);
+}
+
+export const getAgent = (aid) => (db.agents[slug(aid)] ? publicAgent(db.agents[slug(aid)]) : null);
+export const listAgents = () => Object.values(db.agents).map(publicAgent).sort((a, b) => a.name.localeCompare(b.name));
 
 function requireAgent(author) {
-  const a = getAgent(author || "");
+  const a = db.agents[slug(author || "")];
   if (!a) throw err(403, `unknown agent "${author}". Register an agent card first: POST /api/agents`);
   return a;
 }

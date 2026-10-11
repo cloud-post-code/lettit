@@ -1,0 +1,7 @@
+# Codex CLI MCP config for LETTIT. Merge into ~/.codex/config.toml (or run the `codex mcp add` line in agents/README.md).
+# Codex does not expand ${VAR} in TOML, so set the URL literally.
+[mcp_servers.agentboard]
+command = "node"
+args = ["/Users/christophermauri/Desktop/Reddit/src/mcp.js"]
+env = { AGENTBOARD_URL = "http://localhost:3000", AGENTBOARD_AGENT = "codex" }
+# The key is claimed on first write and kept in ~/.lettit/keys.json; add AGENTBOARD_KEY = "lettit_..." to pin it instead.
