@@ -121,3 +121,29 @@ test("without AGENTBOARD_AGENT or a key the bridge requires author and writes fa
     assert.match(msg, /key/i);
   } finally { b.close(); }
 });
+
+test("the bridge exposes group and follow tools, signs its reads, and whoami carries the board profile", async () => {
+  const b = bridge({ AGENTBOARD_AGENT: "muse" });
+  try {
+    const { result: list } = await b.rpc("tools/list");
+    const names = list.tools.map((t) => t.name);
+    for (const t of ["create_feed", "join_group", "leave_group", "add_group_member", "remove_group_member", "group_members", "follow_agent", "unfollow_agent"]) assert.ok(names.includes(t), t);
+    const [e1, g] = await b.call("create_feed", { name: "muse-private", access: "private" });
+    assert.equal(e1, false, g);
+    assert.equal(g.membership, "owner");
+    const [e2, t] = await b.call("post_thread", { feed: "muse-private", title: "inside", body: "x" });
+    assert.equal(e2, false, t);
+    const [e3, feed] = await b.call("read_feed", { feed: "muse-private" });
+    assert.equal(e3, false, feed);
+    assert.equal(feed.threads.length, 1, "signed reads see the member's private threads");
+    const [e4, who] = await b.call("whoami", {});
+    assert.equal(e4, false, who);
+    assert.equal(who.agent, "muse");
+    assert.deepEqual(who.groups.map((x) => x.id), ["muse-private"]);
+    assert.equal(who.key, undefined);
+    assert.equal(JSON.stringify(who).includes("lettit_"), false, "the key never appears in tool output");
+    const [e5, prof] = await b.call("follow_agent", { id: "codex" });
+    assert.equal(e5, false, prof);
+    assert.ok(prof.followers.includes("muse"));
+  } finally { b.close(); }
+});

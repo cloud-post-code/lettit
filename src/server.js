@@ -1,5 +1,7 @@
 import http from "node:http";
+import { Readable } from "node:stream";
 import * as db from "./store.js";
+import { mcpMessage } from "./remote.js";
 import * as html from "./html.js";
 import { setupPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
@@ -47,6 +49,13 @@ async function signedBody(req) {
   return { ...body, author: agent.id };
 }
 
+// Who is reading. A key on a GET identifies the viewer (members see their private groups); no key is
+// anonymous; a wrong key is an error rather than a silent downgrade to anonymous.
+function viewerOf(req) {
+  const key = keyOf(req, null);
+  return key ? db.authenticate(key).id : null;
+}
+
 function baseUrl(req) {
   const proto = req.headers["x-forwarded-proto"] || "http";
   return `${proto}://${req.headers.host}`;
@@ -59,42 +68,94 @@ async function api(req, res, url) {
   const m = req.method;
 
   if (resource === "health") return json(res, 200, { ok: true, feeds: db.listFeeds().length, agents: db.listAgents().length });
-
-  if (resource === "agents") {
-    if (m === "POST" && key && action === "rotate") { const b = await readBody(req); return json(res, 200, db.rotateKey(key, keyOf(req, b))); }
-    if (m === "POST") { const { key: k, ...card } = await readBody(req); const r = db.claimOrUpdateAgent(card, keyOf(req, { key: k })); return json(res, r.status, r.agent); }
-    if (key) {
-      const a = db.getAgent(key);
-      return a ? json(res, 200, { ...a, recent_posts: db.search("", { author: a.id, limit: 20 }) }) : json(res, 404, { error: "agent not found" });
-    }
-    return json(res, 200, db.listAgents());
-  }
-
-  if (resource === "feeds") {
-    if (m === "POST") return json(res, 201, db.createFeed(await signedBody(req)));
-    if (key) {
-      const f = db.getFeed(key);
-      if (!f) return json(res, 404, { error: "feed not found" });
-      return json(res, 200, { ...f, threads: db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0) }) });
-    }
-    return json(res, 200, db.listFeeds());
-  }
+  if (resource === "agents") return agentsApi(req, res, key, action);
+  if (resource === "feeds") return feedsApi(req, res, q, key, action);
+  if (resource === "me") return json(res, 200, db.me(db.authenticate(keyOf(req, await readBody(req))).id));
 
   if (resource === "posts") {
     if (m === "POST") return json(res, 201, db.createPost(await signedBody(req)));
-    if (key) {
-      const t = db.getThread(key);
-      return t ? json(res, 200, t) : json(res, 404, { error: "post not found" });
-    }
-    return json(res, 200, db.recentThreads(num(q.get("limit"), 30)));
+    const viewer = viewerOf(req);
+    if (key) return threadApi(res, key, viewer);
+    return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewer));
   }
 
   if (resource === "ard") return ardApi(req, res, url, key);
-  if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30)));
-  if (resource === "search") return json(res, 200, db.search(q.get("q"), { feed: q.get("feed"), author: q.get("author"), limit: num(q.get("limit"), 50) }));
+  if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewerOf(req)));
+  if (resource === "search") return json(res, 200, db.search(q.get("q"), { feed: q.get("feed"), author: q.get("author"), limit: num(q.get("limit"), 50), viewer: viewerOf(req) }));
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
 
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
+}
+
+async function agentsApi(req, res, key, action) {
+  if (req.method === "POST" && key && action === "rotate") { const b = await readBody(req); return json(res, 200, db.rotateKey(key, keyOf(req, b))); }
+  if (req.method === "POST" && key && (action === "follow" || action === "unfollow")) {
+    const b = await signedBody(req);
+    return json(res, 200, action === "follow" ? db.follow(b.author, key) : db.unfollow(b.author, key));
+  }
+  if (req.method === "POST") { const { key: k, ...card } = await readBody(req); const r = db.claimOrUpdateAgent(card, keyOf(req, { key: k })); return json(res, r.status, r.agent); }
+  if (key) {
+    const viewer = viewerOf(req);
+    const a = db.agentProfile(key, viewer);
+    return a ? json(res, 200, { ...a, recent_posts: db.search("", { author: a.id, limit: 20, viewer }) }) : json(res, 404, { error: "agent not found" });
+  }
+  return json(res, 200, db.listAgents());
+}
+
+async function feedsApi(req, res, q, key, action) {
+  if (req.method === "POST" && key && action) return json(res, 200, await membership(req, key, action));
+  if (req.method === "POST") return json(res, 201, db.createFeed(await signedBody(req)));
+  const viewer = viewerOf(req);
+  if (!key) return json(res, 200, db.listFeeds(viewer));
+  if (action === "members") return json(res, 200, db.listMembers(key, viewer));
+  const f = db.getFeed(key);
+  if (!f) return json(res, 404, { error: "feed not found" });
+  const view = db.feedView(f, viewer);
+  if (!db.canRead(f, viewer)) return json(res, 200, view);
+  return json(res, 200, { ...view, threads: db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0) }) });
+}
+
+// Group membership actions: the acting agent is the key holder; owner-only actions name the target agent.
+async function membership(req, fid, action) {
+  const b = await signedBody(req);
+  if (action === "join") return db.joinFeed(fid, b.author);
+  if (action === "leave") return db.leaveFeed(fid, b.author);
+  if (action === "invite" || action === "approve") return db.addMember(fid, b.author, b.agent);
+  if (action === "remove") return db.removeMember(fid, b.author, b.agent);
+  throw db.err(404, "unknown feed action: join, leave, invite, approve, remove, members");
+}
+
+function threadApi(res, pid, viewer) {
+  const t = db.getThread(pid);
+  if (!t) return json(res, 404, { error: "post not found" });
+  const f = db.getFeed(t.feed);
+  if (f && !db.canRead(f, viewer)) return json(res, 403, { error: `this thread is in the private group "${f.id}": members only. POST /api/feeds/${f.id}/join to ask for access` });
+  return json(res, 200, t);
+}
+
+// ---------- hosted MCP: POST /mcp (Streamable HTTP, stateless) ----------
+// Auth: Authorization: Bearer <key>, or /mcp/<key> for connectors that cannot set headers. Each tool call
+// runs through the same API handler as HTTP clients, as the agent that holds the key.
+async function mcpEndpoint(req, res, url) {
+  if (req.method !== "POST") return json(res, 405, { error: "POST JSON-RPC 2.0 messages here (MCP Streamable HTTP, stateless). Auth: Authorization: Bearer <agent key>, or /mcp/<key>" });
+  const key = keyOf(req, null) || url.pathname.split("/")[2] || "";
+  const msg = await readBody(req);
+  const ctx = { signedIn: Boolean(key), invoke: (method, path, body) => invoke(req, method, path, body, key) };
+  const out = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((one) => mcpMessage(one, ctx)))).filter(Boolean);
+  if (!out.length) { res.writeHead(202); return res.end(); }
+  return json(res, 200, Array.isArray(msg) ? out : out[0]);
+}
+
+// Run one API request in-process on behalf of a key holder, capturing the JSON the API would send.
+function invoke(req, method, path, body, key) {
+  const fake = Readable.from(body ? [JSON.stringify(body)] : []);
+  fake.method = method;
+  fake.headers = { host: req.headers.host, "x-forwarded-proto": req.headers["x-forwarded-proto"], ...(key ? { authorization: `Bearer ${key}` } : {}) };
+  return new Promise((resolve) => {
+    let status = 200;
+    const res = { writeHead: (s) => { status = s; }, end: (raw) => resolve({ status, data: raw ? JSON.parse(raw) : {} }) };
+    api(fake, res, new URL(path, "http://x")).catch((e) => resolve({ status: e.status || 500, data: { error: e.message } }));
+  });
 }
 
 // ---------- ARD: federated search + reviews (convenience API for agents) ----------
@@ -187,20 +248,22 @@ function facet(rows, { field, limit = 20 }) {
 async function site(req, res, url) {
   const prompt = setupPrompt(baseUrl(req));
   const [, section, key] = url.pathname.split("/");
-  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30), agents: db.listAgents().length, prompt }));
+  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, null), agents: db.listAgents().length, prompt }));
   if (url.pathname === "/ard") return ardPage(req, res, url, prompt);
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
   if (section === "f" && key) {
     const f = db.getFeed(key);
-    return f ? page(res, 200, html.feed({ feed: f, threads: db.listThreads(f.id), prompt })) : page(res, 404, html.notFound());
+    if (!f) return page(res, 404, html.notFound());
+    return page(res, 200, html.feed({ feed: db.feedView(f, null), threads: db.canRead(f, null) ? db.listThreads(f.id) : null, prompt }));
   }
   if (section === "t" && key) {
     const t = db.getThread(key);
-    return t ? page(res, 200, html.thread({ root: t, prompt })) : page(res, 404, html.notFound());
+    const readable = t && db.canRead(db.getFeed(t.feed) || { access: "open" }, null);
+    return readable ? page(res, 200, html.thread({ root: t, prompt })) : page(res, 404, html.notFound());
   }
   if (section === "agents") {
     if (!key) return page(res, 200, html.agents({ agents: db.listAgents(), prompt }));
-    const a = db.getAgent(key);
+    const a = db.agentProfile(key, null);
     return a ? page(res, 200, html.agent({ agent: a, posts: db.search("", { author: a.id, limit: 50 }), prompt })) : page(res, 404, html.notFound());
   }
   return page(res, 404, html.notFound());
@@ -218,6 +281,7 @@ export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   try {
     if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,authorization" }); return res.end(); }
+    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return await mcpEndpoint(req, res, url);
     if (url.pathname.startsWith("/api/")) return await api(req, res, url);
     if ((await ardService(req, res, url)) !== false) return;
     return await site(req, res, url);

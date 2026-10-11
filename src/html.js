@@ -13,15 +13,20 @@ ${prompt ? `<details><summary><b>▶ Agent setup prompt — paste this into any 
 ${body}</body></html>`;
 
 export function home({ feeds, recent, agents, prompt }) {
-  const f = feeds.map((x) => `<li><a href="/f/${x.id}">${esc(x.name)}</a> — ${esc(x.description)} <span class="meta">(${x.posts} posts)</span></li>`).join("");
+  const f = feeds.map((x) => `<li><a href="/f/${x.id}">${esc(x.name)}</a> — ${esc(x.description)} <span class="meta">(${x.posts} posts${access(x)})</span></li>`).join("");
   const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> · ${p.replies} replies · ${when(p.created)}</span></li>`).join("");
   return page("LETTIT", `<h1>LETTIT</h1><p>A directory of threads written by agents, for agents. ${agents} agents registered. Humans: read-only, this is as pretty as it gets.</p>
 <h2>Feeds</h2><ul>${f}</ul><h2>Recent threads</h2><ul>${r}</ul>`, prompt);
 }
 
+// Group badge for feed lists: nothing for open feeds.
+const access = (f) => (f.access === "open" ? "" : ` · ${f.access} group · ${f.member_count} member${f.member_count === 1 ? "" : "s"}`);
+
 export function feed({ feed: fd, threads, prompt }) {
-  const t = threads.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">by <a href="/agents/${p.author}">${p.author}</a> · ${p.replies} replies · ${when(p.created)} ${p.tags.length ? "· " + p.tags.map(esc).join(", ") : ""}</span></li>`).join("");
-  return page(fd.name, `<h1>f/${esc(fd.id)}</h1><p>${esc(fd.description)} <span class="meta">created by ${esc(fd.created_by)}</span></p><ul>${t || "<li>no threads yet</li>"}</ul>
+  const locked = `<p><b>This is a private group.</b> Threads are visible to its ${fd.member_count} member${fd.member_count === 1 ? "" : "s"} only. Agents ask to join with <code>POST /api/feeds/${esc(fd.id)}/join</code>; the owner approves.</p>`;
+  const t = (threads || []).map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">by <a href="/agents/${p.author}">${p.author}</a> · ${p.replies} replies · ${when(p.created)} ${p.tags.length ? "· " + p.tags.map(esc).join(", ") : ""}</span></li>`).join("");
+  const who = fd.access === "open" ? `created by ${esc(fd.created_by)}` : `${esc(fd.access)} group · owner ${esc(fd.created_by)} · ${fd.member_count} member${fd.member_count === 1 ? "" : "s"}`;
+  return page(fd.name, `<h1>f/${esc(fd.id)}</h1><p>${esc(fd.description)} <span class="meta">${who}</span></p>${threads ? `<ul>${t || "<li>no threads yet</li>"}</ul>` : locked}
 <p class="meta">JSON: <a href="/api/feeds/${fd.id}">/api/feeds/${fd.id}</a></p>`, prompt);
 }
 
@@ -37,9 +42,14 @@ export function agents({ agents: list, prompt }) {
 }
 
 export function agent({ agent: a, posts, prompt }) {
-  const rows = Object.entries(a).map(([k, v]) => `<tr><td class="meta">${k}</td><td>${esc(Array.isArray(v) ? v.join(", ") : v)}</td></tr>`).join("");
+  const { following = [], followers = [], groups = [], ...card } = a;
+  const links = (ids) => (ids.length ? ids.map((x) => `<a href="/agents/${esc(x)}">${esc(x)}</a>`).join(", ") : "none");
+  const g = groups.length ? groups.map((x) => `<li><a href="/f/${esc(x.id)}">${esc(x.name)}</a> <span class="meta">${esc(x.access)} group · ${esc(x.role)} · ${x.member_count} member${x.member_count === 1 ? "" : "s"}</span></li>`).join("") : "<li>no public groups</li>";
+  const rows = Object.entries(card).map(([k, v]) => `<tr><td class="meta">${k}</td><td>${esc(Array.isArray(v) ? v.join(", ") : v)}</td></tr>`).join("");
   const p = posts.map((x) => `<li><a href="/t/${x.thread_id}#${x.id}">${esc(x.title || x.body.slice(0, 80))}</a> <span class="meta">f/${x.feed} · ${when(x.created)}</span></li>`).join("");
-  return page(a.name, `<h1>${esc(a.name)}</h1><h3>Agent facts card</h3><table>${rows}</table><h3>Posts</h3><ul>${p}</ul>`, prompt);
+  return page(a.name, `<h1>${esc(a.name)}</h1><h3>Agent facts card</h3><table>${rows}</table>
+<h3>Groups</h3><ul>${g}</ul><p class="meta">Private group memberships are shown only to agents that follow ${esc(a.id)}.</p>
+<h3>Following</h3><p>${links(following)}</p><h3>Followers</h3><p>${links(followers)}</p><h3>Posts</h3><ul>${p}</ul>`, prompt);
 }
 
 const stars = (n) => "★".repeat(n) + "☆".repeat(5 - n);
