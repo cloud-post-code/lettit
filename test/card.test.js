@@ -41,11 +41,11 @@ test("a claim needs an operator and gets an operator-prefixed id; legacy fields 
 });
 
 test("a seeded unclaimed card is claimed by name alone and keeps its operator; a prefixed name is not doubled", async () => {
-  const [s, muse] = await post("/api/agents", { name: "muse" });
+  const [s, muse] = await post("/api/agents", { name: "blake-muse" });
   assert.equal(s, 201);
-  assert.equal(muse.id, "muse");
+  assert.equal(muse.id, "blake-muse");
   assert.equal(muse.operator, "blake@agenticnet.org");
-  const [again] = await post("/api/agents", { name: "muse" });
+  const [again] = await post("/api/agents", { name: "blake-muse" });
   assert.equal(again, 403);
   const [s2, pre] = await post("/api/agents", { name: "blake-scout", operator: "blake@agenticnet.org" });
   assert.equal(s2, 201);
@@ -66,9 +66,9 @@ test("rotate_key is a hosted MCP tool; hosted register_agent never returns the k
   assert.equal(rotated.id, "op-rotor");
   assert.match(rotated.key, /^lettit_/);
   assert.notEqual(rotated.key, card.key);
-  const [old] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b" }, card.key);
+  const [old] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, card.key);
   assert.equal(old, 403);
-  const [fresh] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b" }, rotated.key);
+  const [fresh] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, rotated.key);
   assert.equal(fresh, 201);
   const [e2, msg] = await call("rotate_key", {});
   assert.equal(e2, true);
@@ -93,24 +93,24 @@ function bridge(env) {
 
 test("the bridge reads LETTIT_* variables, still honours AGENTBOARD_* with a warning, and rotates keys into the key file", async () => {
   const KEY_FILE = path.join(process.env.DATA_DIR, "keys.json");
-  const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "dot", LETTIT_KEY_FILE: KEY_FILE });
+  const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "blake-dot", LETTIT_KEY_FILE: KEY_FILE });
   try {
     const [e1, t] = await b.call("post", { kind: "status", title: "from dot", body: "x" });
     assert.equal(e1, false, t);
-    assert.equal(t.author, "dot");
-    const before = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base].dot;
+    assert.equal(t.author, "blake-dot");
+    const before = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base]["blake-dot"];
     assert.match(before, /^lettit_/);
     const [e2, rot] = await b.call("rotate_key", {});
     assert.equal(e2, false, rot);
     assert.equal(rot.key, undefined);
     assert.equal(rot.key_on_file, true);
-    const after = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base].dot;
+    const after = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base]["blake-dot"];
     assert.notEqual(after, before);
     const [e3, t2] = await b.call("post", { kind: "status", title: "after rotate", body: "x" });
     assert.equal(e3, false, t2);
     assert.equal(b.stderr().includes("AGENTBOARD"), false);
   } finally { b.close(); }
-  const legacy = bridge({ AGENTBOARD_URL: base, AGENTBOARD_AGENT: "dot", AGENTBOARD_KEY_FILE: KEY_FILE });
+  const legacy = bridge({ AGENTBOARD_URL: base, AGENTBOARD_AGENT: "blake-dot", AGENTBOARD_KEY_FILE: KEY_FILE });
   try {
     const [e, who] = await legacy.call("whoami", {});
     assert.equal(e, false, who);

@@ -43,9 +43,9 @@ test("follow and unfollow update both profiles; self and unknown targets are rej
 test("following opens the author's followers-only posts and nothing else; /api/me needs a key", async () => {
   const host = await claim("Host");
   const fan = await claim("Fan");
-  const [, whisper] = await post("/api/posts", { feed: "lettit-feedback", title: "whisper", body: "quiet", audience: "followers" }, host);
-  const [, friendsOnly] = await post("/api/posts", { feed: "lettit-feedback", title: "inner", body: "circle", audience: "friend" }, host);
-  await post("/api/posts", { feed: "lettit-feedback", title: "shout", body: "loud" }, host);
+  const [, whisper] = await post("/api/posts", { feed: "feedback", title: "whisper", body: "quiet", audience: "followers" }, host);
+  const [, friendsOnly] = await post("/api/posts", { feed: "feedback", title: "inner", body: "circle", audience: "friend" }, host);
+  await post("/api/posts", { feed: "feedback", title: "shout", body: "loud" }, host);
   const titles = async (key) => (await get("/api/search?q=&author=t-host", key))[1].map((p) => p.title).sort();
   assert.deepEqual(await titles(fan), ["shout"]);
   assert.deepEqual(await titles(), ["shout"]);

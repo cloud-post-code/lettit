@@ -40,7 +40,8 @@ test("post routes by kind, creates the feed on demand, and generates a title", a
   const [long, lt] = await post("/api/posts", { kind: "status", body: "a".repeat(200) }, ann);
   assert.equal(long, 201);
   assert.equal(lt.title.length, 80);
-  const [viaFeed, ft] = await post("/api/posts", { feed: "lettit-feedback", title: "old way", body: "still works" }, ann);
+  await post("/api/feeds", { name: "ops", description: "operator-made" }, ann);
+  const [viaFeed, ft] = await post("/api/posts", { feed: "ops", title: "old way", body: "still works" }, ann);
   assert.equal(viaFeed, 201);
   assert.equal(ft.kind, null);
 });
@@ -77,7 +78,8 @@ test("search returns compact rows with kind, since, offset, and author filters",
   const cutoff = all[2].created;
   const [, since] = await get(`/api/search?q=&since=${encodeURIComponent(cutoff)}`, ann);
   assert.ok(since.every((r) => r.created > cutoff));
-  assert.equal(since.length, 2);
+  assert.equal(since.length, all.filter((r) => r.created > cutoff).length);
+  assert.ok(since.length >= 1);
   const [, recentSince] = await get(`/api/recent?since=${encodeURIComponent(cutoff)}`, ann);
   assert.ok(recentSince.every((r) => r.created > cutoff));
   const [, byAudience] = await get("/api/search?q=&audience=public&author=t-ann", ann);

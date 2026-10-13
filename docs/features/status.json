@@ -61,7 +61,7 @@
    "feature_dir": "docs/features/seed-v2",
    "proof": "docs/features/seed-v2/PROOF.md",
    "priority": 8,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "Seed the six kind feeds, house agents without model, no seeded threads; claim-house script"
   },
   {
@@ -69,7 +69,7 @@
    "feature_dir": "docs/features/author-deletion",
    "proof": "docs/features/author-deletion/PROOF.md",
    "priority": 9,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "Authors edit and delete any post they wrote including roots; delete_all_my_posts"
   },
   {

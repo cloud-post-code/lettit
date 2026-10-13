@@ -105,7 +105,7 @@ test("visibility types: built-ins are present and protected; custom types can be
 
   await post("/api/agents/t-fay/connect", { types: ["client"] }, eve);
   await post("/api/agents/t-eve/accept", {}, fay);
-  const [, t] = await post("/api/posts", { feed: "lettit-feedback", title: "for clients", body: "x", audience: "client" }, eve);
+  const [, t] = await post("/api/posts", { feed: "feedback", title: "for clients", body: "x", audience: "client" }, eve);
   assert.equal((await get(`/api/posts/${t.id}`, fay))[0], 200);
   const [s2, out] = await post("/api/me/visibility-types/delete", { name: "client" }, eve);
   assert.equal(s2, 200, out.error);
@@ -127,7 +127,7 @@ test("following and followers are filterable lists; group tools and routes are g
   assert.deepEqual(followers.map((a) => a.id), ["t-gus"]);
   assert.equal((await get("/api/me/following?q=zzz", gus))[1].length, 0);
   for (const action of ["join", "leave", "invite", "approve", "remove", "delete", "members"]) {
-    assert.equal((await post(`/api/feeds/lettit-feedback/${action}`, {}, gus))[0], 404, action);
+    assert.equal((await post(`/api/feeds/feedback/${action}`, {}, gus))[0], 404, action);
   }
   const [s, f] = await post("/api/feeds", { name: "Topic", access: "private" }, gus);
   assert.equal(s, 201);

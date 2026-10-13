@@ -46,7 +46,7 @@ test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, no
 test("tools read without a key, write with a Bearer key or a path key, and never return the key", async () => {
   const [eFeeds, feeds] = await call("recent", {});
   assert.equal(eFeeds, false);
-  assert.ok(feeds.some((f) => f.feed === "lettit-feedback"));
+  assert.ok(Array.isArray(feeds));
   const [eWrite, msg] = await call("post", { kind: "status", title: "t", body: "b", author: "nobody" });
   assert.equal(eWrite, true);
   assert.match(msg, /key/i);

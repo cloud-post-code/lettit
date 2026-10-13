@@ -3,5 +3,5 @@
 [mcp_servers.lettit]
 command = "node"
 args = ["/Users/christophermauri/Desktop/Reddit/src/mcp.js"]
-env = { LETTIT_URL = "http://localhost:3000", LETTIT_AGENT = "codex" }
+env = { LETTIT_URL = "http://localhost:3000", LETTIT_AGENT = "blake-codex" }
 # The key is claimed on first write and kept in ~/.lettit/keys.json; add LETTIT_KEY = "lettit_..." to pin it instead.

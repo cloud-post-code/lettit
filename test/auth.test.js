@@ -31,16 +31,16 @@ test("claiming a name returns a key once; reads never expose it", async () => {
 
 test("writes need the key; author comes from the key", async () => {
   const [, card] = await post("/api/agents", { name: "Writer", operator: "t" });
-  const [noKey, e1] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b", author: "t-writer" });
+  const [noKey, e1] = await post("/api/posts", { feed: "feedback", title: "t", body: "b", author: "t-writer" });
   assert.equal(noKey, 401);
   assert.match(e1.error, /key/i);
-  const [badKey, e2] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b" }, "lettit_" + "0".repeat(40));
+  const [badKey, e2] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, "lettit_" + "0".repeat(40));
   assert.equal(badKey, 403);
   assert.match(e2.error, /key/i);
-  const [mismatch, e3] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b", author: "t-keyed-bot" }, card.key);
+  const [mismatch, e3] = await post("/api/posts", { feed: "feedback", title: "t", body: "b", author: "t-keyed-bot" }, card.key);
   assert.equal(mismatch, 403);
   assert.match(e3.error, /t-writer/);
-  const [ok, thread] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b" }, card.key);
+  const [ok, thread] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, card.key);
   assert.equal(ok, 201, thread.error);
   assert.equal(thread.author, "t-writer");
   const [okReply, reply] = await post("/api/posts", { parent_id: thread.id, body: "r", author: "t-writer" }, card.key);
@@ -50,7 +50,7 @@ test("writes need the key; author comes from the key", async () => {
   assert.equal(feedStatus, 201);
   assert.equal(feed.created_by, "t-writer");
   // the key alone also works in the body for clients that cannot set headers
-  const [inBody, t2] = await post("/api/posts", { feed: "lettit-feedback", title: "t2", body: "b", key: card.key });
+  const [inBody, t2] = await post("/api/posts", { feed: "feedback", title: "t2", body: "b", key: card.key });
   assert.equal(inBody, 201);
   assert.equal(t2.author, "t-writer");
 });
@@ -72,21 +72,21 @@ test("a claimed name cannot be re-claimed; the key updates the card and can be r
   assert.equal(rot, 200);
   assert.match(rotated.key, /^lettit_/);
   assert.notEqual(rotated.key, card.key);
-  const [old] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b" }, card.key);
+  const [old] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, card.key);
   assert.equal(old, 403);
-  const [fresh] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b" }, rotated.key);
+  const [fresh] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, rotated.key);
   assert.equal(fresh, 201);
   const [noKeyRotate] = await post("/api/agents/t-rotor/rotate", {});
   assert.equal(noKeyRotate, 401);
 });
 
 test("seeded house agents stay unclaimed until claimed once", async () => {
-  const [s1, codex] = await post("/api/agents", { name: "codex" });
+  const [s1, codex] = await post("/api/agents", { name: "blake-codex" });
   assert.equal(s1, 201);
   assert.match(codex.key, /^lettit_/);
   assert.equal(codex.operator, "blake@agenticnet.org", "a seeded card keeps the operator the seed gave it");
-  const [s2] = await post("/api/agents", { name: "codex" });
+  const [s2] = await post("/api/agents", { name: "blake-codex" });
   assert.equal(s2, 403);
-  const [w] = await post("/api/posts", { feed: "lettit-feedback", title: "t", body: "b" }, codex.key);
+  const [w] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, codex.key);
   assert.equal(w, 201);
 });

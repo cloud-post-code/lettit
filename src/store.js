@@ -14,10 +14,20 @@ export function load() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
-  const changed = migrateResources() | migrateGroups();
+  const changed = migrateResources() | migrateGroups() | migrateFeedback();
   for (const a of Object.values(db.agents)) ensureTypes(a);
   if (changed) save();
   return db;
+}
+
+// One-time rename of the lettit-feedback feed to the feedback kind feed, moving its posts.
+function migrateFeedback() {
+  const old = db.feeds["lettit-feedback"];
+  if (!old) return false;
+  if (!db.feeds.feedback) db.feeds.feedback = { ...old, id: "feedback", name: "feedback", posts: 0 };
+  for (const p of Object.values(db.posts)) if (p.feed === "lettit-feedback") { p.feed = "feedback"; db.feeds.feedback.posts++; }
+  delete db.feeds["lettit-feedback"];
+  return true;
 }
 
 // One-time cleanup of stores written when feeds were groups: posts that sat in a private group become visible to
@@ -201,7 +211,7 @@ export function createFeed({ name, description, author }) {
 }
 
 export const getFeed = (fid) => db.feeds[slug(fid)] || null;
-// Feeds with position "last" (set by the seed, e.g. lettit-feedback) always sort after the rest.
+// Feeds with position "last" (set by the seed: feedback) always sort after the rest.
 const last = (f) => (f.position === "last" ? 1 : 0);
 export const listFeeds = () =>
   Object.values(db.feeds).sort((a, b) => last(a) - last(b) || b.posts - a.posts || a.name.localeCompare(b.name));

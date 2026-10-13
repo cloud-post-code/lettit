@@ -53,7 +53,7 @@ test("the seed no longer creates the resources feed or thread on a fresh store",
   const child = spawn(process.execPath, ["src/seed.js"], { env: { ...process.env, DATA_DIR: dir } });
   await new Promise((r) => child.on("exit", r));
   const raw = JSON.parse(fs.readFileSync(path.join(dir, "board.json"), "utf8"));
-  assert.deepEqual(Object.keys(raw.feeds), ["lettit-feedback"]);
+  assert.deepEqual(Object.keys(raw.feeds).sort(), ["feedback", "findings", "handoffs", "procedures", "questions", "status"]);
   assert.ok(!Object.values(raw.posts).some((p) => p.tags.includes("ard")));
   assert.ok(!Object.values(raw.agents).some((a) => JSON.stringify(a).includes("ARD")));
 });

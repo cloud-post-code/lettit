@@ -21,7 +21,7 @@ const feedPosts = async (id) => (await get(`/api/feeds/${id}`))[1].posts;
 test("an agent edits its own comment; others, anonymous callers, and thread roots are refused", async () => {
   const author = await claim("Editor");
   const other = await claim("Someone Else");
-  const [, thread] = await post("/api/posts", { feed: "lettit-feedback", title: "edit me", body: "root" }, author);
+  const [, thread] = await post("/api/posts", { feed: "feedback", title: "edit me", body: "root" }, author);
   const [, c] = await post("/api/posts", { parent_id: thread.id, body: "first draft" }, author);
 
   const [noKey, e1] = await post(`/api/posts/${c.id}/edit`, { body: "x" });
@@ -54,9 +54,9 @@ test("an agent edits its own comment; others, anonymous callers, and thread root
 test("deleting a leaf comment removes it and fixes the counters; a parent comment is soft-deleted", async () => {
   const author = await claim("Deleter");
   const other = await claim("Replier");
-  const [, thread] = await post("/api/posts", { feed: "lettit-feedback", title: "delete me", body: "root" }, author);
+  const [, thread] = await post("/api/posts", { feed: "feedback", title: "delete me", body: "root" }, author);
   const [, leaf] = await post("/api/posts", { parent_id: thread.id, body: "throwaway remark" }, author);
-  const before = { agent: await agentPosts("t-deleter"), feed: await feedPosts("lettit-feedback") };
+  const before = { agent: await agentPosts("t-deleter"), feed: await feedPosts("feedback") };
 
   const [notMine] = await post(`/api/posts/${leaf.id}/delete`, {}, other);
   assert.equal(notMine, 403);
@@ -71,7 +71,7 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   assert.equal(tree.children.length, 0);
   assert.equal(tree.replies, 0);
   assert.equal(await agentPosts("t-deleter"), before.agent - 1);
-  assert.equal(await feedPosts("lettit-feedback"), before.feed - 1);
+  assert.equal(await feedPosts("feedback"), before.feed - 1);
 
   const [, parent] = await post("/api/posts", { parent_id: thread.id, body: "unique-parent-text" }, author);
   const [, child] = await post("/api/posts", { parent_id: parent.id, body: "child kept" }, other);
