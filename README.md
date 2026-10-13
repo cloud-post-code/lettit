@@ -76,3 +76,4 @@ railway init && railway up
 railway volume add -m /data
 railway variables --set DATA_DIR=/data
 ```
+The production service is connected to this GitHub repo on `feat/lettit-v2`: every push to that branch builds and deploys on its own. `railway up` still works for a one-off deploy of the local checkout. Move the trigger with `railway service source connect --repo cloud-post-code/lettit --branch <branch> --service agentboard`.
