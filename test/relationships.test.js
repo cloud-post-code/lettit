@@ -26,7 +26,7 @@ before(async () => {
   me = await claim("Me");
   bob = await claim("Bob"); cat = await claim("Cat"); dan = await claim("Dan"); eve = await claim("Eve"); fay = await claim("Fay");
   await api("/api/agents/t-bob/connect", { types: ["colleague"] }, me);
-  await api("/api/agents/t-me/accept", { types: ["friend"] }, bob);
+  await api("/api/agents/t-me/connect", { types: ["friend"] }, bob);
   await api("/api/agents/t-me/follow", {}, cat);
   await api("/api/agents/t-dan/follow", {}, me);
   await api("/api/agents/t-me/connect", { types: ["friend"] }, eve);
@@ -44,10 +44,11 @@ test("the console lists every relationship with labels, summary, and filters", a
   assert.match(row(html, "t-bob"), /name="types" value="friend"(?! checked)/);
   assert.match(row(html, "t-cat"), /follows you/);
   assert.match(row(html, "t-dan"), /you follow/);
-  assert.match(row(html, "t-eve"), /proposed by them/);
-  assert.match(row(html, "t-eve"), /value="accept"/);
-  assert.match(row(html, "t-fay"), /proposed by you/);
-  assert.match(html, /1 connection: 0 friend, 1 colleague/);
+  assert.match(row(html, "t-bob"), /connected with you as friend/);
+  assert.match(row(html, "t-eve"), /connected with you as friend/);
+  assert.match(row(html, "t-eve"), /value="connect"/);
+  assert.match(row(html, "t-fay"), /connected/);
+  assert.match(html, /2 connections: 0 friend, 1 colleague/);
   assert.match(html, /show my posts as seen by/);
   const byType = await text("/me/connections?type=friend", cookie);
   assert.equal(row(byType, "t-bob"), null);
@@ -68,22 +69,24 @@ test("a visibility change through the form is reflected for the target on its ne
   assert.deepEqual(rel.relationship.they_are, ["friend", "colleague"]);
   const html = await text("/me/connections", cookie);
   assert.match(row(html, "t-bob"), /value="friend" checked/);
-  assert.match(html, /1 connection: 1 friend, 1 colleague/);
+  assert.match(html, /2 connections: 1 friend, 1 colleague/);
 });
 
-test("accept, decline, disconnect, follow, and unfollow work from the console", async () => {
-  assert.equal((await form("/me/connections", { csrf, action: "accept", agent: "t-eve", types: "colleague" }, cookie)).status, 302);
+test("connect, disconnect, follow, and unfollow work from the console", async () => {
+  assert.equal((await form("/me/connections", { csrf, action: "connect", agent: "t-eve", types: "colleague" }, cookie)).status, 302);
   const [, eveRel] = await get("/api/agents/t-eve", me);
   assert.equal(eveRel.relationship.connected, true);
   assert.deepEqual(eveRel.relationship.they_are, ["colleague"]);
-  assert.equal((await form("/me/connections", { csrf, action: "decline", agent: "t-fay" }, cookie)).status, 302);
-  assert.equal((await get("/api/agents/t-fay", me))[1].relationship.proposed_by_me, false);
+  assert.equal((await form("/me/connections", { csrf, action: "decline", agent: "t-fay" }, cookie)).status, 404, "decline no longer exists");
+  assert.equal((await form("/me/connections", { csrf, action: "disconnect", agent: "t-fay" }, cookie)).status, 302);
+  assert.equal((await get("/api/agents/t-fay", me))[1].relationship.connected, false);
   assert.equal((await form("/me/connections", { csrf, action: "follow", agent: "t-cat" }, cookie)).status, 302);
   assert.equal((await get("/api/agents/t-cat", me))[1].relationship.i_follow, true);
   assert.equal((await form("/me/connections", { csrf, action: "unfollow", agent: "t-dan" }, cookie)).status, 302);
   assert.equal((await get("/api/agents/t-dan", me))[1].relationship.i_follow, false);
   assert.equal((await form("/me/connections", { csrf, action: "disconnect", agent: "t-eve" }, cookie)).status, 302);
   assert.equal((await get("/api/agents/t-eve", me))[1].relationship.connected, false);
+  assert.equal((await get("/api/agents/t-eve", me))[1].relationship.they_connected, true, "eve's side is hers");
   const bad = await form("/me/connections", { csrf, action: "explode", agent: "t-eve" }, cookie);
   assert.equal(bad.status, 404);
 });

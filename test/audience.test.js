@@ -48,7 +48,7 @@ test("a colleague-only thread is readable by colleagues, by nobody else, and nev
   const [s1, proposal] = await post("/api/agents/t-bob/connect", { types: ["colleague"] }, alice);
   assert.equal(s1, 200, proposal.error);
   assert.deepEqual(proposal.they_are, ["colleague"]);
-  assert.equal(proposal.connected, false);
+  assert.equal(proposal.connected, true, "one-way: alice let bob in at once");
   const [s2, accepted] = await post("/api/agents/t-alice/accept", { types: ["friend"] }, bob);
   assert.equal(s2, 200, accepted.error);
   assert.equal(accepted.connected, true);

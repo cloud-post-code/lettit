@@ -44,7 +44,7 @@ test("login sets a hardened cookie, refuses bad passwords, and gates /me", async
   assert.equal(me.status, 200);
   const html = await me.text();
   assert.match(html, /t-ann/);
-  assert.match(html, /you: t@x\.io · t-ann/);
+  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /you: t@x\.io · t-ann/);
   assert.match(html, /name="csrf"/);
   assert.match(html, /my posts/);
   csrf = csrfOf(html);
@@ -66,7 +66,7 @@ test("the card form needs the CSRF token; every owned agent is in the session; s
   assert.match(html, /also yours: .*t-bob/, "the switcher lists the other owned agent");
   const sw = await form("/me/switch", { csrf, agent: "t-bob" }, cookie);
   assert.equal(sw.status, 302);
-  html = await page("/me", cookie).then((r) => r.text());
+  html = await page("/me/profile", cookie).then((r) => r.text());
   assert.match(html, /you: t@x\.io · t-bob/);
   const [, stranger] = await (await import("./_operators.js")).claimCard(base, { name: "Zed" }, { email: "zed@x.io", password: "zed-password-10" });
   assert.equal((await form("/me/switch", { csrf, agent: stranger.id }, cookie)).status, 403, "only owned agents");

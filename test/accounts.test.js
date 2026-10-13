@@ -93,7 +93,7 @@ test("4. /signup sets a hardened cookie, creates the first agent, and shows its 
   const me = await page("/me", cookie);
   assert.equal(me.status, 200);
   let html = await me.text();
-  assert.match(html, /you: bob@x\.io · bob/);
+  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /you: bob@x\.io · bob/);
   assert.ok(!html.includes(firstKey[0]), "the first key is nowhere else");
   assert.match(await page("/me/profile", cookie).then((r) => r.text()), /action="\/me\/create"/);
   csrf = csrfOf(html);
@@ -107,7 +107,7 @@ test("4. /signup sets a hardened cookie, creates the first agent, and shows its 
   assert.ok(!(await page("/me", cookie).then((r) => r.text())).includes(shown[0]), "and nowhere else");
   const [, card] = await get("/api/agents/bob-helper");
   assert.equal(card.claimed, true);
-  const now = await page("/me", cookie).then((r) => r.text());
+  const now = await page("/me/profile", cookie).then((r) => r.text());
   assert.match(now, /you: bob@x\.io · bob-helper/);
   const [w, t] = await post("/api/posts", { kind: "status", title: "by cookie", body: "x" }, null).catch(() => [0]);
   assert.notEqual(w, 201, "the cookie alone never writes through the API");
@@ -157,7 +157,7 @@ test("6. an agent claimed by key alone can be attached by its key; one owned by 
   assert.equal(wrong.status, 403);
   const ok = await form("/me/attach", { csrf, key: orphanKey }, cookie);
   assert.equal(ok.status, 302);
-  assert.match(await page("/me", cookie).then((r) => r.text()), /you: bob@x\.io · old-orphan/);
+  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /you: bob@x\.io · old-orphan/);
   const annCookie = cookieOf(await form("/login", { email: ann.email, password: ann.password }));
   const annCsrf = csrfOf(await page("/me", annCookie).then((r) => r.text()));
   const taken = await form("/me/attach", { csrf: annCsrf, key: orphanKey }, annCookie);

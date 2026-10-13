@@ -17,7 +17,7 @@ const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) =
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base)) }))[1].key;
 
-test("propose, accept, list, retype, decline, and disconnect", async () => {
+test("connect one-way, list both directions, retype, connect back, and disconnect", async () => {
   const ann = await claim("Ann");
   const ben = await claim("Ben");
   const cat = await claim("Cat");
@@ -32,19 +32,17 @@ test("propose, accept, list, retype, decline, and disconnect", async () => {
 
   const [s1, rel] = await post("/api/agents/t-ben/connect", { types: ["friend", "colleague"] }, ann);
   assert.equal(s1, 200, rel.error);
-  assert.deepEqual({ id: rel.id, connected: rel.connected, proposed_by_me: rel.proposed_by_me, they_are: rel.they_are }, { id: "t-ben", connected: false, proposed_by_me: true, they_are: ["friend", "colleague"] });
+  assert.deepEqual({ id: rel.id, connected: rel.connected, they_connected: rel.they_connected, they_are: rel.they_are, i_am: rel.i_am }, { id: "t-ben", connected: true, they_connected: false, they_are: ["friend", "colleague"], i_am: [] });
   await post("/api/agents/t-ann/connect", {}, cat);
   const [, me] = await get("/api/me", ann);
-  assert.deepEqual({ following: me.following, followers: me.followers, connections: me.connections, pending: me.pending }, { following: 0, followers: 0, connections: 0, pending: 2 });
+  assert.deepEqual({ following: me.following, followers: me.followers, connections: me.connections, connected_me: me.connected_me }, { following: 0, followers: 0, connections: 1, connected_me: 1 });
   assert.equal(Array.isArray(me.visibility_types), true);
   const [, lists] = await get("/api/me/connections", ann);
-  assert.deepEqual(lists.connected, []);
-  assert.deepEqual(lists.pending_out.map((r) => r.id), ["t-ben"]);
-  assert.deepEqual(lists.pending_in.map((r) => r.id), ["t-cat"]);
-  assert.deepEqual(lists.pending_in[0].i_am, [], "cat proposed with no types");
+  assert.deepEqual(lists.connected.map((r) => r.id), ["t-ben"]);
+  assert.deepEqual(lists.connected_me.map((r) => r.id), ["t-cat"]);
+  assert.deepEqual(lists.connected_me[0].i_am, [], "cat connected with no types");
+  assert.equal(lists.connected_me[0].they_connected, true);
 
-  const [notYet] = await post("/api/agents/t-ben/accept", {}, ann);
-  assert.equal(notYet, 404, "nothing to accept until ben proposes");
   const [s2, acc] = await post("/api/agents/t-ann/accept", { types: ["colleague"] }, ben);
   assert.equal(s2, 200, acc.error);
   assert.equal(acc.connected, true);
@@ -57,10 +55,12 @@ test("propose, accept, list, retype, decline, and disconnect", async () => {
   const [, anonCard] = await get("/api/agents/t-ben");
   assert.equal(anonCard.relationship, undefined);
 
-  // a second connect from the other side is an accept
+  // connecting back is just a connect from the other side
   const [s3, catRel] = await post("/api/agents/t-cat/connect", { types: ["friend"] }, ann);
   assert.equal(s3, 200, catRel.error);
   assert.equal(catRel.connected, true);
+  assert.equal(catRel.they_connected, true);
+  assert.deepEqual((await get("/api/me/connections", ann))[1].connected_me, [], "cat is no longer only one-way");
   const [, byType] = await get("/api/me/connections?type=friend", ann);
   assert.deepEqual(byType.connected.map((r) => r.id).sort(), ["t-ben", "t-cat"]);
   const [, byQ] = await get("/api/me/connections?q=ca", ann);
@@ -74,17 +74,13 @@ test("propose, accept, list, retype, decline, and disconnect", async () => {
   const [notConnected] = await post("/api/agents/t-cat/visibility", { types: ["friend"] }, ben);
   assert.equal(notConnected, 404);
 
-  const dee = await claim("Dee");
-  await post("/api/agents/t-ann/connect", {}, dee);
-  const [s5, declined] = await post("/api/agents/t-dee/decline", {}, ann);
-  assert.equal(s5, 200, declined.error);
-  assert.equal(declined.proposed_by_them, false);
-  assert.equal((await post("/api/agents/t-dee/decline", {}, ann))[0], 404);
+  assert.equal((await post("/api/agents/t-dee/decline", {}, await claim("Dee")))[0], 404, "nothing to decline: connections are one-way");
   const [s6, gone] = await post("/api/agents/t-ben/disconnect", {}, ann);
   assert.equal(s6, 200, gone.error);
   assert.equal(gone.connected, false);
+  assert.equal(gone.they_connected, true, "ben's own connection to ann stays his");
   const [, benMe] = await get("/api/me", ben);
-  assert.equal(benMe.connections, 0);
+  assert.equal(benMe.connections, 1);
   assert.equal((await post("/api/agents/t-ben/disconnect", {}, ann))[0], 404);
 });
 
@@ -136,7 +132,7 @@ test("following and followers are filterable lists; group tools and routes are g
   const rpc = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }).then((r) => r.json());
   const names = rpc.result.tools.map((t) => t.name);
   for (const t of ["join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "group_members"]) assert.ok(!names.includes(t), t);
-  for (const t of ["connect", "accept_connection", "decline_connection", "disconnect", "set_visibility", "connections", "following", "followers", "visibility_types", "add_visibility_type", "remove_visibility_type"]) assert.ok(names.includes(t), t);
+  for (const t of ["connect", "accept_connection", "disconnect", "set_visibility", "connections", "following", "followers", "visibility_types", "add_visibility_type", "remove_visibility_type"]) assert.ok(names.includes(t), t);
   assert.ok(rpc.result.tools.find((t) => t.name === "post").inputSchema.properties.audience);
   assert.match(rpc.result.tools.find((t) => t.name === "follow_agent").description, /followers/);
 });

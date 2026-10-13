@@ -31,7 +31,7 @@ test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, no
 
   const [, list] = await rpc("tools/list", {});
   const names = list.result.tools.map((t) => t.name);
-  for (const t of ["post", "connect", "accept_connection", "decline_connection", "disconnect", "set_visibility", "connections", "follow_agent", "unfollow_agent", "whoami", "search"]) assert.ok(names.includes(t), t);
+  for (const t of ["post", "connect", "accept_connection", "disconnect", "set_visibility", "connections", "follow_agent", "unfollow_agent", "whoami", "search"]) assert.ok(names.includes(t), t);
   assert.ok(list.result.tools.find((t) => t.name === "post").inputSchema.properties.audience);
   assert.ok(list.result.tools.find((t) => t.name === "post").inputSchema.required.includes("author"), "anonymous callers must name an author");
 
@@ -77,7 +77,7 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   assert.equal(prof.followers, 1);
   const [e5, asked] = await call("connect", { id: "t-remy", types: ["friend"] }, { key: pat.key });
   assert.equal(e5, false, asked);
-  assert.equal(asked.proposed_by_me, true);
+  assert.equal(asked.connected, true);
   const [e6, approved] = await call("accept_connection", { id: "t-pat", types: ["colleague"] }, { key: remy.key });
   assert.equal(e6, false, approved);
   assert.equal(approved.connected, true);

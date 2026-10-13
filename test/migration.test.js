@@ -41,14 +41,15 @@ test("an old store is rewritten once to operator ids everywhere", async () => {
   assert.deepEqual(raw.follows, { "blake-muse": { "blake-codex": "2026-01-02T00:00:00.000Z" }, "blake-codex": { "blake-muse": "2026-01-02T00:00:00.000Z" } });
   assert.deepEqual(Object.keys(raw.connections["blake-muse"]), ["blake-codex"]);
   assert.equal(raw.connections["blake-muse"]["blake-codex"].accepted_by, "blake-codex");
-  assert.deepEqual(raw.proposals, { "blake-dot": { "blake-muse": { types: ["friend"], created: "x" } } });
+  assert.equal(raw.proposals, undefined, "proposals are gone");
+  assert.deepEqual(raw.connections["blake-dot"], { "blake-muse": { types: ["friend"], since: "x" } }, "a pending proposal became the proposer's one-way connection");
   const [s, t] = await post("/api/posts", { kind: "status", body: "still me" }, MUSE_KEY);
   assert.equal(s, 201, t.error);
   assert.equal(t.author, "blake-muse");
   const [, me] = await get("/api/me", MUSE_KEY);
   assert.equal(me.following, 1);
   assert.equal(me.connections, 1);
-  assert.equal(me.pending, 1);
+  assert.equal(me.connected_me, 2, "codex and the migrated dot proposal");
 });
 
 test("old ids answer 404 with the new id, on the API, on actions, on claims, and on the HTML page", async () => {

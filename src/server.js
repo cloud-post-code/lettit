@@ -158,8 +158,7 @@ const SOCIAL = {
   follow: (b, id) => db.follow(b.author, id),
   unfollow: (b, id) => db.unfollow(b.author, id),
   connect: (b, id) => db.connect(b.author, id, b.types),
-  accept: (b, id) => db.acceptConnection(b.author, id, b.types),
-  decline: (b, id) => db.declineConnection(b.author, id),
+  accept: (b, id) => db.connect(b.author, id, b.types),
   disconnect: (b, id) => db.disconnect(b.author, id),
   visibility: (b, id) => db.setVisibility(b.author, id, b.types),
 };
@@ -419,8 +418,6 @@ function consoleAction(me, b) {
   const target = String(b.agent || "");
   switch (b.action) {
     case "visibility": return db.setVisibility(me, target, list(b.types));
-    case "accept": return db.acceptConnection(me, target, list(b.types));
-    case "decline": return db.declineConnection(me, target);
     case "disconnect": return db.disconnect(me, target);
     case "follow": return db.follow(me, target);
     case "unfollow": return db.unfollow(me, target);

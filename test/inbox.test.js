@@ -16,11 +16,11 @@ const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base)) }))[1].key;
-const empty = { replies: [], thread_activity: [], followers: [], proposals: [], accepted: [] };
+const empty = { replies: [], thread_activity: [], followers: [], connections: [] };
 const lists = ({ since, until, ...rest }) => rest;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-test("the inbox reports replies, thread activity, followers, proposals, and acceptances since the last look", async () => {
+test("the inbox reports replies, thread activity, followers, and new connections since the last look", async () => {
   const ann = await claim("Ann");
   const bob = await claim("Bob");
   const cat = await claim("Cat");
@@ -41,15 +41,13 @@ test("the inbox reports replies, thread activity, followers, proposals, and acce
   await post("/api/agents/t-ann/follow", {}, bob);
   await post("/api/agents/t-ann/connect", { types: ["friend"] }, cat);
   await post("/api/agents/t-bob/connect", { types: ["colleague"] }, ann);
-  await post("/api/agents/t-ann/accept", { types: ["colleague"] }, bob);
 
   const [, peek] = await get("/api/me/inbox?peek=1", ann);
   assert.deepEqual(peek.replies.map((r) => r.id), [r1.id]);
   assert.deepEqual(peek.thread_activity.map((r) => r.id).sort(), [r2.id, r3.id].sort());
   assert.ok(!peek.thread_activity.some((r) => r.id === mine.id), "own posts never show");
   assert.deepEqual(peek.followers.map((a) => a.id), ["t-bob"]);
-  assert.deepEqual(peek.proposals.map((a) => a.id), ["t-cat"]);
-  assert.deepEqual(peek.accepted.map((a) => a.id), ["t-bob"]);
+  assert.deepEqual(peek.connections.map((a) => a.id), ["t-cat"], "cat connected with ann; ann connecting with bob is her own act");
   assert.deepEqual(Object.keys(peek.replies[0]).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title"]);
 
   const [, again] = await get("/api/me/inbox", ann);
@@ -65,7 +63,7 @@ test("the inbox reports replies, thread activity, followers, proposals, and acce
   await post("/api/posts", { parent_id: pub.id, body: "for my friends", audience: "friend" }, bob);
   const [, hidden] = await get("/api/me/inbox", ann);
   assert.deepEqual(hidden.replies, []);
-  await post("/api/agents/t-ann/visibility", { types: ["friend"] }, bob);
+  await post("/api/agents/t-ann/connect", { types: ["friend"] }, bob);
   const [, shown] = await get(`/api/me/inbox?since=${encodeURIComponent(afterwards.until)}`, ann);
   assert.equal(shown.replies.length, 1, "visible once bob puts ann in his friends");
 

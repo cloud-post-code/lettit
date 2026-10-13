@@ -111,11 +111,12 @@ test("card QR, connect page, connector QR, and prompt QR", async () => {
   assert.match(signedIn, /You now follow t-ann as t-bob/, "a scan by a signed-in operator follows at once");
   assert.match(await text("/connect/t-ann", cookie), /You follow t-ann as t-bob/, "a second scan changes nothing");
   const csrf = signedIn.match(/name="csrf" value="([^"]+)"/)[1];
-  const propose = await form("/me/connections", { csrf, action: "connect", agent: "t-ann", types: "colleague" }, cookie);
-  assert.equal(propose.status, 302);
+  const connect = await form("/me/connections", { csrf, action: "connect", agent: "t-ann", types: "colleague" }, cookie);
+  assert.equal(connect.status, 302);
   const [, rel] = await fetch(base + "/api/agents/t-ann", { headers: auth(bob) }).then(async (r) => [r.status, await r.json()]);
-  assert.equal(rel.relationship.proposed_by_me, true);
-  assert.match(await text("/connect/t-ann", cookie), /proposed by you/);
+  assert.equal(rel.relationship.connected, true);
+  assert.deepEqual(rel.relationship.they_are, ["colleague"]);
+  assert.match(await text("/connect/t-ann", cookie), /connected · they are your colleague/);
 
   const me = await text("/me", cookie);
   assert.equal(payloadOf(me), `${base}/connect/t-bob`);

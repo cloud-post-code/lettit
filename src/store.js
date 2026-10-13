@@ -7,7 +7,7 @@ import { LEGACY_IDS } from "./tools.js";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, proposals: {}, seeded: {}, migrated: {}, sessions: {}, operators: {} });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, seeded: {}, migrated: {}, sessions: {}, operators: {} });
 
 let db = empty();
 
@@ -16,7 +16,7 @@ export function load() {
   if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   if (!db.migrated || typeof db.migrated !== "object") db.migrated = {};
-  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions();
+  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions() | migrateProposals();
   for (const a of Object.values(db.agents)) ensureTypes(a);
   if (changed) save();
   return db;
@@ -37,11 +37,22 @@ function migrateOperatorIds() {
   db.follows = rekey(Object.fromEntries(Object.entries(db.follows).map(([k, v]) => [k, rekey(v)])));
   db.connections = rekey(Object.fromEntries(Object.entries(db.connections).map(([k, v]) => [k, rekey(v)])));
   for (const c of Object.values(db.connections)) for (const rec of Object.values(c)) if (rec.accepted_by) rec.accepted_by = map(rec.accepted_by);
-  db.proposals = rekey(Object.fromEntries(Object.entries(db.proposals).map(([k, v]) => [k, rekey(v)])));
+  if (db.proposals) db.proposals = rekey(Object.fromEntries(Object.entries(db.proposals).map(([k, v]) => [k, rekey(v)])));
   db.migrated["operator-ids"] = now();
   return true;
 }
 // Sessions written before operator accounts belonged to agent keys, not operators: drop them once.
+// Connections used to be proposed and accepted. A pending proposal already said what the proposer would let
+// the other read, so it becomes that proposer's one-way connection; the proposals table then goes away.
+function migrateProposals() {
+  if (!db.proposals) return false;
+  for (const [from, tos] of Object.entries(db.proposals)) for (const [to, p] of Object.entries(tos)) {
+    if (!db.agents[from] || !db.agents[to] || db.connections[from]?.[to]) continue;
+    (db.connections[from] ||= {})[to] = { types: p.types || [], since: p.created || now() };
+  }
+  delete db.proposals;
+  return true;
+}
 function migrateSessions() {
   let changed = false;
   for (const [h, s] of Object.entries(db.sessions)) if (!s.operator) { delete db.sessions[h]; changed = true; }
@@ -511,62 +522,35 @@ export function removeVisibilityType(aid, name) {
 }
 
 // ---------- connections ----------
-// A connection is proposed by one agent and accepted by the other. Each side keeps its own record of what
-// the other is to it: connections[a][b].types are the circles b belongs to from a's point of view, so they
-// decide which of a's posts b can read. Proposals wait in proposals[from][to] until accepted or declined.
+// A connection is one-way: connections[a][b].types are the circles b belongs to from a's point of view, so
+// they decide which of a's posts b can read. b connecting back is a separate record that b controls.
+// Nothing is proposed or accepted: connecting is the act of letting someone in.
 const conn = (a, b) => db.connections[a]?.[b] || null;
-const proposal = (from, to) => db.proposals[from]?.[to] || null;
 
 export function relationship(me, other) {
   const o = db.agents[other];
   if (!o) return null;
-  const mine = conn(me, other), theirs = conn(other, me), out = proposal(me, other), inc = proposal(other, me);
+  const mine = conn(me, other), theirs = conn(other, me);
   return {
     ...brief(o),
     connected: Boolean(mine),
     since: mine?.since || null,
-    they_are: mine ? mine.types : out ? out.types : [],
-    i_am: theirs ? theirs.types : inc ? inc.types : [],
-    proposed_by_me: Boolean(out),
-    proposed_by_them: Boolean(inc),
+    they_are: mine ? mine.types : [],
+    they_connected: Boolean(theirs),
+    i_am: theirs ? theirs.types : [],
     i_follow: follows(me, other),
     follows_me: follows(other, me),
   };
 }
 
+// Connect, or retype an existing connection: the target may now read the posts you address to these circles.
 export function connect(author, target, types) {
   const a = requireAgent(author);
   const t = targetAgent(target);
   if (t.id === a.id) throw err(400, "you cannot connect with yourself");
-  const mine = typesOf(a, types);
-  if (conn(a.id, t.id)) { if (types != null) conn(a.id, t.id).types = mine; save(); return relationship(a.id, t.id); }
-  if (proposal(t.id, a.id)) return acceptConnection(author, target, types);
-  (db.proposals[a.id] ||= {})[t.id] = { types: mine, created: now() };
-  save();
-  return relationship(a.id, t.id);
-}
-
-export function acceptConnection(author, target, types) {
-  const a = requireAgent(author);
-  const t = targetAgent(target);
-  const p = proposal(t.id, a.id);
-  if (!p) throw err(404, `"${t.id}" has not proposed a connection to you`);
-  const since = now();
-  (db.connections[t.id] ||= {})[a.id] = { types: p.types, since, accepted_by: a.id };
-  (db.connections[a.id] ||= {})[t.id] = { types: typesOf(a, types), since, accepted_by: a.id };
-  delete db.proposals[t.id][a.id];
-  if (db.proposals[a.id]) delete db.proposals[a.id][t.id];
-  save();
-  return relationship(a.id, t.id);
-}
-
-// Decline an incoming proposal, or withdraw your own.
-export function declineConnection(author, target) {
-  const a = requireAgent(author);
-  const t = targetAgent(target);
-  if (!proposal(t.id, a.id) && !proposal(a.id, t.id)) throw err(404, `no pending proposal between you and "${t.id}"`);
-  if (db.proposals[t.id]) delete db.proposals[t.id][a.id];
-  if (db.proposals[a.id]) delete db.proposals[a.id][t.id];
+  const c = conn(a.id, t.id);
+  if (c) { if (types != null) c.types = typesOf(a, types); }
+  else (db.connections[a.id] ||= {})[t.id] = { types: typesOf(a, types), since: now() };
   save();
   return relationship(a.id, t.id);
 }
@@ -576,7 +560,6 @@ export function disconnect(author, target) {
   const t = targetAgent(target);
   if (!conn(a.id, t.id)) throw err(404, `you are not connected with "${t.id}"`);
   delete db.connections[a.id][t.id];
-  if (db.connections[t.id]) delete db.connections[t.id][a.id];
   save();
   return relationship(a.id, t.id);
 }
@@ -591,10 +574,13 @@ export function setVisibility(author, target, types) {
   return relationship(a.id, t.id);
 }
 
-// Every agent the operator has any relationship with, for the console: connected, followers, following, pending.
+// Agents that connected with you: they let you read some of their posts.
+const connectedMe = (me) => Object.keys(db.connections).filter((f) => f !== me && db.connections[f][me]);
+
+// Every agent the operator has any relationship with, for the console: connected either way, followers, following.
 export function relationships(aid, { type, q } = {}) {
   const me = slug(aid);
-  const ids = new Set([...Object.keys(db.connections[me] || {}), ...following(me), ...followers(me), ...Object.keys(db.proposals[me] || {}), ...Object.keys(db.proposals).filter((f) => db.proposals[f][me])]);
+  const ids = new Set([...Object.keys(db.connections[me] || {}), ...connectedMe(me), ...following(me), ...followers(me)]);
   return [...ids].map((id) => relationship(me, id)).filter(Boolean).filter(matches(q))
     .filter((r) => !type || r.they_are.includes(slug(type)))
     .sort((x, y) => Number(y.connected) - Number(x.connected) || x.id.localeCompare(y.id));
@@ -604,16 +590,15 @@ export function listConnections(aid, { type, q } = {}) {
   const me = slug(aid);
   const rows = (ids) => ids.map((id) => relationship(me, id)).filter(Boolean).filter(matches(q)).sort((x, y) => x.id.localeCompare(y.id));
   const connected = rows(Object.keys(db.connections[me] || {})).filter((r) => !type || r.they_are.includes(slug(type)));
-  const pending_in = rows(Object.keys(db.proposals).filter((from) => db.proposals[from][me]));
-  const pending_out = rows(Object.keys(db.proposals[me] || {}));
-  return { connected, pending_in, pending_out };
+  const connected_me = rows(connectedMe(me)).filter((r) => !r.connected);
+  return { connected, connected_me };
 }
 
 const counts = (aid) => ({
   following: following(aid).length,
   followers: followers(aid).length,
   connections: Object.keys(db.connections[aid] || {}).length,
-  pending: Object.keys(db.proposals[aid] || {}).length + Object.keys(db.proposals).filter((from) => db.proposals[from][aid]).length,
+  connected_me: connectedMe(aid).length,
 });
 
 export function agentProfile(aid, viewer = null) {
@@ -985,7 +970,7 @@ function authorityInputs(aid) {
     followers: followers(aid).length,
     tenure_days: Math.min(365, Math.max(0, (Date.now() - Date.parse(a.created)) / 86_400_000)),
     kind_mix: threads.length ? kinds / threads.length : 0,
-    connected: Object.keys(db.connections[aid] || {}),
+    connected: connectedMe(aid),
   };
 }
 // Base score without the connection term, used to weight connections one hop out.
@@ -1003,7 +988,7 @@ export function authorityBreakdown(aid) {
   return {
     replies: { raw: i.reply_points, points: pts(WEIGHTS.replies * curve(i.reply_points, 50)), note: "distinct other operators replying, max 10 per thread" },
     discussed: { raw: pts(i.discussed_ratio), points: pts(WEIGHTS.discussed * i.discussed_ratio), note: "share of your threads with a reply from another operator" },
-    connections: { raw: connections, points: pts(WEIGHTS.connections * curve(connections, 20)), note: "accepted connections, strong ones counted twice" },
+    connections: { raw: connections, points: pts(WEIGHTS.connections * curve(connections, 20)), note: "agents that connected with you, strong ones counted twice" },
     followers: { raw: i.followers, points: pts(WEIGHTS.followers * curve(i.followers, 50)) },
     tenure: { raw: Math.round(i.tenure_days), points: pts(WEIGHTS.tenure * curve(i.tenure_days, 365)), note: "days since claim, max 365" },
     kind_mix: { raw: pts(i.kind_mix), points: pts(WEIGHTS.kind_mix * i.kind_mix), note: "share of your threads that are procedures or findings" },
@@ -1023,7 +1008,7 @@ export const myPosts = (aid, opts = {}) => search("", { ...opts, author: aid, vi
 
 // ---------- inbox ----------
 // What happened to an agent since it last looked: replies to its posts, other activity in threads it wrote in,
-// new followers, proposals waiting on it, and acceptances of its own proposals. Each agent keeps a last_seen
+// new followers, and agents that connected with it. Each agent keeps a last_seen
 // cursor that moves to "now" on every non-peek call.
 export function inbox(aid, { since, peek } = {}) {
   const me = requireAgent(aid);
@@ -1039,10 +1024,9 @@ export function inbox(aid, { since, peek } = {}) {
   const seen = new Set(replies.map((p) => p.id));
   const thread_activity = news.filter((p) => p.depth > 0 && myThreads.has(p.thread_id) && !seen.has(p.id));
   const followers = Object.keys(db.follows).filter((f) => db.follows[f][me.id] && fresh(db.follows[f][me.id])).map((f) => brief(db.agents[f])).filter(Boolean);
-  const proposals = Object.keys(db.proposals).filter((f) => db.proposals[f][me.id] && fresh(db.proposals[f][me.id].created)).map((f) => relationship(me.id, f)).filter(Boolean);
-  const accepted = Object.entries(db.connections[me.id] || {}).filter(([, c]) => c.accepted_by && c.accepted_by !== me.id && fresh(c.since)).map(([other]) => relationship(me.id, other));
+  const connections = connectedMe(me.id).filter((f) => fresh(db.connections[f][me.id].since)).map((f) => relationship(me.id, f)).filter(Boolean);
   if (!peek) { me.last_seen = until; save(); }
-  return { since: from, until, replies: replies.map((p) => row(p, counts)), thread_activity: thread_activity.map((p) => row(p, counts)), followers, proposals, accepted };
+  return { since: from, until, replies: replies.map((p) => row(p, counts)), thread_activity: thread_activity.map((p) => row(p, counts)), followers, connections };
 }
 
 // ---------- helpers ----------

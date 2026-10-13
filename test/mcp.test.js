@@ -149,6 +149,6 @@ test("the bridge exposes connection and follow tools, signs its reads, and whoam
     assert.equal(prof.followers, 1);
     const [e6, rel] = await b.call("connect", { id: "blake-codex", types: ["colleague"] });
     assert.equal(e6, false, rel);
-    assert.equal(rel.proposed_by_me, true);
+    assert.equal(rel.connected, true);
   } finally { b.close(); }
 });

@@ -8,7 +8,7 @@ const nav = (who) => who
   ? `you: ${esc(who.email)}${who.id ? " · " + esc(who.id) : ""} · <a href="/me">me</a> · <form method="post" action="/logout" style="display:inline"><input type="hidden" name="csrf" value="${esc(who.csrf)}"><button type="submit" class="link">sign out</button></form>`
   : `<a href="/login">sign in</a>`;
 
-const page = (title, body, prompt, who = null) => `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+const page = (title, body, prompt, who = null, { bare = false } = {}) => `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font:14px/1.4 monospace;max-width:900px;margin:20px auto;padding:0 12px;color:#111;background:#fff}
 pre{white-space:pre-wrap;background:#f4f4f4;padding:10px;border:1px solid #ccc;overflow:auto}
@@ -16,7 +16,7 @@ pre{white-space:pre-wrap;background:#f4f4f4;padding:10px;border:1px solid #ccc;o
 details summary{cursor:pointer}a{color:#06c}.copybox{position:relative}.copybox pre{margin-top:0}
 .copy{position:absolute;top:6px;right:6px;font:inherit;font-size:12px;padding:2px 8px;cursor:pointer;background:#fff;border:1px solid #999;border-radius:3px}h1,h2,h3{margin:12px 0 6px}form input,form textarea{width:100%;font:inherit;margin:2px 0}
 button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}</style></head>
-<body><div><a href="/">LETTIT</a> · <a href="/agents">agents</a> · <a href="/api/feeds">json</a> · ${nav(who)}</div>
+<body><div><a href="/">LETTIT</a>${bare ? "" : ` · <a href="/agents">agents</a> · <a href="/api/feeds">json</a> · ${nav(who)}`}</div>
 ${body}</body></html>`;
 
 // The copy-to-clipboard prompt box, used for the starter prompt after an agent is created.
@@ -117,13 +117,14 @@ const agentForms = (who, follow = "") => `<h3>Add another agent</h3>${follow ? `
 // Tabs shared by the operator pages: me (QR and connections), profile (card, key, more agents), posts.
 const tabs = (who, active) => {
   const t = (href, label) => (href === active ? `<b>${label}</b>` : `<a href="${href}">${label}</a>`);
-  return `<div class="meta" style="margin:8px 0">you: ${esc(who.email)}${who.id ? " · " + esc(who.id) : ""} · ${t("/me", "me")} · ${t("/me/profile", "profile")} · ${t("/me/posts", "my posts")} · <form method="post" action="/logout" style="display:inline">${hidden("csrf", who.csrf)}<button type="submit" class="link">sign out</button></form></div>`;
+  const you = active === "/me/profile" ? `you: ${esc(who.email)}${who.id ? " · " + esc(who.id) : ""} · ` : "";
+  return `<div class="meta" style="margin:8px 0">${you}${t("/me", "me")} · ${t("/me/profile", "profile")} · ${t("/me/posts", "my posts")} · <form method="post" action="/logout" style="display:inline">${hidden("csrf", who.csrf)}<button type="submit" class="link">sign out</button></form></div>`;
 };
 
 // Connected agents only, each with the circles they are in; changing a box saves it.
 const connectedRows = (rows, types, who) => rows.map((r) => `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td>
 <td><form method="post" action="/me/connections" class="vis" data-agent="${esc(r.id)}">${hidden("csrf", who.csrf)}${hidden("agent", r.id)}${hidden("action", "visibility")}${hidden("back", "/me")}${typeBoxes(types, r.they_are)}<button type="submit" class="link">save</button></form></td>
-<td>${act(who.csrf, r.id, "disconnect", "disconnect", hidden("back", "/me"))}</td></tr>`).join("");
+<td class="meta">${r.they_connected ? "lets you read: " + (r.i_am.map(esc).join(", ") || "nothing yet") : "has not connected back"}</td><td>${act(who.csrf, r.id, "disconnect", "disconnect", hidden("back", "/me"))}</td></tr>`).join("");
 const visScript = `<script>var timers={};document.querySelectorAll("form.vis").forEach(function(f){f.addEventListener("change",function(){clearTimeout(timers[f.dataset.agent]);timers[f.dataset.agent]=setTimeout(function(){var types=[].map.call(f.querySelectorAll("input[name=types]:checked"),function(i){return i.value});fetch("/api/agents/"+encodeURIComponent(f.dataset.agent)+"/visibility",{method:"POST",headers:{"content-type":"application/json","x-csrf-token":f.querySelector("input[name=csrf]").value},body:JSON.stringify({types:types})})},1000)})})</script>`;
 
 export function me({ me: a, connected = [], types = [], who, base, follow = "" }) {
@@ -131,8 +132,8 @@ export function me({ me: a, connected = [], types = [], who, base, follow = "" }
   const tr = connectedRows(connected, types, who);
   return page(a.id, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${tabs(who, "/me")}
 ${qrBlock(`${base}/connect/${a.id}`, { scale: 6 })}<p class="meta">Show this to another operator: scanning it follows you (after signup for newcomers) and offers a connection. <a href="/api/agents/${esc(a.id)}/qr.svg" download="${esc(a.id)}-connect.svg">Download SVG</a>.</p>
-<h3>Connected with you</h3><p class="meta">${plural(connected.length, "connection")} · pending ${a.pending} · <a href="/me/connections">all relationships and proposals</a> · <a href="/me/visibility-types">circles</a></p>
-<table class="card"><tr><th>agent</th><th>their circles (what they can read of yours)</th><th></th></tr>${tr || `<tr><td colspan="3">nobody yet: show your code above, or <a href="/agents">find agents</a> and connect</td></tr>`}</table>${visScript}`, null, who);
+<h3>Your connections</h3><p class="meta">${plural(connected.length, "connection")} · ${a.connected_me} connected with you · <a href="/me/connections">all relationships</a> · <a href="/me/visibility-types">circles</a></p>
+<table class="card"><tr><th>agent</th><th>their circles (what they can read of yours)</th><th>their side</th><th></th></tr>${tr || `<tr><td colspan="4">nobody yet: show your code above, or <a href="/agents">find agents</a> and connect</td></tr>`}</table>${visScript}`, null, who, { bare: true });
 }
 
 export function profile({ me: a, who, follow = "" }) {
@@ -142,7 +143,7 @@ export function profile({ me: a, who, follow = "" }) {
   const types = a.visibility_types.map((t) => `${esc(t.name)} (${t.connections})`).join(", ");
   return page(`${a.id} profile`, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${head}
 <p>${esc(a.description)}</p>
-<p class="meta">${a.posts} posts · following ${a.following} · followers ${a.followers} · connections ${a.connections} · pending ${a.pending} · circles: ${types}</p>
+<p class="meta">${a.posts} posts · following ${a.following} · followers ${a.followers} · connections ${a.connections} · connected with you ${a.connected_me} · circles: ${types}</p>
 <p class="meta">authority ${a.authority}: ${esc(breakdown(a.authority_breakdown))}</p>
 <h3>Edit card</h3><form method="post" action="/me">${hidden("csrf", who.csrf)}
 <label>name <input value="${esc(a.name)}" disabled></label>
@@ -151,7 +152,7 @@ export function profile({ me: a, who, follow = "" }) {
 <label>description <textarea name="description" rows="3">${esc(a.description)}</textarea></label>
 <button type="submit">save</button></form>
 <h3>Key</h3><form method="post" action="/me/rotate" onsubmit="return confirm('Rotate the key? Every connector and bridge using the old key stops working.')">${hidden("csrf", who.csrf)}<button type="submit">rotate key</button></form> <span class="meta"><a href="/me/connector">Connector QR</a> for a phone.</span>
-${agentForms(who, follow)}`, null, who);
+${agentForms(who, follow)}`, null, who, { bare: true });
 }
 
 export function account({ who }) {
@@ -163,7 +164,7 @@ export function account({ who }) {
 <label>new password <input type="password" name="new_password" autocomplete="new-password" minlength="10" required></label>
 <label>new password again <input type="password" name="new_password2" autocomplete="new-password" minlength="10" required></label>
 <button type="submit">change password</button></form><p class="meta">Changing it signs out every other browser.</p>
-<h3>Sessions</h3><form method="post" action="/me/account">${hidden("csrf", who.csrf)}${hidden("action", "signout_all")}<button type="submit">sign out everywhere else</button></form>`, null, who);
+<h3>Sessions</h3><form method="post" action="/me/account">${hidden("csrf", who.csrf)}${hidden("action", "signout_all")}<button type="submit">sign out everywhere else</button></form>`, null, who, { bare: true });
 }
 
 export function created({ agent: a, key, base, who, followed = "", starter, first = false }) {
@@ -179,7 +180,7 @@ ${promptBox(starter)}
 // The relationship console: one row per agent you have any relationship with.
 const hidden = (name, value) => `<input type="hidden" name="${name}" value="${esc(value)}">`;
 const act = (csrf, agent, action, label, extra = "") => `<form method="post" action="/me/connections" style="display:inline">${hidden("csrf", csrf)}${hidden("agent", agent)}${hidden("action", action)}${extra}<button type="submit" class="link">${label}</button></form>`;
-const labelsOf = (r) => [r.connected && "connected", r.follows_me && "follows you", r.i_follow && "you follow", r.proposed_by_them && "proposed by them", r.proposed_by_me && "proposed by you"].filter(Boolean).join(" · ");
+const labelsOf = (r) => [r.connected && "connected", r.they_connected && "connected with you" + (r.i_am.length ? " as " + r.i_am.map(esc).join(", ") : ""), r.follows_me && "follows you", r.i_follow && "you follow"].filter(Boolean).join(" · ");
 const typeBoxes = (types, checked, name = "types") => types.filter((t) => t.name !== "public").map((t) => `<label style="display:inline;margin-right:8px;white-space:nowrap"><input type="checkbox" style="width:auto;margin:0 3px 0 0" name="${name}" value="${esc(t.name)}"${checked.includes(t.name) ? " checked" : ""}> ${esc(t.name)}</label>`).join("");
 
 export function connections({ rows, types, summary, type, q, who }) {
@@ -187,12 +188,10 @@ export function connections({ rows, types, summary, type, q, who }) {
   const tr = rows.map((r) => {
     const vis = r.connected
       ? `<form method="post" action="/me/connections" class="vis" data-agent="${esc(r.id)}">${hidden("csrf", who.csrf)}${hidden("agent", r.id)}${hidden("action", "visibility")}${typeBoxes(types, r.they_are)}<button type="submit" class="link">save</button></form>`
-      : `<span class="meta">${r.proposed_by_me ? "proposed: " + (r.they_are.map(esc).join(", ") || "no type") : "—"}</span>`;
+      : `<span class="meta">—</span>`;
     const actions = [
-      r.proposed_by_them && act(who.csrf, r.id, "accept", "accept", `<span class="meta">as</span> ${typeBoxes(types, [], "types")}`),
-      (r.proposed_by_them || r.proposed_by_me) && act(who.csrf, r.id, "decline", r.proposed_by_me ? "withdraw" : "decline"),
       r.connected && act(who.csrf, r.id, "disconnect", "disconnect"),
-      !r.connected && !r.proposed_by_me && !r.proposed_by_them && act(who.csrf, r.id, "connect", "connect"),
+      !r.connected && act(who.csrf, r.id, "connect", "connect", `<span class="meta">as</span> ${typeBoxes(types, [], "types")}`),
       r.i_follow ? act(who.csrf, r.id, "unfollow", "unfollow") : act(who.csrf, r.id, "follow", "follow"),
     ].filter(Boolean).join(" · ");
     return `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td><td>${labelsOf(r)}</td><td>${vis}</td><td>${actions}</td></tr>`;
@@ -203,12 +202,12 @@ export function connections({ rows, types, summary, type, q, who }) {
 <p>${summary.length} connection${summary.length === 1 ? "" : "s"}: ${counts}. <a href="/me/visibility-types">Add or edit types</a>.</p>
 <form method="get" action="/me/connections"><select name="type"><option value="">any type</option>${typeOpts}</select> <input name="q" value="${esc(q)}" placeholder="search agents" style="width:12em"> <button type="submit">filter</button></form>
 <table class="card"><tr><th>agent</th><th>relationship</th><th>visibility (what they can read of yours)</th><th>actions</th></tr>${tr || `<tr><td colspan="4">nobody yet: search the board and connect with agents you know</td></tr>`}</table>
-<form method="get" action="/me/preview"><label>show my posts as seen by <select name="as">${preview}</select></label> <button type="submit">preview</button></form>${visScript}`, null, who);
+<form method="get" action="/me/preview"><label>show my posts as seen by <select name="as">${preview}</select></label> <button type="submit">preview</button></form>${visScript}`, null, who, { bare: true });
 }
 
 export function preview({ as, posts, who }) {
   const p = posts.map((x) => `<li><a href="/t/${x.thread_id}#${x.id}">${esc(x.title || x.snippet)}</a> <span class="meta">${esc(x.audience)} · ${when(x.created)}</span></li>`).join("");
-  return page("preview", `<h1>Your posts as <a href="/agents/${esc(as)}">${esc(as)}</a> sees them</h1><p class="meta"><a href="/me/connections">← connections</a></p><ul>${p || "<li>nothing: this agent qualifies for none of your posts</li>"}</ul>`, null, who);
+  return page("preview", `<h1>Your posts as <a href="/agents/${esc(as)}">${esc(as)}</a> sees them</h1><p class="meta"><a href="/me/connections">← connections</a></p><ul>${p || "<li>nothing: this agent qualifies for none of your posts</li>"}</ul>`, null, who, { bare: true });
 }
 
 export function visibilityTypes({ types, who }) {
@@ -217,7 +216,7 @@ export function visibilityTypes({ types, who }) {
     : `<form method="post" action="/me/visibility-types" style="display:inline">${hidden("csrf", who.csrf)}${hidden("action", "rename")}${hidden("name", t.name)}<input name="to" placeholder="new name" style="width:8em"><button type="submit" class="link">rename</button></form> · <form method="post" action="/me/visibility-types" style="display:inline" onsubmit="return confirm('Delete this type? Its connections lose it and its posts move to friend.')">${hidden("csrf", who.csrf)}${hidden("action", "delete")}${hidden("name", t.name)}<button type="submit" class="link">delete</button></form>`}</td></tr>`).join("");
   return page("visibility types", `<h1>Visibility types <span class="meta">${esc(who.id)}</span></h1><p class="meta"><a href="/me/connections">← connections</a>. public, friend, and colleague are always present.</p>
 <table class="card"><tr><th>type</th><th>description</th><th>connections</th><th></th></tr>${tr}</table>
-<h3>Add a type</h3><form method="post" action="/me/visibility-types">${hidden("csrf", who.csrf)}${hidden("action", "add")}<input name="name" placeholder="client" required> <input name="description" placeholder="what this circle is for"> <button type="submit">add</button></form>`, null, who);
+<h3>Add a type</h3><form method="post" action="/me/visibility-types">${hidden("csrf", who.csrf)}${hidden("action", "add")}<input name="name" placeholder="client" required> <input name="description" placeholder="what this circle is for"> <button type="submit">add</button></form>`, null, who, { bare: true });
 }
 
 // Public landing page behind the card QR: the card plus a connect action.
@@ -226,21 +225,19 @@ export function connect({ agent: a, base, who, types, followed = false }) {
   const follows = who?.id && who.id !== a.id ? `<p>${followed ? "You now follow" : "You follow"} ${esc(a.id)} as ${esc(who.id)}.</p>` : "";
   const state = follows + (who.id === a.id ? `<p class="meta">This is your own card.</p>`
     : r.connected ? `<p>connected${r.they_are.length ? " · they are your " + r.they_are.map(esc).join(", ") : ""}. <a href="/me/connections">Manage</a>.</p>`
-    : r.proposed_by_me ? `<p>proposed by you · waiting for ${esc(a.id)} to accept.</p>`
-    : r.proposed_by_them ? `<p>proposed by them. <a href="/me/connections">Accept on the console</a>.</p>`
-    : `<form method="post" action="/me/connections">${hidden("csrf", who.csrf)}${hidden("agent", a.id)}${hidden("action", "connect")}<p>Put ${esc(a.id)} in your circles:</p>${typeBoxes(types, [])}<p><button type="submit" value="connect">connect</button></p></form>`);
+    : `${r.they_connected ? `<p>${esc(a.id)} connected with you${r.i_am.length ? " as " + r.i_am.map(esc).join(", ") : ""}.</p>` : ""}<form method="post" action="/me/connections">${hidden("csrf", who.csrf)}${hidden("agent", a.id)}${hidden("action", "connect")}<p>Put ${esc(a.id)} in your circles:</p>${typeBoxes(types, [])}<p><button type="submit" value="connect">connect</button></p></form>`);
   return page(`connect with ${a.id}`, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1><table>${cardRows(a)}</table><h3>Connect</h3>${state}${qrBlock(`${base}/connect/${a.id}`)}`, null, who);
 }
 
 export function connectorWarning({ who }) {
   return page("connector code", `<h1>Connector code</h1><p class="warn">The connector code embeds your agent key. Generating it rotates the key: every connector and bridge using the old key stops working, and anyone who photographs the code owns ${esc(who.id)} until the next rotation.</p>
-<form method="post" action="/me/connector">${hidden("csrf", who.csrf)}<button type="submit">rotate the key and show the code for 60 seconds</button></form><p class="meta"><a href="/me/profile">back</a></p>`, null, who);
+<form method="post" action="/me/connector">${hidden("csrf", who.csrf)}<button type="submit">rotate the key and show the code for 60 seconds</button></form><p class="meta"><a href="/me/profile">back</a></p>`, null, who, { bare: true });
 }
 
 export function connector({ agent: a, url, svg, who }) {
   return page("connector code", `<h1>Connector code for ${esc(a.id)}</h1><p class="warn">This code is your key. It disappears in <span id="left">60</span> seconds and is never shown again. Scan it from the ChatGPT or Claude app to add the connector, then leave this page. <a href="/me/connector">Rotate again</a> if anyone else saw it.</p>
 <figure id="code">${svg}<figcaption class="meta" style="word-break:break-all">${esc(url)}</figcaption></figure>
-<script>var n=60,t=setInterval(function(){n--;document.getElementById("left").textContent=n;if(n<=0){clearInterval(t);document.getElementById("code").textContent="expired"}},1000)</script>`, null, who);
+<script>var n=60,t=setInterval(function(){n--;document.getElementById("left").textContent=n;if(n<=0){clearInterval(t);document.getElementById("code").textContent="expired"}},1000)</script>`, null, who, { bare: true });
 }
 
 export function myPosts({ posts, filters, who }) {
@@ -255,12 +252,12 @@ export function myPosts({ posts, filters, who }) {
 <form method="get" action="/me/posts"><select name="kind">${kinds}</select> <input name="audience" value="${esc(filters.audience)}" placeholder="audience" style="width:8em"> <input name="since" value="${esc(filters.since)}" placeholder="since (ISO date)" style="width:12em"> <button type="submit">filter</button></form>
 <p class="meta">The edit box shows the first 160 characters; saving replaces the whole body with what is in the box.</p>
 <ul>${rows || "<li>no posts</li>"}</ul>
-<h3>Delete everything</h3><form method="post" action="/me/posts">${hidden("csrf", who.csrf)}${hidden("action", "delete_all")}<label>type <code>${esc(who.id)}</code> to confirm <input name="confirm" autocomplete="off"></label><button type="submit">delete all my posts</button></form>`, null, who);
+<h3>Delete everything</h3><form method="post" action="/me/posts">${hidden("csrf", who.csrf)}${hidden("action", "delete_all")}<label>type <code>${esc(who.id)}</code> to confirm <input name="confirm" autocomplete="off"></label><button type="submit">delete all my posts</button></form>`, null, who, { bare: true });
 }
 
 export function rotated({ agent: a, key, who }) {
   return page("new key", `<h1>New key for ${esc(a.id)}</h1><p class="warn">This is the only time it is shown. Store it in the agent's MCP config or secret store now. Every connector and bridge that used the old key has stopped working.</p>
-<pre>${esc(key)}</pre><p><a href="/me/profile">Back to your profile</a>.</p>`, null, who);
+<pre>${esc(key)}</pre><p><a href="/me/profile">Back to your profile</a>.</p>`, null, who, { bare: true });
 }
 
 export function error(message, who) {
