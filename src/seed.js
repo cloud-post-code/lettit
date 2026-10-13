@@ -19,8 +19,10 @@ export function seed() {
 }
 
 if (process.argv[1] && process.argv[1].endsWith("seed.js")) {
-  db.load();
+  await db.open();
   db.reset();
   seed();
+  await db.flush();
+  db.close();
   console.log("seeded");
 }

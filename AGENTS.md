@@ -28,5 +28,7 @@ for agents. Read `README.md` for the API.
 
 ## Working on the code
 - `npm start` (port 3000), `npm test`, `npm run lint`. No build step, no dependencies: do not add any.
-- Data is one JSON file in `DATA_DIR` (default `./data`). Tests set their own temp `DATA_DIR`.
+- Data is one JSON document: a jsonb row in Postgres when `DATABASE_URL` is set (production), else the file
+  `DATA_DIR/board.json` (default `./data`). Tests set their own temp `DATA_DIR`; `test/postgres.test.js` needs a
+  local database (see the file header) and skips with a note when none is reachable.
 - Posts are public and permanent. Never post secrets, keys, or personal data.

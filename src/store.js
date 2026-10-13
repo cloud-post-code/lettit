@@ -1,9 +1,12 @@
-// Tiny JSON-file store. One file, loaded into memory, written on every change.
+// The store: one JSON document loaded into memory, written on every change. With DATABASE_URL set it is a
+// jsonb row in Postgres (production); without it, a file in DATA_DIR (tests and local runs).
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { LEGACY_IDS } from "./tools.js";
+import * as pg from "./pg.js";
 
+const DATABASE_URL = process.env.DATABASE_URL || "";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
@@ -11,9 +14,28 @@ const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connection
 
 let db = empty();
 
+export const backend = () => (DATABASE_URL ? "postgres" : "file");
+
+// Opens the store: Postgres when DATABASE_URL is set, else the file. The server awaits this once.
+export async function open() {
+  if (!DATABASE_URL) return load();
+  await sql("create table if not exists board (id int primary key check (id = 1), doc jsonb not null, updated timestamptz not null default now())");
+  const [row] = await sql("select doc::text as doc from board where id = 1");
+  hydrate(row ? JSON.parse(row.doc) : null);
+  await flush();
+  return db;
+}
+
+// File mode only; synchronous so tests can reload in place.
 export function load() {
+  if (DATABASE_URL) throw new Error("load() is for the file store; call open() when DATABASE_URL is set");
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
+  hydrate(fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, "utf8")) : null);
+  return db;
+}
+
+function hydrate(raw) {
+  db = raw ? { ...empty(), ...raw } : empty();
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   if (!db.migrated || typeof db.migrated !== "object") db.migrated = {};
   db.oauth = { clients: {}, codes: {}, tokens: {}, ...(db.oauth || {}) };
@@ -100,10 +122,53 @@ function migrateResources() {
 
 export function save() {
   authorityCache.clear();
+  if (DATABASE_URL) return queueWrite();
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = FILE + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(db, null, 1));
   fs.renameSync(tmp, FILE);
+}
+
+// ---------- postgres ----------
+// The in-memory document is the truth; every save() snapshots it and the newest snapshot is written behind
+// the request, one write at a time. A failed write is retried with the newest snapshot until it lands.
+// jsonb cannot hold U+0000, so that character is dropped from the stored copy.
+let client = null;
+let pending = null;
+let inflight = null;
+
+async function sql(q) {
+  if (!client || client.closed) client = await pg.connect(DATABASE_URL);
+  return client.query(q);
+}
+
+function queueWrite() {
+  pending = JSON.stringify(db).replace(/\\u0000/g, "");
+  if (!inflight) inflight = drain();
+}
+
+async function drain() {
+  while (pending) {
+    const doc = pending;
+    pending = null;
+    try {
+      await sql(`insert into board (id, doc, updated) values (1, ${pg.literal(doc)}::jsonb, now()) on conflict (id) do update set doc = excluded.doc, updated = excluded.updated`);
+    } catch (e) {
+      console.error("postgres write failed, retrying:", e.message);
+      client = null;
+      pending ||= doc;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+  inflight = null;
+}
+
+// Resolves once every queued write has landed. The server awaits it before exiting.
+export const flush = () => inflight || Promise.resolve();
+
+export function close() {
+  if (client) client.end();
+  client = null;
 }
 
 export function reset() {

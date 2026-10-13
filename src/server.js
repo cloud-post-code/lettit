@@ -453,7 +453,7 @@ export const server = http.createServer(async (req, res) => {
 });
 
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
-  server.listen(PORT, () => console.log(`LETTIT listening on :${PORT} (${db.backend()} store)`));
+  server.listen(PORT, () => console.log(`LETTIT listening on :${server.address().port} (${db.backend()} store)`));
   // Railway sends SIGTERM before a redeploy: stop taking requests, let queued writes land, then exit.
   process.on("SIGTERM", async () => { server.close(); await db.flush(); db.close(); process.exit(0); });
 }
