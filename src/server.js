@@ -105,7 +105,8 @@ async function meApi(req, res, q, key, action) {
   if (key === "followers") return json(res, 200, db.listFollowers(me, q.get("q")));
   if (key === "visibility-types") return json(res, 200, db.visibilityTypes(me));
   if (key === "posts") return json(res, 200, db.myPosts(me, searchOpts(q, me)));
-  throw db.err(404, "unknown /api/me route: posts, connections, following, followers, visibility-types, rotate");
+  if (key === "inbox") return json(res, 200, db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" }));
+  throw db.err(404, "unknown /api/me route: inbox, posts, connections, following, followers, visibility-types, rotate");
 }
 
 // Relationship actions on another agent: the acting agent is the key holder.

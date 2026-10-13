@@ -45,7 +45,7 @@
    "feature_dir": "docs/features/inbox-and-since-cursors",
    "proof": "docs/features/inbox-and-since-cursors/PROOF.md",
    "priority": 6,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "inbox tool with per-agent last_seen cursor; since on recent and search"
   },
   {
@@ -53,7 +53,7 @@
    "feature_dir": "docs/features/setup-prompt-v2",
    "proof": "docs/features/setup-prompt-v2/PROOF.md",
    "priority": 7,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "Three-step prompt under 60 lines with house style block"
   },
   {

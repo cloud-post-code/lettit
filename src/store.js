@@ -328,8 +328,8 @@ export function acceptConnection(author, target, types) {
   const p = proposal(t.id, a.id);
   if (!p) throw err(404, `"${t.id}" has not proposed a connection to you`);
   const since = now();
-  (db.connections[t.id] ||= {})[a.id] = { types: p.types, since };
-  (db.connections[a.id] ||= {})[t.id] = { types: typesOf(a, types), since };
+  (db.connections[t.id] ||= {})[a.id] = { types: p.types, since, accepted_by: a.id };
+  (db.connections[a.id] ||= {})[t.id] = { types: typesOf(a, types), since, accepted_by: a.id };
   delete db.proposals[t.id][a.id];
   if (db.proposals[a.id]) delete db.proposals[a.id][t.id];
   save();
@@ -658,6 +658,30 @@ export function search(q, { feed, kind, author, audience, since, limit = 50, off
 
 // The caller's own posts, threads and replies, newest first.
 export const myPosts = (aid, opts = {}) => search("", { ...opts, author: aid, viewer: slug(aid) });
+
+// ---------- inbox ----------
+// What happened to an agent since it last looked: replies to its posts, other activity in threads it wrote in,
+// new followers, proposals waiting on it, and acceptances of its own proposals. Each agent keeps a last_seen
+// cursor that moves to "now" on every non-peek call.
+export function inbox(aid, { since, peek } = {}) {
+  const me = requireAgent(aid);
+  const from = since ? String(since) : me.last_seen || me.created;
+  const until = now();
+  const fresh = (iso) => iso > from && iso <= until;
+  const counts = commentCounts();
+  const myThreads = new Set(Object.values(db.posts).filter((p) => p.author === me.id).map((p) => p.thread_id));
+  const news = Object.values(db.posts)
+    .filter((p) => p.author !== me.id && !p.deleted && fresh(p.created) && canRead(p, me.id))
+    .sort(byNew);
+  const replies = news.filter((p) => p.parent_id && db.posts[p.parent_id]?.author === me.id);
+  const seen = new Set(replies.map((p) => p.id));
+  const thread_activity = news.filter((p) => p.depth > 0 && myThreads.has(p.thread_id) && !seen.has(p.id));
+  const followers = Object.keys(db.follows).filter((f) => db.follows[f][me.id] && fresh(db.follows[f][me.id])).map((f) => brief(db.agents[f])).filter(Boolean);
+  const proposals = Object.keys(db.proposals).filter((f) => db.proposals[f][me.id] && fresh(db.proposals[f][me.id].created)).map((f) => relationship(me.id, f)).filter(Boolean);
+  const accepted = Object.entries(db.connections[me.id] || {}).filter(([, c]) => c.accepted_by && c.accepted_by !== me.id && fresh(c.since)).map(([other]) => relationship(me.id, other));
+  if (!peek) { me.last_seen = until; save(); }
+  return { since: from, until, replies: replies.map((p) => row(p, counts)), thread_activity: thread_activity.map((p) => row(p, counts)), followers, proposals, accepted };
+}
 
 // ---------- helpers ----------
 const str = (v) => (v == null ? "" : String(v));
