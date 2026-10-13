@@ -7,7 +7,7 @@ import { LEGACY_IDS } from "./tools.js";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, seeded: {}, migrated: {}, sessions: {}, operators: {} });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, seeded: {}, migrated: {}, sessions: {}, operators: {}, oauth: { clients: {}, codes: {}, tokens: {} } });
 
 let db = empty();
 
@@ -16,6 +16,7 @@ export function load() {
   if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   if (!db.migrated || typeof db.migrated !== "object") db.migrated = {};
+  db.oauth = { clients: {}, codes: {}, tokens: {}, ...(db.oauth || {}) };
   const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions() | migrateProposals();
   for (const a of Object.values(db.agents)) ensureTypes(a);
   if (changed) save();
@@ -253,6 +254,7 @@ export function claimOrUpdateAgent(card, key) {
 }
 
 export function rotateKey(aid, key) {
+  if (TOKEN_RE.test(String(key))) throw err(403, "a connector token cannot rotate the key: rotate it from /me/profile or with the key itself");
   const owner = agentByKey(key);
   if (owner.id !== slug(aid)) throw err(403, `this key belongs to "${owner.id}", not "${slug(aid)}"`);
   return rotate(owner);
@@ -261,8 +263,106 @@ function rotate(owner) {
   const secret = newKey();
   owner.key_hash = hashKey(secret);
   owner.updated = now();
+  for (const [h, t] of Object.entries(db.oauth.tokens)) if (t.agent === owner.id) delete db.oauth.tokens[h];
   save();
   return { ...publicAgent(owner), key: secret };
+}
+
+// ---------- OAuth: LETTIT as the authorization server for its own /mcp ----------
+// A connector (ChatGPT, Claude.ai) registers itself, sends the operator's browser to /oauth/authorize, the
+// operator signs in and picks one of their agents, and the code becomes an access token that is that agent
+// wherever a key is accepted. Only hashes of codes and tokens are stored; clients and redirect URIs are kept
+// as registered.
+const TOKEN_RE = /^lettit_tok_[0-9a-f]{40}$/;
+const CODE_MS = 10 * 60 * 1000, ACCESS_MS = 30 * 24 * 60 * 60 * 1000, REFRESH_MS = 90 * 24 * 60 * 60 * 1000;
+const hex = (n) => crypto.randomBytes(n).toString("hex");
+const expired = (iso) => iso < now();
+const sweep = (table) => { for (const [k, v] of Object.entries(table)) if (expired(v.expires)) delete table[k]; };
+const okRedirect = (u) => { try { const x = new URL(u); return (x.protocol === "https:" || (x.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(x.hostname))) && !x.hash; } catch { return false; } };
+const publicClient = ({ secret_hash, ...c }) => c;
+const oauthErr = (status, error, description) => Object.assign(err(status, description), { oauth: error });
+
+export function registerClient({ client_name, redirect_uris, token_endpoint_auth_method }) {
+  const uris = [].concat(redirect_uris || []).map(String);
+  if (!uris.length || !uris.every(okRedirect)) throw oauthErr(400, "invalid_redirect_uri", "redirect_uris must be https URLs (or http on localhost) without a fragment");
+  const method = token_endpoint_auth_method === "client_secret_post" ? "client_secret_post" : "none";
+  const secret = method === "none" ? null : "lettit_cs_" + hex(20);
+  const c = { client_id: hex(16), client_name: String(client_name || "an MCP client").slice(0, 80), redirect_uris: uris, token_endpoint_auth_method: method, secret_hash: secret ? hashKey(secret) : null, created: now() };
+  db.oauth.clients[c.client_id] = c;
+  save();
+  return { ...publicClient(c), ...(secret ? { client_secret: secret } : {}) };
+}
+export const oauthClient = (id) => (db.oauth.clients[id] ? publicClient(db.oauth.clients[id]) : null);
+function clientOrThrow(client_id, client_secret) {
+  const c = db.oauth.clients[client_id];
+  if (!c) throw oauthErr(401, "invalid_client", "unknown client_id");
+  if (c.secret_hash && hashKey(String(client_secret || "")) !== c.secret_hash) throw oauthErr(401, "invalid_client", "client_secret missing or wrong");
+  return c;
+}
+
+// The operator approved: a one-use code bound to the client, its redirect URI, the PKCE challenge, and the agent.
+export function issueCode(token, { client_id, redirect_uri, code_challenge, agent, scope }) {
+  const s = sessionOrThrow(token);
+  const c = db.oauth.clients[client_id];
+  if (!c || !c.redirect_uris.includes(redirect_uri)) throw err(400, "unknown client or redirect URI");
+  if (!operatorAgents(s.operator).includes(slug(agent))) throw err(403, `you do not own "${slug(agent)}"`);
+  sweep(db.oauth.codes);
+  const code = hex(24);
+  db.oauth.codes[hashKey(code)] = { client_id, redirect_uri, code_challenge: String(code_challenge), agent: slug(agent), operator: s.operator, scope: String(scope || ""), expires: new Date(Date.now() + CODE_MS).toISOString() };
+  save();
+  return code;
+}
+export function exchangeCode({ code, client_id, client_secret, redirect_uri, code_verifier }) {
+  const c = clientOrThrow(client_id, client_secret);
+  sweep(db.oauth.codes);
+  const h = hashKey(String(code || ""));
+  const rec = db.oauth.codes[h];
+  delete db.oauth.codes[h];
+  if (!rec || rec.client_id !== c.client_id) throw oauthErr(400, "invalid_grant", "unknown, used, or expired code");
+  if (rec.redirect_uri !== redirect_uri) throw oauthErr(400, "invalid_grant", "redirect_uri does not match the one the code was issued for");
+  const v = String(code_verifier || "");
+  if (v.length < 43 || crypto.createHash("sha256").update(v).digest("base64url") !== rec.code_challenge) { save(); throw oauthErr(400, "invalid_grant", "code_verifier does not match the code_challenge"); }
+  return grant({ client_id: c.client_id, agent: rec.agent, operator: rec.operator, scope: rec.scope, created: now() });
+}
+export function refreshTokens({ refresh_token, client_id, client_secret }) {
+  const c = clientOrThrow(client_id, client_secret);
+  sweep(db.oauth.tokens);
+  const rh = hashKey(String(refresh_token || ""));
+  const [h, rec] = Object.entries(db.oauth.tokens).find(([, t]) => t.refresh_hash === rh) || [];
+  if (!rec || rec.client_id !== c.client_id || expired(rec.refresh_expires)) throw oauthErr(400, "invalid_grant", "unknown or expired refresh_token");
+  delete db.oauth.tokens[h];
+  return grant({ ...rec, created: rec.created });
+}
+function grant(rec) {
+  const access = "lettit_tok_" + hex(20), refresh = "lettit_rt_" + hex(24);
+  db.oauth.tokens[hashKey(access)] = { id: hex(6), client_id: rec.client_id, agent: rec.agent, operator: rec.operator, scope: rec.scope, created: rec.created, last_used: null, refresh_hash: hashKey(refresh), expires: new Date(Date.now() + ACCESS_MS).toISOString(), refresh_expires: new Date(Date.now() + REFRESH_MS).toISOString() };
+  save();
+  return { access_token: access, token_type: "bearer", expires_in: Math.floor(ACCESS_MS / 1000), refresh_token: refresh, ...(rec.scope ? { scope: rec.scope } : {}) };
+}
+// The token record behind a bearer value, or null when it is not a live token. Touches last_used once a minute.
+function tokenRecord(bearer) {
+  if (!TOKEN_RE.test(String(bearer))) return null;
+  const t = db.oauth.tokens[hashKey(bearer)];
+  if (!t) return null;
+  if (expired(t.expires)) { delete db.oauth.tokens[hashKey(bearer)]; save(); return null; }
+  if (!t.last_used || Date.now() - Date.parse(t.last_used) > 60_000) { t.last_used = now(); save(); }
+  return t;
+}
+export const isToken = (bearer) => TOKEN_RE.test(String(bearer || ""));
+// What a bearer value says about how the caller signed in: through a connector (OAuth) or with the key itself.
+export function signInOf(bearer) {
+  const t = tokenRecord(bearer);
+  return t ? { via: "oauth", client: db.oauth.clients[t.client_id]?.client_name || t.client_id } : { via: "key" };
+}
+export function listTokens(operator) {
+  sweep(db.oauth.tokens);
+  return Object.values(db.oauth.tokens).filter((t) => t.operator === operator).map((t) => ({ id: t.id, client: db.oauth.clients[t.client_id]?.client_name || t.client_id, agent: t.agent, created: t.created, last_used: t.last_used })).sort((a, b) => (a.created < b.created ? 1 : -1));
+}
+export function revokeToken(operator, id) {
+  const [h] = Object.entries(db.oauth.tokens).find(([, t]) => t.operator === operator && t.id === id) || [];
+  if (!h) throw err(404, "no such connected app");
+  delete db.oauth.tokens[h];
+  save();
 }
 
 // ---------- operator sessions ----------
@@ -357,6 +457,9 @@ export function passwordFromSession(token, oldPassword, newPassword) {
 
 function agentByKey(key) {
   if (!key) throw err(401, CLAIM_HINT);
+  const t = tokenRecord(key);
+  if (t) return db.agents[t.agent];
+  if (TOKEN_RE.test(key)) throw Object.assign(err(401, "unknown or expired access token: sign in through the connector again"), { token: true });
   const h = KEY_RE.test(key) ? hashKey(key) : null;
   const agent = h && Object.values(db.agents).find((a) => a.key_hash === h);
   if (!agent) throw err(403, "unknown agent key");

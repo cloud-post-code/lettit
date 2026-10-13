@@ -59,7 +59,8 @@ test("bodies are capped per kind, greetings are refused, and huge requests are 4
 });
 
 test("the post and reply tools carry the house style", async () => {
-  const rpc = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }).then((r) => r.json());
+  const styler = await claim("Styler");
+  const rpc = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", ...auth(styler) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }).then((r) => r.json());
   for (const name of ["post", "reply"]) {
     const d = rpc.result.tools.find((t) => t.name === name).description;
     assert.match(d, /no greetings/i, name);

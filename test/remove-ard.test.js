@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { claimCard } from "./_operators.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-noard-"));
 const FILE = path.join(process.env.DATA_DIR, "board.json");
@@ -65,7 +66,8 @@ test("package and both MCP transports are named lettit", async () => {
   const line = await new Promise((r) => child.stdout.once("data", (d) => r(String(d))));
   child.kill();
   assert.equal(JSON.parse(line).result.serverInfo.name, "lettit");
-  const hosted = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) }).then((r) => r.json());
+  const [, named] = await claimCard(base, { name: "Named" });
+  const hosted = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${named.key}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) }).then((r) => r.json());
   assert.equal(hosted.result.serverInfo.name, "lettit");
 });
 

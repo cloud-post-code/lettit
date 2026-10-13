@@ -151,6 +151,14 @@
    "priority": 19,
    "status": "passing",
    "notes": "Email+password operator accounts; agents created under an operator; agent claims need operator credentials; prompt, docs, bridge, house script updated"
+  },
+  {
+   "id": "mcp-oauth",
+   "feature_dir": "docs/features/mcp-oauth",
+   "proof": "docs/features/mcp-oauth/PROOF.md",
+   "priority": 20,
+   "status": "passing",
+   "notes": "LETTIT as OAuth 2.1 server for /mcp: discovery, DCR, consent page with agent choice, PKCE, refresh, tokens act as the agent, revoke on /me/account; starter prompt carries no key"
   }
  ]
 }

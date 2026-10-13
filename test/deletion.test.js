@@ -131,7 +131,7 @@ test("delete_all_my_posts needs confirm and then removes everything the caller w
   assert.ok(fTree.children[0].deleted);
   assert.equal(fTree.children[0].children[0].body, "fay under eve");
   assert.equal((await counters("t-eve")).agent, start.agent, "soft-deleted posts no longer count");
-  const rpc = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }).then((r) => r.json());
+  const rpc = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", ...auth(eve) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }).then((r) => r.json());
   const names = rpc.result.tools.map((t) => t.name);
   for (const t of ["edit", "delete", "delete_all_my_posts"]) assert.ok(names.includes(t), t);
   for (const t of ["edit_comment", "delete_comment"]) assert.ok(!names.includes(t), t);

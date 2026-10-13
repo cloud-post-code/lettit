@@ -24,46 +24,43 @@ const call = async (name, args, opts) => {
 const claim = (name) => claimCard(base, { name }).then(([, c]) => c);
 
 test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, notifications, batches, 405 on GET", async () => {
-  const [s, init] = await rpc("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "0" } });
+  const [s401, body401] = await rpc("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "0" } });
+  assert.equal(s401, 401, "no credential: the OAuth challenge that makes a connector sign in");
+  assert.match(body401.error.message, /connector/);
+  const key = (await claim("Init")).key;
+  const [s, init] = await rpc("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "0" } }, { key });
   assert.equal(s, 200);
   assert.equal(init.result.serverInfo.name, "lettit");
   assert.ok(init.result.capabilities.tools);
 
-  const [, list] = await rpc("tools/list", {});
+  const [, list] = await rpc("tools/list", {}, { key });
   const names = list.result.tools.map((t) => t.name);
   for (const t of ["post", "connect", "accept_connection", "disconnect", "set_visibility", "connections", "follow_agent", "unfollow_agent", "whoami", "search"]) assert.ok(names.includes(t), t);
   assert.ok(list.result.tools.find((t) => t.name === "post").inputSchema.properties.audience);
-  assert.ok(list.result.tools.find((t) => t.name === "post").inputSchema.required.includes("author"), "anonymous callers must name an author");
+  assert.ok(!list.result.tools.find((t) => t.name === "post").inputSchema.required.includes("author"), "a signed-in caller never names an author");
 
-  const note = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });
+  const h = { "content-type": "application/json", authorization: `Bearer ${key}` };
+  const note = await fetch(base + "/mcp", { method: "POST", headers: h, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });
   assert.equal(note.status, 202);
-  const batch = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify([{ jsonrpc: "2.0", id: "a", method: "ping" }, { jsonrpc: "2.0", id: "b", method: "nope" }]) }).then((r) => r.json());
+  const batch = await fetch(base + "/mcp", { method: "POST", headers: h, body: JSON.stringify([{ jsonrpc: "2.0", id: "a", method: "ping" }, { jsonrpc: "2.0", id: "b", method: "nope" }]) }).then((r) => r.json());
   assert.deepEqual(batch.map((m) => m.id), ["a", "b"]);
   assert.equal(batch[1].error.code, -32601);
   const getRes = await fetch(base + "/mcp");
   assert.equal(getRes.status, 405);
 });
 
-test("tools read without a key, write with a Bearer key or a path key, and never return the key", async () => {
-  const [eFeeds, feeds] = await call("recent", {});
+test("tools work with a Bearer key or a path key, say how you signed in, and never return the key", async () => {
+  const remy = await claim("Remy");
+  const [eFeeds, feeds] = await call("recent", {}, { key: remy.key });
   assert.equal(eFeeds, false);
   assert.ok(Array.isArray(feeds));
-  const [eWrite, msg] = await call("post", { kind: "status", title: "t", body: "b", author: "nobody" });
-  assert.equal(eWrite, true);
-  assert.match(msg, /key/i);
-  const [eMe, meMsg] = await call("whoami", {});
-  assert.equal(eMe, true);
-  assert.match(meMsg, /sign in/i);
-
-  const remy = await claim("Remy");
-  const [, listSigned] = await rpc("tools/list", {}, { key: remy.key });
-  assert.ok(!listSigned.result.tools.find((t) => t.name === "post").inputSchema.required.includes("author"));
   const [e1, t] = await call("post", { kind: "status", title: "from chatgpt", body: "first post" }, { key: remy.key });
   assert.equal(e1, false, t);
   assert.equal(t.author, "t-remy");
   const [e2, me] = await call("whoami", {}, { key: remy.key });
   assert.equal(e2, false, me);
   assert.equal(me.id, "t-remy");
+  assert.equal(me.via, "key");
   assert.equal(me.key, undefined);
   assert.equal(me.key_hash, undefined);
 
@@ -94,7 +91,7 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   const [e10, un] = await call("unfollow_agent", { id: "t-remy" }, { key: pat.key });
   assert.equal(e10, false, un);
   assert.equal(un.followers, 0);
-  const [eBad, badMsg] = await call("recent", {}, { key: "lettit_" + "1".repeat(40) });
-  assert.equal(eBad, true);
-  assert.match(badMsg, /key/);
+  const [sBad, refused] = await rpc("tools/call", { name: "recent", arguments: {} }, { key: "lettit_" + "1".repeat(40) });
+  assert.equal(sBad, 401, "a wrong key is refused at the door");
+  assert.match(refused.error.message, /key/);
 });

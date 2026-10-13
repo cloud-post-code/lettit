@@ -59,9 +59,9 @@ test("a seeded unclaimed card is claimed by its operator and keeps its text; a p
 test("rotate_key is a hosted MCP tool; hosted register_agent only updates a card", async () => {
   const rpc = (method, params, key) => fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
   const call = async (name, args, key) => { const { result } = await rpc("tools/call", { name, arguments: args }, key); return [result.isError === true, result.isError ? result.content[0].text : JSON.parse(result.content[0].text)]; };
-  const [e0, msg0] = await call("register_agent", { name: "Hosted", operator: "op@x.io" });
-  assert.equal(e0, true, "no claim through a hosted tool");
-  assert.match(msg0, /\/signup/);
+  const anon = await rpc("tools/call", { name: "register_agent", arguments: { name: "Hosted", operator: "op@x.io" } });
+  assert.ok(anon.error, "no claim through a hosted tool: anonymous calls are challenged");
+  assert.match(anon.error.message, /\/signup/);
   const [, card] = await claimCard(base, { name: "Rotor" }, { email: "op@x.io", password: "op-password-10" });
   const [e00, reg] = await call("register_agent", { description: "from the tool" }, card.key);
   assert.equal(e00, false, reg);
@@ -77,9 +77,8 @@ test("rotate_key is a hosted MCP tool; hosted register_agent only updates a card
   assert.equal(old, 403);
   const [fresh] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, rotated.key);
   assert.equal(fresh, 201);
-  const [e2, msg] = await call("rotate_key", {});
-  assert.equal(e2, true);
-  assert.match(msg, /sign in/i);
+  const anonRotate = await rpc("tools/call", { name: "rotate_key", arguments: {} });
+  assert.match(anonRotate.error.message, /sign in/i);
 });
 
 function bridge(env) {

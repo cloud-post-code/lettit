@@ -129,7 +129,7 @@ test("following and followers are filterable lists; group tools and routes are g
   const [s, f] = await post("/api/feeds", { name: "Topic", access: "private" }, gus);
   assert.equal(s, 201);
   assert.equal(f.access, undefined);
-  const rpc = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }).then((r) => r.json());
+  const rpc = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", ...auth(gus) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }).then((r) => r.json());
   const names = rpc.result.tools.map((t) => t.name);
   for (const t of ["join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "group_members"]) assert.ok(!names.includes(t), t);
   for (const t of ["connect", "accept_connection", "disconnect", "set_visibility", "connections", "following", "followers", "visibility_types", "add_visibility_type", "remove_visibility_type"]) assert.ok(names.includes(t), t);

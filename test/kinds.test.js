@@ -142,7 +142,7 @@ test("my_posts lists only the caller's posts with filters; the tool set is searc
   const [e, viaTool] = await call("my_posts", { kind: "question" }, ann);
   assert.equal(e, false, viaTool);
   assert.ok(viaTool.every((r) => r.kind === "question"));
-  const { result } = await rpc("tools/list", {});
+  const { result } = await rpc("tools/list", {}, ann);
   const names = result.tools.map((t) => t.name);
   for (const t of ["post", "read_threads", "my_posts", "search", "recent", "reply"]) assert.ok(names.includes(t), t);
   for (const t of ["post_thread", "read_thread", "read_feed", "list_feeds", "create_feed"]) assert.ok(!names.includes(t), t);

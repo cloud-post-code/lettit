@@ -6,6 +6,7 @@ import * as html from "./html.js";
 import { setupPrompt, starterPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
 import * as qr from "./qr.js";
+import * as oauth from "./oauth.js";
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -143,7 +144,7 @@ async function meApi(req, res, q, key, action) {
     throw db.err(404, "unknown visibility-types action: delete");
   }
   const me = actorOf(req, await readBody(req));
-  if (!key) return json(res, 200, db.me(me));
+  if (!key) return json(res, 200, { ...db.me(me), ...db.signInOf(keyOf(req, null)) });
   if (key === "connections") return json(res, 200, db.listConnections(me, { type: q.get("type"), q: q.get("q") }));
   if (key === "following") return json(res, 200, db.listFollowing(me, q.get("q")));
   if (key === "followers") return json(res, 200, db.listFollowers(me, q.get("q")));
@@ -213,8 +214,12 @@ function threadApi(res, pid, viewer) {
 async function mcpEndpoint(req, res, url) {
   if (req.method !== "POST") return json(res, 405, { error: "POST JSON-RPC 2.0 messages here (MCP Streamable HTTP, stateless). Auth: Authorization: Bearer <agent key>, or /mcp/<key>" });
   const key = keyOf(req, null) || url.pathname.split("/")[2] || "";
+  // No credential, or a dead token: a 401 with WWW-Authenticate is what makes an MCP client start OAuth.
+  const base = baseUrl(req);
+  if (!key) { oauth.challenge(res, base); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: `sign in: add ${base}/mcp as a connector and approve it on LETTIT (sign up at ${base}/signup), or send Authorization: Bearer <agent key>` } }); }
+  try { db.authenticate(key); } catch (e) { oauth.challenge(res, base, e.token ? "invalid_token" : undefined); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: e.message } }); }
   const msg = await readBody(req);
-  const ctx = { signedIn: Boolean(key), invoke: (method, path, body) => invoke(req, method, path, body, key) };
+  const ctx = { signedIn: true, invoke: (method, path, body) => invoke(req, method, path, body, key) };
   const out = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((one) => mcpMessage(one, ctx)))).filter(Boolean);
   if (!out.length) { res.writeHead(202); return res.end(); }
   return json(res, 200, Array.isArray(msg) ? out : out[0]);
@@ -317,7 +322,8 @@ async function console_(req, res, url, s, who) {
     } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, follow: f })); }
     const followed = f && db.getAgent(f) ? db.followFromScan(a.id, f) && f : "";
     res.setHeader("set-cookie", cookieHeader(out.token));
-    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(out.token)), followed, starter: starterPrompt(baseUrl(req), a, a.key), first: true }));
+    const next = b.next && localPath(b.next) !== "/me" ? localPath(b.next) : "";
+    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(out.token)), followed, starter: starterPrompt(baseUrl(req), a), first: true, next }));
   }
   if (!s) return redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
   if (m === "POST") {
@@ -332,7 +338,7 @@ async function console_(req, res, url, s, who) {
     return page(res, 200, html.me({ me: s.current ? db.me(s.current) : null, connected, types: s.current ? db.visibilityTypes(s.current) : [], who, base: baseUrl(req), follow: followOk }));
   }
   if (section === "me" && action === "profile") return page(res, 200, html.profile({ me: s.current ? db.me(s.current) : null, who, follow: followOk }));
-  if (section === "me" && action === "account") return page(res, 200, html.account({ who }));
+  if (section === "me" && action === "account") return page(res, 200, html.account({ who, apps: db.listTokens(s.operator) }));
   if (!s.current) return page(res, 400, html.error("create an agent first: you have none yet", who));
   return consoleGet(req, res, url, section, action, s, who);
 }
@@ -353,7 +359,7 @@ async function consolePost(req, res, section, action, s, who, b) {
     const a = db.createFromSession(token, { name: b.name, contact: b.contact, description: b.description });
     const f = db.slug(b.follow || "");
     const followed = f && db.getAgent(f) ? db.followFromScan(a.id, f) && f : "";
-    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(token)), followed, starter: starterPrompt(baseUrl(req), a, a.key) }));
+    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(token)), followed, starter: starterPrompt(baseUrl(req), a) }));
   }
   if (section === "me" && action === "attach") { db.attachFromSession(token, String(b.key || "")); return redirect(res, "/me"); }
   if (section === "me" && action === "switch") { db.switchSession(token, b.agent); return redirect(res, "/me"); }
@@ -375,6 +381,7 @@ async function consolePost(req, res, section, action, s, who, b) {
 function accountPost(req, res, b, who) {
   const token = tokenOf(req);
   if (b.action === "signout_all") { db.dropOtherSessions(token); return redirect(res, "/me/account"); }
+  if (b.action === "revoke") { db.revokeToken(who.email, String(b.token_id || "")); return redirect(res, "/me/account"); }
   if (b.action === "password") {
     if (String(b.new_password ?? "") !== String(b.new_password2 ?? "")) throw db.err(400, "the two new passwords differ");
     db.passwordFromSession(token, b.password, b.new_password);
@@ -442,6 +449,8 @@ export const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,authorization" }); return res.end(); }
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return await mcpEndpoint(req, res, url);
+    if (url.pathname.startsWith("/.well-known/oauth-")) return json(res, 200, oauth.discovery(baseUrl(req), url.pathname.split("/")[2]));
+    if (url.pathname.startsWith("/oauth/")) return await oauth.handle(req, res, url, { json, page, readBody, readForm, tokenOf, baseUrl, html, whoOf, redirect });
     if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await api(req, res, url); }
     try { return await site(req, res, url); } catch (e) {
       if (!e.status || e.status >= 500) throw e;
