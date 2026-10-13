@@ -30,9 +30,9 @@ test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, no
 
   const [, list] = await rpc("tools/list", {});
   const names = list.result.tools.map((t) => t.name);
-  for (const t of ["create_feed", "connect", "accept_connection", "decline_connection", "disconnect", "set_visibility", "connections", "follow_agent", "unfollow_agent", "whoami", "post_thread"]) assert.ok(names.includes(t), t);
-  assert.ok(list.result.tools.find((t) => t.name === "post_thread").inputSchema.properties.audience);
-  assert.ok(list.result.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"), "anonymous callers must name an author");
+  for (const t of ["post", "connect", "accept_connection", "decline_connection", "disconnect", "set_visibility", "connections", "follow_agent", "unfollow_agent", "whoami", "search"]) assert.ok(names.includes(t), t);
+  assert.ok(list.result.tools.find((t) => t.name === "post").inputSchema.properties.audience);
+  assert.ok(list.result.tools.find((t) => t.name === "post").inputSchema.required.includes("author"), "anonymous callers must name an author");
 
   const note = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });
   assert.equal(note.status, 202);
@@ -44,10 +44,10 @@ test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, no
 });
 
 test("tools read without a key, write with a Bearer key or a path key, and never return the key", async () => {
-  const [eFeeds, feeds] = await call("list_feeds", {});
+  const [eFeeds, feeds] = await call("recent", {});
   assert.equal(eFeeds, false);
-  assert.ok(feeds.some((f) => f.id === "lettit-feedback"));
-  const [eWrite, msg] = await call("post_thread", { feed: "lettit-feedback", title: "t", body: "b", author: "nobody" });
+  assert.ok(feeds.some((f) => f.feed === "lettit-feedback"));
+  const [eWrite, msg] = await call("post", { kind: "status", title: "t", body: "b", author: "nobody" });
   assert.equal(eWrite, true);
   assert.match(msg, /key/i);
   const [eMe, meMsg] = await call("whoami", {});
@@ -56,8 +56,8 @@ test("tools read without a key, write with a Bearer key or a path key, and never
 
   const remy = await claim("Remy");
   const [, listSigned] = await rpc("tools/list", {}, { key: remy.key });
-  assert.ok(!listSigned.result.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"));
-  const [e1, t] = await call("post_thread", { feed: "lettit-feedback", title: "from chatgpt", body: "hello" }, { key: remy.key });
+  assert.ok(!listSigned.result.tools.find((t) => t.name === "post").inputSchema.required.includes("author"));
+  const [e1, t] = await call("post", { kind: "status", title: "from chatgpt", body: "hello" }, { key: remy.key });
   assert.equal(e1, false, t);
   assert.equal(t.author, "t-remy");
   const [e2, me] = await call("whoami", {}, { key: remy.key });
@@ -66,9 +66,10 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   assert.equal(me.key, undefined);
   assert.equal(me.key_hash, undefined);
 
-  const [e3, g] = await call("create_feed", { name: "Remy Room" }, { path: `/mcp/${remy.key}` });
+  const [e3, g] = await call("post", { kind: "finding", body: "via path key" }, { path: `/mcp/${remy.key}` });
   assert.equal(e3, false, g);
-  assert.equal(g.created_by, "t-remy");
+  assert.equal(g.author, "t-remy");
+  assert.equal(g.feed, "findings");
   const pat = await claim("Pat");
   const [e4, prof] = await call("follow_agent", { id: "t-remy" }, { key: pat.key });
   assert.equal(e4, false, prof);
@@ -92,7 +93,7 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   const [e10, un] = await call("unfollow_agent", { id: "t-remy" }, { key: pat.key });
   assert.equal(e10, false, un);
   assert.equal(un.followers, 0);
-  const [eBad, badMsg] = await call("list_feeds", {}, { key: "lettit_" + "1".repeat(40) });
+  const [eBad, badMsg] = await call("recent", {}, { key: "lettit_" + "1".repeat(40) });
   assert.equal(eBad, true);
   assert.match(badMsg, /key/);
 });

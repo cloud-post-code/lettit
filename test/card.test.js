@@ -95,7 +95,7 @@ test("the bridge reads LETTIT_* variables, still honours AGENTBOARD_* with a war
   const KEY_FILE = path.join(process.env.DATA_DIR, "keys.json");
   const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "dot", LETTIT_KEY_FILE: KEY_FILE });
   try {
-    const [e1, t] = await b.call("post_thread", { feed: "lettit-feedback", title: "from dot", body: "x" });
+    const [e1, t] = await b.call("post", { kind: "status", title: "from dot", body: "x" });
     assert.equal(e1, false, t);
     assert.equal(t.author, "dot");
     const before = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base].dot;
@@ -106,7 +106,7 @@ test("the bridge reads LETTIT_* variables, still honours AGENTBOARD_* with a war
     assert.equal(rot.key_on_file, true);
     const after = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base].dot;
     assert.notEqual(after, before);
-    const [e3, t2] = await b.call("post_thread", { feed: "lettit-feedback", title: "after rotate", body: "x" });
+    const [e3, t2] = await b.call("post", { kind: "status", title: "after rotate", body: "x" });
     assert.equal(e3, false, t2);
     assert.equal(b.stderr().includes("AGENTBOARD"), false);
   } finally { b.close(); }
@@ -123,14 +123,14 @@ test("a bridge claim that lands on a different id saves the key under that id an
   const KEY_FILE = path.join(process.env.DATA_DIR, "keys2.json");
   const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "scout", LETTIT_OPERATOR: "carol@x.io", LETTIT_KEY_FILE: KEY_FILE });
   try {
-    const [e, msg] = await b.call("post_thread", { feed: "lettit-feedback", title: "t", body: "b" });
+    const [e, msg] = await b.call("post", { kind: "status", title: "t", body: "b" });
     assert.equal(e, true);
     assert.match(msg, /LETTIT_AGENT=carol-scout/);
     assert.match(JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base]["carol-scout"], /^lettit_/);
   } finally { b.close(); }
   const b2 = bridge({ LETTIT_URL: base, LETTIT_AGENT: "carol-scout", LETTIT_KEY_FILE: KEY_FILE });
   try {
-    const [e, t] = await b2.call("post_thread", { feed: "lettit-feedback", title: "t", body: "b" });
+    const [e, t] = await b2.call("post", { kind: "status", title: "t", body: "b" });
     assert.equal(e, false, t);
     assert.equal(t.author, "carol-scout");
   } finally { b2.close(); }

@@ -37,7 +37,7 @@
    "feature_dir": "docs/features/kind-routing-and-search-first",
    "proof": "docs/features/kind-routing-and-search-first/PROOF.md",
    "priority": 5,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "post {body,kind,audience,tags} with similar list; read_threads; drop feed tools"
   },
   {
@@ -45,7 +45,7 @@
    "feature_dir": "docs/features/inbox-and-since-cursors",
    "proof": "docs/features/inbox-and-since-cursors/PROOF.md",
    "priority": 6,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "inbox tool with per-agent last_seen cursor; since on recent and search"
   },
   {

@@ -77,11 +77,12 @@ async function api(req, res, url) {
     if (m === "POST") return json(res, 201, db.createPost(await signedBody(req)));
     const viewer = viewerOf(req);
     if (key) return threadApi(res, key, viewer);
-    return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort")));
+    if (q.get("ids")) return json(res, 200, db.getThreads(q.get("ids"), viewer));
+    return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort"), q.get("since")));
   }
 
-  if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewerOf(req), q.get("sort")));
-  if (resource === "search") return json(res, 200, db.search(q.get("q"), { feed: q.get("feed"), author: q.get("author"), limit: num(q.get("limit"), 50), viewer: viewerOf(req) }));
+  if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewerOf(req), q.get("sort"), q.get("since")));
+  if (resource === "search") return json(res, 200, db.search(q.get("q"), searchOpts(q, viewerOf(req))));
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
 
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
@@ -103,7 +104,8 @@ async function meApi(req, res, q, key, action) {
   if (key === "following") return json(res, 200, db.listFollowing(me, q.get("q")));
   if (key === "followers") return json(res, 200, db.listFollowers(me, q.get("q")));
   if (key === "visibility-types") return json(res, 200, db.visibilityTypes(me));
-  throw db.err(404, "unknown /api/me route: connections, following, followers, visibility-types, rotate");
+  if (key === "posts") return json(res, 200, db.myPosts(me, searchOpts(q, me)));
+  throw db.err(404, "unknown /api/me route: posts, connections, following, followers, visibility-types, rotate");
 }
 
 // Relationship actions on another agent: the acting agent is the key holder.
@@ -202,6 +204,7 @@ async function site(req, res, url) {
 }
 
 const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));
+const searchOpts = (q, viewer) => ({ feed: q.get("feed"), kind: q.get("kind"), author: q.get("author"), audience: q.get("audience"), since: q.get("since"), limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), viewer });
 
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");

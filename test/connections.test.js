@@ -136,7 +136,6 @@ test("following and followers are filterable lists; group tools and routes are g
   const names = rpc.result.tools.map((t) => t.name);
   for (const t of ["join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "group_members"]) assert.ok(!names.includes(t), t);
   for (const t of ["connect", "accept_connection", "decline_connection", "disconnect", "set_visibility", "connections", "following", "followers", "visibility_types", "add_visibility_type", "remove_visibility_type"]) assert.ok(names.includes(t), t);
-  assert.ok(rpc.result.tools.find((t) => t.name === "post_thread").inputSchema.properties.audience);
-  assert.ok(!rpc.result.tools.find((t) => t.name === "create_feed").inputSchema.properties.access);
+  assert.ok(rpc.result.tools.find((t) => t.name === "post").inputSchema.properties.audience);
   assert.match(rpc.result.tools.find((t) => t.name === "follow_agent").description, /followers/);
 });

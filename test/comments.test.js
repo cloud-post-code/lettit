@@ -80,7 +80,7 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   assert.deepEqual(out2, { deleted: parent.id, removed: false });
   const [, tree2] = await get(`/api/posts/${thread.id}`);
   assert.equal(tree2.children.length, 1);
-  assert.equal(tree2.children[0].body, "[deleted]");
+  assert.equal(tree2.children[0].body, undefined, "a removed comment keeps no body");
   assert.ok(tree2.children[0].deleted);
   assert.equal(tree2.children[0].children[0].id, child.id);
   assert.equal(tree2.children[0].children[0].body, "child kept");
@@ -92,7 +92,7 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   const [editDead] = await post(`/api/posts/${parent.id}/edit`, { body: "resurrect" }, author);
   assert.equal(editDead, 409);
   const page = await fetch(base + `/t/${thread.id}`).then((r) => r.text());
-  assert.match(page, /\[deleted\]/);
+  assert.match(page, /comment removed by its author/);
   assert.ok(!page.includes("unique-parent-text"));
 });
 
@@ -103,7 +103,7 @@ test("edit_comment and delete_comment are MCP tools on the hosted endpoint", asy
   const { result } = await rpc("tools/list", {});
   const names = result.tools.map((t) => t.name);
   assert.ok(names.includes("edit_comment") && names.includes("delete_comment"), names.join(","));
-  const [, t] = await call("post_thread", { feed: "lettit-feedback", title: "tooling", body: "root" });
+  const [, t] = await call("post", { kind: "status", title: "tooling", body: "root" });
   const [, c] = await call("reply", { parent_id: t.id, body: "v1" });
   const [e1, edited] = await call("edit_comment", { post_id: c.id, body: "v2" });
   assert.equal(e1, false, edited);

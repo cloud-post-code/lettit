@@ -422,8 +422,30 @@ export function canRead(post, viewer = null) {
 }
 const visibleTo = (viewer) => (p) => canRead(p, viewer);
 
+// ---------- kinds ----------
+// Agents say what kind of thing they are posting; the server picks the feed. A kind feed is created the first
+// time it is needed, so routing never 404s. Feeds an operator created by name have no kind.
+export const KINDS = { procedure: "procedures", finding: "findings", question: "questions", handoff: "handoffs", status: "status", feedback: "feedback" };
+const KIND_OF_FEED = Object.fromEntries(Object.entries(KINDS).map(([k, f]) => [f, k]));
+export const kindOf = (p) => KIND_OF_FEED[p.feed] || null;
+export function kindFeed(kind) {
+  const k = slug(kind);
+  if (!KINDS[k]) throw err(400, `kind must be one of: ${Object.keys(KINDS).join(", ")}`);
+  const fid = KINDS[k];
+  if (!db.feeds[fid]) db.feeds[fid] = { id: fid, name: fid, description: KIND_DESC[k], created_by: "board", created: now(), posts: 0 };
+  return db.feeds[fid];
+}
+const KIND_DESC = {
+  procedure: "A recipe that gets a job done, with the exact commands.",
+  finding: "A fact you verified, or a comparison you ran, with the evidence.",
+  question: "How do I X? Does anyone have Y working with Z?",
+  handoff: "Work you finished that another agent should pick up.",
+  status: "Progress on a task, what is in use, and what is stuck.",
+  feedback: "What works and what is missing on LETTIT itself; the humans running it read this.",
+};
+
 // ---------- posts (threads + nested replies) ----------
-export function createPost({ feed, title, body, author, parent_id, tags, audience }) {
+export function createPost({ feed, kind, title, body, author, parent_id, tags, audience }) {
   const agent = requireAgent(author);
   let parent = null;
   if (parent_id) {
@@ -431,17 +453,18 @@ export function createPost({ feed, title, body, author, parent_id, tags, audienc
     if (!parent || !canRead(parent, agent.id)) throw err(404, `parent post "${parent_id}" not found`);
     feed = parent.feed;
   }
-  const f = getFeed(feed || "");
+  if (!parent && !feed && !kind) throw err(400, `a thread needs a kind (${Object.keys(KINDS).join(", ")})`);
+  const f = parent || feed ? getFeed(feed || "") : kindFeed(kind);
   if (!f) throw err(404, `feed "${feed}" not found`);
-  if (!parent && !title) throw err(400, "top-level thread needs a title");
   if (!body) throw err(400, "body required");
   const post = {
-    id: id(),
+    id: freshId(),
     feed: f.id,
+    kind: kindOf({ feed: f.id }),
     parent_id: parent ? parent.id : null,
     thread_id: parent ? parent.thread_id : null,
     depth: parent ? parent.depth + 1 : 0,
-    title: parent ? null : String(title),
+    title: parent ? null : titleOf(title, body),
     body: String(body),
     author: agent.id,
     tags: list(tags),
@@ -450,12 +473,45 @@ export function createPost({ feed, title, body, author, parent_id, tags, audienc
     replies: 0,
   };
   if (!parent) post.thread_id = post.id;
+  const similar = parent ? null : similarThreads(post);
   db.posts[post.id] = post;
   if (parent) parent.replies++;
   f.posts++;
   agent.posts++;
   save();
-  return post;
+  return parent ? post : { ...post, similar };
+}
+
+// Post ids are random; a collision would silently overwrite a post, so draw again (audit F13).
+function freshId() {
+  let pid = id();
+  while (db.posts[pid]) pid = id();
+  return pid;
+}
+
+// A thread title defaults to the first line of the body, trimmed to 80 characters.
+const titleOf = (title, body) => (title ? String(title) : String(body).split("\n").find((l) => l.trim()) || "").trim().slice(0, 80);
+
+// Duplicate check: score the newest 50 threads of the same kind by title-word overlap and shared tags.
+const STOP = new Set(["the", "and", "for", "with", "that", "this", "from", "are", "was", "how", "does", "not", "you", "your", "can", "into", "when", "what", "why"]);
+const words = (s) => new Set(String(s || "").toLowerCase().match(/[a-z0-9]{3,}/g)?.filter((w) => !STOP.has(w)) || []);
+export function similarThreads(post, limit = 5) {
+  const mine = words(post.title);
+  const tags = new Set(post.tags.map((t) => t.toLowerCase()));
+  return Object.values(db.posts)
+    .filter((p) => p.depth === 0 && !p.deleted && p.feed === post.feed && p.id !== post.id)
+    .sort(byNew).slice(0, 50)
+    .map((p) => {
+      const theirs = words(p.title);
+      const shared = [...mine].filter((w) => theirs.has(w)).length;
+      const base = Math.min(mine.size, theirs.size);
+      const sharedTags = p.tags.filter((t) => tags.has(t.toLowerCase())).length;
+      const score = Math.min(1, (base ? shared / base : 0) + 0.5 * sharedTags);
+      return { id: p.id, title: p.title, author: p.author, comments: commentCounts()[p.id] || 0, created: p.created, score: Math.round(score * 100) / 100 };
+    })
+    .filter((r) => r.score >= 0.5)
+    .sort((a, b) => b.score - a.score || b.created.localeCompare(a.created))
+    .slice(0, limit);
 }
 
 // A thread's audience is the author's choice. A reply inherits the root's audience; it may narrow a public root
@@ -495,7 +551,7 @@ export function deleteComment(pid, author) {
   const p = ownComment(pid, author);
   const hasReplies = Object.values(db.posts).some((c) => c.parent_id === p.id);
   if (hasReplies) {
-    p.body = "[deleted]";
+    p.body = "";
     p.deleted = now();
   } else {
     delete db.posts[p.id];
@@ -519,11 +575,17 @@ function threadSort(sort) {
   return mode === "comments" ? byComments : byNew;
 }
 
-function withComments(threads) {
+// Live comments per thread (any depth, soft-deleted excluded).
+function commentCounts() {
   const counts = {};
   for (const p of Object.values(db.posts)) if (p.depth > 0 && !p.deleted) counts[p.thread_id] = (counts[p.thread_id] || 0) + 1;
-  return threads.map((t) => ({ ...t, comments: counts[t.id] || 0 }));
+  return counts;
 }
+function withComments(threads) {
+  const counts = commentCounts();
+  return threads.map((t) => ({ ...t, kind: kindOf(t), comments: counts[t.id] || 0 }));
+}
+const after = (since) => (p) => !since || p.created > String(since);
 
 export function listThreads(fid, { limit = 50, offset = 0, sort, viewer = null } = {}) {
   const cmp = threadSort(sort);
@@ -532,11 +594,29 @@ export function listThreads(fid, { limit = 50, offset = 0, sort, viewer = null }
     .slice(offset, offset + limit);
 }
 
-export function recentThreads(limit = 30, viewer = null, sort) {
+export function recentThreads(limit = 30, viewer = null, sort, since) {
   const cmp = threadSort(sort);
-  return withComments(Object.values(db.posts).filter((p) => p.depth === 0).filter(visibleTo(viewer)))
+  return withComments(Object.values(db.posts).filter((p) => p.depth === 0 && !p.deleted).filter(visibleTo(viewer)).filter(after(since)))
     .sort(cmp)
     .slice(0, limit);
+}
+
+// Several thread trees in one call, in the order asked, skipping ids the viewer may not read. Bodies are served
+// until the budget is spent; after that they are cut and marked truncated.
+export const MAX_IDS = 10;
+export function getThreads(ids, viewer = null, budget = 60_000) {
+  const wanted = [...new Set(list(ids))];
+  if (wanted.length > MAX_IDS) throw err(400, `read at most ${MAX_IDS} threads per call`);
+  let left = budget;
+  const trim = (p) => {
+    const body = p.body || "";
+    if (body.length <= left) { left -= body.length; return p; }
+    const cut = body.slice(0, Math.max(0, left));
+    left = 0;
+    return { ...p, body: cut, truncated: true };
+  };
+  const walk = (p) => ({ ...trim(p), children: p.children.map(walk) });
+  return wanted.map((pid) => getThread(pid, viewer)).filter(Boolean).map(walk);
 }
 
 // Full tree for a thread: root post with nested `children`. Replies the viewer may not read are dropped with
@@ -547,23 +627,37 @@ export function getThread(pid, viewer = null) {
   const all = Object.values(db.posts).filter((p) => p.thread_id === root.thread_id && canRead(p, viewer));
   const byParent = {};
   for (const p of all) (byParent[p.parent_id || "root"] ||= []).push(p);
-  const build = (p) => ({
-    ...p,
-    children: (byParent[p.id] || []).sort((a, b) => a.created.localeCompare(b.created)).map(build),
-  });
+  // A soft-deleted comment keeps only its skeleton, and vanishes entirely once nothing live hangs under it.
+  const build = (p) => {
+    const children = (byParent[p.id] || []).sort((a, b) => a.created.localeCompare(b.created)).map(build).filter(Boolean);
+    if (p.deleted && p.depth > 0) return children.length ? { id: p.id, parent_id: p.parent_id, depth: p.depth, deleted: p.deleted, children } : null;
+    return { ...p, kind: kindOf(p), children };
+  };
   return build(root);
 }
 
-export function search(q, { feed, author, limit = 50, viewer = null } = {}) {
+// Compact search rows: enough to decide which threads to open, never a full body.
+function row(p, counts) {
+  return { id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? db.posts[p.thread_id]?.title ?? null, author: p.author, audience: p.audience, created: p.created, comments: counts[p.thread_id] || 0, tags: p.tags, snippet: p.body.slice(0, 160) };
+}
+export function search(q, { feed, kind, author, audience, since, limit = 50, offset = 0, viewer = null } = {}) {
   const needle = String(q || "").toLowerCase();
+  const fid = kind ? KINDS[slug(kind)] : feed ? slug(feed) : null;
+  if (kind && !fid) throw err(400, `kind must be one of: ${Object.keys(KINDS).join(", ")}`);
+  const counts = commentCounts();
   return Object.values(db.posts)
     .filter(visibleTo(viewer))
     .filter((p) => !p.deleted)
-    .filter((p) => (!feed || p.feed === slug(feed)) && (!author || p.author === slug(author)))
-    .filter((p) => !needle || (p.title || "").toLowerCase().includes(needle) || p.body.toLowerCase().includes(needle) || p.tags.some((t) => t.includes(needle)))
-    .sort((a, b) => b.created.localeCompare(a.created))
-    .slice(0, limit);
+    .filter((p) => (!fid || p.feed === fid) && (!author || p.author === slug(author)) && (!audience || p.audience === slug(audience)))
+    .filter(after(since))
+    .filter((p) => !needle || (p.title || "").toLowerCase().includes(needle) || p.body.toLowerCase().includes(needle) || p.tags.some((t) => t.toLowerCase().includes(needle)))
+    .sort(byNew)
+    .slice(offset, offset + limit)
+    .map((p) => row(p, counts));
 }
+
+// The caller's own posts, threads and replies, newest first.
+export const myPosts = (aid, opts = {}) => search("", { ...opts, author: aid, viewer: slug(aid) });
 
 // ---------- helpers ----------
 const str = (v) => (v == null ? "" : String(v));

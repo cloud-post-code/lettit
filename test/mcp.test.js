@@ -47,7 +47,7 @@ test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is sa
     const { result: list } = await b.rpc("tools/list");
     const reg = list.tools.find((t) => t.name === "register_agent");
     assert.ok(!reg.inputSchema.required?.includes("name"), "name is optional when LETTIT_AGENT is set");
-    const post = list.tools.find((t) => t.name === "post_thread");
+    const post = list.tools.find((t) => t.name === "post");
     assert.ok(!post.inputSchema.required.includes("author"), "author is optional when LETTIT_AGENT is set");
 
     const [, who] = await b.call("whoami", {});
@@ -56,7 +56,7 @@ test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is sa
     // Two writes land at once on a bridge with no key yet: exactly one claim happens, both succeed.
     const [[e1, card], [e0, first]] = await Promise.all([
       b.call("register_agent", { operator: "openai", description: "coding agent" }),
-      b.call("post_thread", { feed: "lettit-feedback", title: "racing", body: "x" }),
+      b.call("post", { kind: "status", title: "racing", body: "x" }),
     ]);
     assert.equal(e0, false, first);
     assert.equal(e1, false, card);
@@ -68,7 +68,7 @@ test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is sa
     assert.match(saved[base].codex, /^lettit_/);
     assert.equal(fs.statSync(KEY_FILE).mode & 0o777, 0o600);
 
-    const [e2, thread] = await b.call("post_thread", { feed: "lettit-feedback", title: "from codex", body: "hello" });
+    const [e2, thread] = await b.call("post", { kind: "status", title: "from codex", body: "hello" });
     assert.equal(e2, false, thread);
     assert.equal(thread.author, "codex");
 
@@ -76,7 +76,7 @@ test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is sa
     assert.equal(e3, false, reply);
     assert.equal(reply.author, "codex");
 
-    const [e4, msg] = await b.call("post_thread", { feed: "lettit-feedback", title: "explicit", body: "x", author: "other-bot" });
+    const [e4, msg] = await b.call("post", { kind: "status", title: "explicit", body: "x", author: "other-bot" });
     assert.equal(e4, true);
     assert.match(msg, /signed in as "codex"/);
     const [e5, msg2] = await b.call("register_agent", { name: "other-bot" });
@@ -93,7 +93,7 @@ test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is sa
   try {
     const [, who] = await b2.call("whoami", {});
     assert.equal(who.key_on_file, true);
-    const [e, t] = await b2.call("post_thread", { feed: "lettit-feedback", title: "second session", body: "same me" });
+    const [e, t] = await b2.call("post", { kind: "status", title: "second session", body: "same me" });
     assert.equal(e, false, t);
     assert.equal(t.author, "codex");
     const [, me] = await b2.call("get_agent", { id: "codex" });
@@ -105,7 +105,7 @@ test("LETTIT_KEY alone signs the bridge in; the server derives the author from i
   const [, card] = await fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Key Only", operator: "t" }) }).then(async (r) => [r.status, await r.json()]);
   const b = bridge({ LETTIT_AGENT: "", LETTIT_KEY: card.key });
   try {
-    const [e, t] = await b.call("post_thread", { feed: "lettit-feedback", title: "by key", body: "x" });
+    const [e, t] = await b.call("post", { kind: "status", title: "by key", body: "x" });
     assert.equal(e, false, t);
     assert.equal(t.author, "t-key-only");
   } finally { b.close(); }
@@ -115,8 +115,8 @@ test("without LETTIT_AGENT or a key the bridge requires author and writes fail a
   const b = bridge({ LETTIT_AGENT: "" });
   try {
     const { result: list } = await b.rpc("tools/list");
-    assert.ok(list.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"));
-    const [isErr, msg] = await b.call("post_thread", { feed: "lettit-feedback", title: "t", body: "b", author: "codex" });
+    assert.ok(list.tools.find((t) => t.name === "post").inputSchema.required.includes("author"));
+    const [isErr, msg] = await b.call("post", { kind: "status", title: "t", body: "b", author: "codex" });
     assert.equal(isErr, true);
     assert.match(msg, /key/i);
   } finally { b.close(); }
@@ -127,13 +127,13 @@ test("the bridge exposes connection and follow tools, signs its reads, and whoam
   try {
     const { result: list } = await b.rpc("tools/list");
     const names = list.tools.map((t) => t.name);
-    for (const t of ["create_feed", "connect", "accept_connection", "set_visibility", "connections", "visibility_types", "follow_agent", "unfollow_agent"]) assert.ok(names.includes(t), t);
-    const [e2, t] = await b.call("post_thread", { feed: "lettit-feedback", title: "inside", body: "x", audience: "friend" });
+    for (const t of ["post", "read_threads", "connect", "accept_connection", "set_visibility", "connections", "visibility_types", "follow_agent", "unfollow_agent"]) assert.ok(names.includes(t), t);
+    const [e2, t] = await b.call("post", { kind: "status", title: "inside", body: "x", audience: "friend" });
     assert.equal(e2, false, t);
     assert.equal(t.audience, "friend");
-    const [e3, feed] = await b.call("read_feed", { feed: "lettit-feedback" });
-    assert.equal(e3, false, feed);
-    assert.ok(feed.threads.some((x) => x.id === t.id), "signed reads see the author's own circle-only threads");
+    const [e3, rows] = await b.call("search", { q: "inside" });
+    assert.equal(e3, false, rows);
+    assert.ok(rows.some((x) => x.id === t.id), "signed reads see the author's own circle-only threads");
     const [e4, who] = await b.call("whoami", {});
     assert.equal(e4, false, who);
     assert.equal(who.agent, "muse");

@@ -38,7 +38,9 @@ export function feed({ feed: fd, threads, sort = "new", prompt }) {
 }
 
 export function thread({ root, prompt }) {
-  const render = (p) => `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+  const render = (p) => p.deleted && p.depth > 0
+    ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
+    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
   return page(root.title, `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>${esc(root.title)}</h1>${render(root)}
 <p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>`, prompt);
 }
