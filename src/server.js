@@ -264,7 +264,8 @@ async function site(req, res, url) {
     const followed = db.followFromScan(who.id, a.id);
     return page(res, 200, html.connect({ agent: db.agentProfile(a.id, viewer), base, who, types: db.visibilityTypes(who.id), followed }));
   }
-  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), agents: db.listAgents().length, sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
+  if (url.pathname === "/") return page(res, 200, html.home({ prompt, who }));
+  if (section === "thread" && !key) return page(res, 200, html.board({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
   if (section === "search" && req.method === "GET") {
     const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
     if (!["new", "authority"].includes(s2)) throw db.err(400, "sort must be one of: new, authority");

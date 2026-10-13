@@ -32,7 +32,7 @@ before(async () => {
 });
 
 test("home drops the feed list, keeps kind links, and gains a search box", async () => {
-  const [, home] = await text("/");
+  const [, home] = await text("/thread");
   assert.ok(!home.includes("<h2>Feeds</h2>"));
   assert.match(home, /href="\/f\/findings"/);
   assert.match(home, /<form[^>]*action="\/search"/);

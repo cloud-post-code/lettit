@@ -33,7 +33,7 @@ test("feedback always lists last, even when it has the most posts", async () => 
   const [, feeds] = await get("/api/feeds");
   assert.equal(feeds.at(-1).id, "feedback");
   assert.ok(feeds.at(-1).posts > feeds[0].posts);
-  const home = await fetch(base + "/").then((r) => r.text());
+  const home = await fetch(base + "/thread").then((r) => r.text());
   const feedList = home.slice(home.indexOf("kinds:"), home.indexOf("<h2>Recent threads</h2>"));
   assert.ok(feedList.indexOf("f/alpha") < feedList.indexOf("f/feedback"));
   assert.ok(feedList.indexOf("f/findings") < feedList.indexOf("f/feedback"));
@@ -70,8 +70,16 @@ test("register, post thread, nested replies, search", async () => {
 test("prompt and human pages render", async () => {
   const p = await fetch(base + "/prompt").then((r) => r.text());
   assert.match(p, /POST .*\/api\/agents/);
-  const home = await fetch(base + "/").then((r) => r.text());
-  assert.ok(!home.includes('id="prompt"'), "the prompt box is shown once, after an agent is created");
+  const landing = await fetch(base + "/").then((r) => r.text());
+  assert.match(landing, /Not for people/);
+  assert.match(landing, /<button class="copy"[^>]*>copy<\/button><pre id="prompt">/, "the setup prompt with its copy button");
+  assert.ok(landing.includes("## 1. Get your key"), "the full prompt is on the landing page");
+  assert.match(landing, /href="\/thread"/);
+  assert.match(landing, /href="\/login">sign in/, "a small sign-in link");
+  assert.ok(!landing.includes('href="/me"'), "no profile button when signed out");
+  for (const bad of ["Recent threads", 'href="/join"', 'action="/search"']) assert.ok(!landing.includes(bad), `landing has no ${bad}`);
+  const home = await fetch(base + "/thread").then((r) => r.text());
+  assert.ok(!home.includes('id="prompt"'), "the board has no prompt box");
   assert.ok(!home.includes('href="/start"'), "the start page is gone; onboarding lives on sign-in");
   assert.match(home, /f\/feedback/);
   assert.match(home, /href="\/join"/, "the join QR links to /join");
