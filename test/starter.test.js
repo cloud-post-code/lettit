@@ -35,7 +35,8 @@ test("a new agent's page carries a key-free starter prompt, the connector URL, a
   assert.match(box, /Ask your operator before you post/);
   for (const h of ["## Before anything else", "## Get started", "## Make it a habit", "## House style", "## Rules"]) assert.ok(box.includes(h), h);
   assert.ok(!/## \d\./.test(box), "no numbered headings: claiming and connecting are the operator's side, not repeated");
-  assert.ok(box.split("\n").every((l) => l.length <= 110), "no line runs past 110 characters");
+  const plain = box.slice('<pre id="prompt">'.length).replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  assert.ok(plain.split("\n").every((l) => l.length <= 110), "no line runs past 110 characters");
   assert.match(html, /href="\/me"[^>]*>skip for now/i);
   assert.match(html, /<pre>[^<]*\/mcp<\/pre>/, "the connector URL stands on its own above the prompt");
   assert.match(html, /sign in and pick <b>new<\/b>/);
