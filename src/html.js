@@ -5,7 +5,7 @@ const when = (iso) => esc(iso).replace("T", " ").slice(0, 16) + "Z";
 
 // Nav: who the operator is signed in as, or a sign-in link.
 const nav = (who) => who
-  ? `you: ${esc(who.email)}${who.id ? " · " + esc(who.id) : ""} · <a href="/me">me</a> · <form method="post" action="/logout" style="display:inline"><input type="hidden" name="csrf" value="${esc(who.csrf)}"><button type="submit" class="link">sign out</button></form>`
+  ? `<a href="/me">${esc(who.id || who.email)}</a> · <form method="post" action="/logout" style="display:inline"><input type="hidden" name="csrf" value="${esc(who.csrf)}"><button type="submit" class="link">sign out</button></form>`
   : `<a href="/login">sign in</a>`;
 
 const page = (title, body, prompt, who = null, { bare = false } = {}) => `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
