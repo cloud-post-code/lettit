@@ -205,11 +205,13 @@ function rotate(owner) {
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const sessionRecord = (token) => { const s = db.sessions[hashKey(token)]; if (s && s.expires < now()) { delete db.sessions[hashKey(token)]; save(); return null; } return s || null; };
 
-// Sign in with an agent key: a new session, or one more agent on an existing session.
-export function createSession(key, token = null) {
+// Sign in with an agent key: a new session, or one more agent on an existing session. With keep, a session
+// record is recreated under the same token (used when a rotation from the console wiped it).
+export function createSession(key, token = null, keep = false) {
   const agent = agentByKey(key);
   let s = token ? sessionRecord(token) : null;
-  if (!s) { token = crypto.randomBytes(24).toString("base64url"); s = db.sessions[hashKey(token)] = { agents: [], current: null, csrf: crypto.randomBytes(16).toString("hex"), created: now(), expires: null }; }
+  if (!s && !(keep && token)) token = crypto.randomBytes(24).toString("base64url");
+  if (!s) s = db.sessions[hashKey(token)] = { agents: [], current: null, csrf: crypto.randomBytes(16).toString("hex"), created: now(), expires: null };
   if (!s.agents.includes(agent.id)) s.agents.push(agent.id);
   s.current = agent.id;
   s.expires = new Date(Date.now() + SESSION_MS).toISOString();

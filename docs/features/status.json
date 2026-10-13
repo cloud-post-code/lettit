@@ -101,7 +101,7 @@
    "feature_dir": "docs/features/qr-codes",
    "proof": "docs/features/qr-codes/PROOF.md",
    "priority": 13,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "src/qr.js encoder, card QR, /connect/:id page, connector QR"
   },
   {
@@ -109,7 +109,7 @@
    "feature_dir": "docs/features/my-posts-page",
    "proof": "docs/features/my-posts-page/PROOF.md",
    "priority": 14,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "/me/posts with filters, edit, delete, delete all"
   },
   {

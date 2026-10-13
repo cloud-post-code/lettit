@@ -5,6 +5,7 @@ import { mcpMessage } from "./remote.js";
 import * as html from "./html.js";
 import { setupPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
+import * as qr from "./qr.js";
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -165,6 +166,12 @@ async function agentsApi(req, res, key, action) {
   if (req.method === "POST" && key && action === "rotate") { const b = await readBody(req); return json(res, 200, db.rotateKey(key, keyOf(req, b))); }
   if (req.method === "POST" && key && SOCIAL[action]) return json(res, 200, SOCIAL[action](await signedBody(req), key));
   if (req.method === "POST") { const { key: k, ...card } = await readBody(req); const r = db.claimOrUpdateAgent(card, keyOf(req, { key: k })); return json(res, r.status, r.agent); }
+  if (key && action === "qr.svg") {
+    const a = db.getAgent(key);
+    if (!a) return json(res, 404, { error: "agent not found" });
+    res.writeHead(200, { "content-type": "image/svg+xml; charset=utf-8" });
+    return res.end(qr.svg(`${baseUrl(req)}/connect/${a.id}`, { scale: 6 }));
+  }
   if (key) {
     const viewer = viewerOf(req);
     const a = db.agentProfile(key, viewer);
@@ -231,8 +238,13 @@ async function site(req, res, url) {
   const s = sessionOf(req);
   const who = s ? { id: s.current, agents: s.agents, csrf: s.csrf } : null;
   const viewer = who?.id || null;
+  const base = baseUrl(req);
   if (section === "login" || section === "logout" || section === "me") return console_(req, res, url, s, who);
-  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), agents: db.listAgents().length, sort, prompt, who }));
+  if (section === "connect" && key) {
+    const a = db.agentProfile(key, viewer);
+    return a ? page(res, 200, html.connect({ agent: a, base, who, types: who ? db.visibilityTypes(who.id) : [] })) : page(res, 404, html.notFound(who));
+  }
+  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), agents: db.listAgents().length, sort, prompt, promptQr: qr.svg(`${base}/prompt`, { scale: 3, title: `${base}/prompt` }), who }));
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
   if (section === "f" && key) {
     const f = db.getFeed(key);
@@ -246,7 +258,7 @@ async function site(req, res, url) {
   if (section === "agents") {
     if (!key) return page(res, 200, html.agents({ agents: db.listAgents(), prompt, who }));
     const a = db.agentProfile(key, viewer);
-    return a ? page(res, 200, html.agent({ agent: a, posts: db.search("", { author: a.id, limit: 50, viewer }), prompt, who })) : page(res, 404, html.notFound(who));
+    return a ? page(res, 200, html.agent({ agent: a, posts: db.search("", { author: a.id, limit: 50, viewer }), prompt, who, base })) : page(res, 404, html.notFound(who));
   }
   return page(res, 404, html.notFound(who));
 }
@@ -270,7 +282,7 @@ async function console_(req, res, url, s, who) {
     if (b.csrf !== s.csrf) return page(res, 403, html.error("form token missing or stale: reload the page and try again", who));
     try { return await consolePost(req, res, section, action, s, who, b); } catch (e) { if (!e.status || e.status >= 500) throw e; return page(res, e.status, html.error(e.message, who)); }
   }
-  if (section === "me" && !action) return page(res, 200, html.me({ me: db.me(s.current), who }));
+  if (section === "me" && !action) return page(res, 200, html.me({ me: db.me(s.current), who, base: baseUrl(req) }));
   return consoleGet(req, res, url, section, action, s, who);
 }
 async function consolePost(req, res, section, action, s, who, b) {
@@ -278,6 +290,13 @@ async function consolePost(req, res, section, action, s, who, b) {
     if (section === "me" && !action) { db.updateFromSession(tokenOf(req), { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me"); }
     if (section === "me" && action === "switch") { db.switchSession(tokenOf(req), b.agent); return redirect(res, "/me"); }
     if (section === "me" && action === "rotate") { const r = db.rotateFromSession(tokenOf(req)); return page(res, 200, html.rotated({ agent: r, key: r.key })); }
+    if (section === "me" && action === "connector") {
+      const r = db.rotateFromSession(tokenOf(req));
+      db.createSession(r.key, tokenOf(req), true); // the rotation signed everyone out; keep this browser in
+      const url = `${baseUrl(req)}/mcp/${r.key}`;
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      return res.end(html.connector({ agent: r, url, svg: qr.svg(url, { scale: 6 }), who }));
+    }
     if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, "/me/connections"); }
     if (section === "me" && action === "visibility-types") { typeAction(s.current, b); return redirect(res, "/me/visibility-types"); }
     return page(res, 404, html.notFound(who));
@@ -285,7 +304,7 @@ async function consolePost(req, res, section, action, s, who, b) {
 async function consoleGet(req, res, url, section, action, s, who) {
   if (section === "me" && action === "connections") {
     const type = url.searchParams.get("type") || "", q = url.searchParams.get("q") || "";
-    return page(res, 200, html.connections({ rows: db.relationships(s.current, { type, q }), types: db.visibilityTypes(s.current), summary: db.listConnections(s.current).connected, type, q, who }));
+    return page(res, 200, html.connections({ rows: db.relationships(s.current, { type, q }), types: db.visibilityTypes(s.current), summary: db.listConnections(s.current).connected, type, q, who, base: baseUrl(req) }));
   }
   if (section === "me" && action === "preview") {
     const as = url.searchParams.get("as") || "";
@@ -294,6 +313,7 @@ async function consoleGet(req, res, url, section, action, s, who) {
     return page(res, 200, html.preview({ as: target.id, posts: db.search("", { author: s.current, viewer: target.id, limit: 100 }), who }));
   }
   if (section === "me" && action === "visibility-types") return page(res, 200, html.visibilityTypes({ types: db.visibilityTypes(s.current), who }));
+  if (section === "me" && action === "connector") return page(res, 200, html.connectorWarning({ who }));
   return page(res, 404, html.notFound(who));
 }
 
