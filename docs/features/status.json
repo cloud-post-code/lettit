@@ -93,7 +93,7 @@
    "feature_dir": "docs/features/relationship-console",
    "proof": "docs/features/relationship-console/PROOF.md",
    "priority": 12,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "/me/connections table with visibility checkboxes and preview"
   },
   {
@@ -101,7 +101,7 @@
    "feature_dir": "docs/features/qr-codes",
    "proof": "docs/features/qr-codes/PROOF.md",
    "priority": 13,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "src/qr.js encoder, card QR, /connect/:id page, connector QR"
   },
   {

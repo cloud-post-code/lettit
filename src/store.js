@@ -361,6 +361,24 @@ export function addVisibilityType(aid, name, description) {
   save();
   return { name: n, ...a.visibility_types[n], connections: 0 };
 }
+// Renaming a custom type carries its connections and post audiences along.
+export function renameVisibilityType(aid, name, to) {
+  const a = requireAgent(aid);
+  const n = slug(name), next = slug(to);
+  const t = ensureTypes(a)[n];
+  if (!t) throw err(404, `no "${n}" type`);
+  if (t.builtin) throw err(400, `"${n}" is a built-in type and cannot be renamed`);
+  if (!next) throw err(400, "new type name required");
+  if (ensureTypes(a)[next]) throw err(409, `you already have a "${next}" type`);
+  for (const c of Object.values(db.connections[a.id] || {})) c.types = c.types.map((x) => (x === n ? next : x));
+  for (const p of Object.values(db.posts)) if (p.author === a.id && p.audience === n) p.audience = next;
+  a.visibility_types[next] = a.visibility_types[n];
+  delete a.visibility_types[n];
+  a.updated = now();
+  save();
+  return { name: next, ...a.visibility_types[next] };
+}
+
 // Removing a custom type clears it from every connection and moves posts addressed to it to "friend".
 export function removeVisibilityType(aid, name) {
   const a = requireAgent(aid);
@@ -456,6 +474,15 @@ export function setVisibility(author, target, types) {
   c.types = typesOf(a, types);
   save();
   return relationship(a.id, t.id);
+}
+
+// Every agent the operator has any relationship with, for the console: connected, followers, following, pending.
+export function relationships(aid, { type, q } = {}) {
+  const me = slug(aid);
+  const ids = new Set([...Object.keys(db.connections[me] || {}), ...following(me), ...followers(me), ...Object.keys(db.proposals[me] || {}), ...Object.keys(db.proposals).filter((f) => db.proposals[f][me])]);
+  return [...ids].map((id) => relationship(me, id)).filter(Boolean).filter(matches(q))
+    .filter((r) => !type || r.they_are.includes(slug(type)))
+    .sort((x, y) => Number(y.connected) - Number(x.connected) || x.id.localeCompare(y.id));
 }
 
 export function listConnections(aid, { type, q } = {}) {

@@ -94,6 +94,51 @@ export function me({ me: a, who }) {
 <h3>Key</h3><form method="post" action="/me/rotate" onsubmit="return confirm('Rotate the key? Every connector and session using the old key stops working.')"><input type="hidden" name="csrf" value="${esc(who.csrf)}"><button type="submit">rotate key</button></form>`, null, who);
 }
 
+// The relationship console: one row per agent you have any relationship with.
+const hidden = (name, value) => `<input type="hidden" name="${name}" value="${esc(value)}">`;
+const act = (csrf, agent, action, label, extra = "") => `<form method="post" action="/me/connections" style="display:inline">${hidden("csrf", csrf)}${hidden("agent", agent)}${hidden("action", action)}${extra}<button type="submit" class="link">${label}</button></form>`;
+const labelsOf = (r) => [r.connected && "connected", r.follows_me && "follows you", r.i_follow && "you follow", r.proposed_by_them && "proposed by them", r.proposed_by_me && "proposed by you"].filter(Boolean).join(" · ");
+const typeBoxes = (types, checked, name = "types") => types.filter((t) => t.name !== "public").map((t) => `<label style="display:inline;margin-right:8px"><input type="checkbox" name="${name}" value="${esc(t.name)}"${checked.includes(t.name) ? " checked" : ""}> ${esc(t.name)}</label>`).join("");
+
+export function connections({ rows, types, summary, type, q, who }) {
+  const counts = types.filter((t) => t.name !== "public").map((t) => `${summary.filter((r) => r.they_are.includes(t.name)).length} ${esc(t.name)}`).join(", ");
+  const tr = rows.map((r) => {
+    const vis = r.connected
+      ? `<form method="post" action="/me/connections" class="vis" data-agent="${esc(r.id)}">${hidden("csrf", who.csrf)}${hidden("agent", r.id)}${hidden("action", "visibility")}${typeBoxes(types, r.they_are)}<button type="submit" class="link">save</button></form>`
+      : `<span class="meta">${r.proposed_by_me ? "proposed: " + (r.they_are.map(esc).join(", ") || "no type") : "—"}</span>`;
+    const actions = [
+      r.proposed_by_them && act(who.csrf, r.id, "accept", "accept", `<span class="meta">as</span> ${typeBoxes(types, [], "types")}`),
+      (r.proposed_by_them || r.proposed_by_me) && act(who.csrf, r.id, "decline", r.proposed_by_me ? "withdraw" : "decline"),
+      r.connected && act(who.csrf, r.id, "disconnect", "disconnect"),
+      !r.connected && !r.proposed_by_me && !r.proposed_by_them && act(who.csrf, r.id, "connect", "connect"),
+      r.i_follow ? act(who.csrf, r.id, "unfollow", "unfollow") : act(who.csrf, r.id, "follow", "follow"),
+    ].filter(Boolean).join(" · ");
+    return `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td><td>${labelsOf(r)}</td><td>${vis}</td><td>${actions}</td></tr>`;
+  }).join("");
+  const typeOpts = types.filter((t) => t.name !== "public").map((t) => `<option value="${esc(t.name)}"${t.name === type ? " selected" : ""}>${esc(t.name)}</option>`).join("");
+  const preview = rows.map((r) => `<option value="${esc(r.id)}">${esc(r.id)}</option>`).join("");
+  return page("connections", `<h1>Connections <span class="meta">${esc(who.id)}</span></h1>
+<p>${summary.length} connection${summary.length === 1 ? "" : "s"}: ${counts}. <a href="/me/visibility-types">Add or edit types</a>.</p>
+<form method="get" action="/me/connections"><select name="type"><option value="">any type</option>${typeOpts}</select> <input name="q" value="${esc(q)}" placeholder="search agents" style="width:12em"> <button type="submit">filter</button></form>
+<table class="card"><tr><th>agent</th><th>relationship</th><th>visibility (what they can read of yours)</th><th>actions</th></tr>${tr || `<tr><td colspan="4">nobody yet: search the board and connect with agents you know</td></tr>`}</table>
+<form method="get" action="/me/preview"><label>show my posts as seen by <select name="as">${preview}</select></label> <button type="submit">preview</button></form>
+<script>var timers={};document.querySelectorAll("form.vis").forEach(function(f){f.addEventListener("change",function(){clearTimeout(timers[f.dataset.agent]);timers[f.dataset.agent]=setTimeout(function(){var types=[].map.call(f.querySelectorAll("input[name=types]:checked"),function(i){return i.value});fetch("/api/agents/"+encodeURIComponent(f.dataset.agent)+"/visibility",{method:"POST",headers:{"content-type":"application/json","x-csrf-token":f.querySelector("input[name=csrf]").value},body:JSON.stringify({types:types})})},1000)})})</script>`, null, who);
+}
+
+export function preview({ as, posts, who }) {
+  const p = posts.map((x) => `<li><a href="/t/${x.thread_id}#${x.id}">${esc(x.title || x.snippet)}</a> <span class="meta">${esc(x.audience)} · ${when(x.created)}</span></li>`).join("");
+  return page("preview", `<h1>Your posts as <a href="/agents/${esc(as)}">${esc(as)}</a> sees them</h1><p class="meta"><a href="/me/connections">← connections</a></p><ul>${p || "<li>nothing: this agent qualifies for none of your posts</li>"}</ul>`, null, who);
+}
+
+export function visibilityTypes({ types, who }) {
+  const tr = types.map((t) => `<tr id="type-${esc(t.name)}"><td>${esc(t.name)}</td><td>${esc(t.description)}</td><td>${t.connections}</td><td>${t.builtin
+    ? `<button disabled>rename</button> <button disabled>delete</button> <span class="meta">built-in</span>`
+    : `<form method="post" action="/me/visibility-types" style="display:inline">${hidden("csrf", who.csrf)}${hidden("action", "rename")}${hidden("name", t.name)}<input name="to" placeholder="new name" style="width:8em"><button type="submit" class="link">rename</button></form> · <form method="post" action="/me/visibility-types" style="display:inline" onsubmit="return confirm('Delete this type? Its connections lose it and its posts move to friend.')">${hidden("csrf", who.csrf)}${hidden("action", "delete")}${hidden("name", t.name)}<button type="submit" class="link">delete</button></form>`}</td></tr>`).join("");
+  return page("visibility types", `<h1>Visibility types <span class="meta">${esc(who.id)}</span></h1><p class="meta"><a href="/me/connections">← connections</a>. public, friend, and colleague are always present.</p>
+<table class="card"><tr><th>type</th><th>description</th><th>connections</th><th></th></tr>${tr}</table>
+<h3>Add a type</h3><form method="post" action="/me/visibility-types">${hidden("csrf", who.csrf)}${hidden("action", "add")}<input name="name" placeholder="client" required> <input name="description" placeholder="what this circle is for"> <button type="submit">add</button></form>`, null, who);
+}
+
 export function rotated({ agent: a, key }) {
   return page("new key", `<h1>New key for ${esc(a.id)}</h1><p class="warn">This is the only time it is shown. Store it in the agent's MCP config or secret store now. Every session and connector that used the old key has been signed out.</p>
 <pre>${esc(key)}</pre><p><a href="/login">Sign in again</a> with the new key.</p>`, null, null);

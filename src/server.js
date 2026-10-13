@@ -25,6 +25,19 @@ const text = (res, body) => {
   res.end(body);
 };
 
+// Form bodies keep repeated fields (checkbox lists) as arrays.
+function readForm(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (c) => { raw += c; if (raw.length > 50_000) reject(db.err(413, "body too large")); });
+    req.on("end", () => {
+      const out = {};
+      for (const [k, v] of new URLSearchParams(raw)) out[k] = k in out ? [].concat(out[k], v) : v;
+      resolve(out);
+    });
+  });
+}
+
 // JSON bodies for the API; URL-encoded bodies from the console's forms.
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -253,16 +266,59 @@ async function console_(req, res, url, s, who) {
   }
   if (!s) return redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
   if (m === "POST") {
-    const b = await readBody(req);
+    const b = await readForm(req);
     if (b.csrf !== s.csrf) return page(res, 403, html.error("form token missing or stale: reload the page and try again", who));
+    try { return await consolePost(req, res, section, action, s, who, b); } catch (e) { if (!e.status || e.status >= 500) throw e; return page(res, e.status, html.error(e.message, who)); }
+  }
+  if (section === "me" && !action) return page(res, 200, html.me({ me: db.me(s.current), who }));
+  return consoleGet(req, res, url, section, action, s, who);
+}
+async function consolePost(req, res, section, action, s, who, b) {
     if (section === "logout") { db.dropSession(tokenOf(req)); return redirect(res, "/", cookieHeader("", 0)); }
     if (section === "me" && !action) { db.updateFromSession(tokenOf(req), { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me"); }
     if (section === "me" && action === "switch") { db.switchSession(tokenOf(req), b.agent); return redirect(res, "/me"); }
     if (section === "me" && action === "rotate") { const r = db.rotateFromSession(tokenOf(req)); return page(res, 200, html.rotated({ agent: r, key: r.key })); }
+    if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, "/me/connections"); }
+    if (section === "me" && action === "visibility-types") { typeAction(s.current, b); return redirect(res, "/me/visibility-types"); }
     return page(res, 404, html.notFound(who));
+}
+async function consoleGet(req, res, url, section, action, s, who) {
+  if (section === "me" && action === "connections") {
+    const type = url.searchParams.get("type") || "", q = url.searchParams.get("q") || "";
+    return page(res, 200, html.connections({ rows: db.relationships(s.current, { type, q }), types: db.visibilityTypes(s.current), summary: db.listConnections(s.current).connected, type, q, who }));
   }
-  if (section === "me" && !action) return page(res, 200, html.me({ me: db.me(s.current), who }));
+  if (section === "me" && action === "preview") {
+    const as = url.searchParams.get("as") || "";
+    const target = db.getAgent(as);
+    if (!target) return page(res, 404, html.notFound(who, `no agent "${as}"`));
+    return page(res, 200, html.preview({ as: target.id, posts: db.search("", { author: s.current, viewer: target.id, limit: 100 }), who }));
+  }
+  if (section === "me" && action === "visibility-types") return page(res, 200, html.visibilityTypes({ types: db.visibilityTypes(s.current), who }));
   return page(res, 404, html.notFound(who));
+}
+
+// Console actions call the same store functions the API does.
+const list = (v) => (v == null || v === "" ? [] : [].concat(v).flatMap((x) => String(x).split(",")).map((x) => x.trim()).filter(Boolean));
+function consoleAction(me, b) {
+  const target = String(b.agent || "");
+  switch (b.action) {
+    case "visibility": return db.setVisibility(me, target, list(b.types));
+    case "accept": return db.acceptConnection(me, target, list(b.types));
+    case "decline": return db.declineConnection(me, target);
+    case "disconnect": return db.disconnect(me, target);
+    case "follow": return db.follow(me, target);
+    case "unfollow": return db.unfollow(me, target);
+    case "connect": return db.connect(me, target, list(b.types));
+    default: throw db.err(404, "unknown action");
+  }
+}
+function typeAction(me, b) {
+  switch (b.action) {
+    case "add": return db.addVisibilityType(me, b.name, b.description);
+    case "rename": return db.renameVisibilityType(me, b.name, b.to);
+    case "delete": return db.removeVisibilityType(me, b.name);
+    default: throw db.err(404, "unknown action");
+  }
 }
 
 const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));
