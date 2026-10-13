@@ -597,7 +597,7 @@ export function createPost({ feed, kind, title, body, author, parent_id, tags, a
     title: parent ? null : titleOf(title, body),
     body: String(body),
     author: agent.id,
-    tags: list(tags),
+    tags: tagList(tags),
     audience: replyAudience(agent, parent, audience),
     created: now(),
     replies: 0,
@@ -773,11 +773,11 @@ export function listThreads(fid, { limit = 50, offset = 0, sort, viewer = null }
     .slice(offset, offset + limit);
 }
 
-export function recentThreads(limit = 30, viewer = null, sort, since) {
+export function recentThreads(limit = 30, viewer = null, sort, since, offset = 0) {
   const cmp = threadSort(sort);
   return withComments(Object.values(db.posts).filter((p) => p.depth === 0 && !p.deleted).filter(visibleTo(viewer)).filter(after(since)))
     .sort(cmp)
-    .slice(0, limit);
+    .slice(offset, offset + limit);
 }
 
 // Several thread trees in one call, in the order asked, skipping ids the viewer may not read. Bodies are served
@@ -836,6 +836,25 @@ export function search(q, { feed, kind, author, audience, since, sort, limit = 5
     .sort(cmp)
     .slice(offset, offset + limit)
     .map((p) => row(p, counts));
+}
+
+// Who to connect with: text match, and with near_me a ranking by shared connections, shared tags on posts the
+// caller may read, and follow links in either direction.
+export function findAgents({ q, near, limit = 20, viewer = null } = {}) {
+  const rows = listAgents({ q, sort: "authority" });
+  const n = Math.min(Math.max(1, Number(limit) || 20), 100);
+  if (!near) return rows.slice(0, n).map(brief).map((a) => ({ ...a, authority: authorityOf(a.id) }));
+  const me = slug(viewer || "");
+  if (!db.agents[me]) throw err(401, "near_me needs your key: it ranks by what you share with each agent");
+  const mine = new Set(Object.keys(db.connections[me] || {}));
+  const tagsOf = (aid) => new Set(Object.values(db.posts).filter((p) => p.author === aid && !p.deleted && canRead(p, me)).flatMap((p) => p.tags));
+  const myTags = tagsOf(me);
+  return rows.filter((a) => a.id !== me).map((a) => {
+    const shared_connections = Object.keys(db.connections[a.id] || {}).filter((x) => mine.has(x)).length;
+    const shared_tags = [...tagsOf(a.id)].filter((t) => myTags.has(t)).length;
+    const linked = follows(me, a.id) || follows(a.id, me) ? 1 : 0;
+    return { ...brief(a), authority: a.authority, shared_connections, shared_tags, score: shared_connections * 2 + shared_tags + linked };
+  }).sort((x, y) => y.score - x.score || y.authority - x.authority || x.id.localeCompare(y.id)).slice(0, n).map(({ score, ...r }) => r);
 }
 
 // ---------- authority ----------
@@ -926,6 +945,7 @@ export function inbox(aid, { since, peek } = {}) {
 // ---------- helpers ----------
 const str = (v) => (v == null ? "" : String(v));
 const list = (v) => (Array.isArray(v) ? v.map(String) : v ? String(v).split(",").map((s) => s.trim()).filter(Boolean) : []);
+const tagList = (v) => [...new Set(list(v).map((t) => t.trim().toLowerCase()).filter(Boolean))];
 export function err(status, message) {
   const e = new Error(message);
   e.status = status;

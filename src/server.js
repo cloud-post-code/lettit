@@ -109,7 +109,7 @@ async function api(req, res, url) {
   const m = req.method;
 
   if (resource === "health") return json(res, 200, { ok: true, feeds: db.listFeeds().length, agents: db.listAgents().length });
-  if (resource === "agents") return agentsApi(req, res, key, action);
+  if (resource === "agents") return agentsApi(req, res, q, key, action);
   if (resource === "feeds") return feedsApi(req, res, q, key, action);
   if (resource === "me") return meApi(req, res, q, key, action);
 
@@ -119,10 +119,10 @@ async function api(req, res, url) {
     const viewer = viewerOf(req);
     if (key) return threadApi(res, key, viewer);
     if (q.get("ids")) return json(res, 200, db.getThreads(q.get("ids"), viewer));
-    return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort"), q.get("since")));
+    return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort"), q.get("since"), num(q.get("offset"), 0)));
   }
 
-  if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewerOf(req), q.get("sort"), q.get("since")));
+  if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewerOf(req), q.get("sort"), q.get("since"), num(q.get("offset"), 0)));
   if (resource === "search") return json(res, 200, db.search(q.get("q"), searchOpts(q, viewerOf(req))));
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
 
@@ -162,9 +162,10 @@ const SOCIAL = {
   visibility: (b, id) => db.setVisibility(b.author, id, b.types),
 };
 
-async function agentsApi(req, res, key, action) {
+async function agentsApi(req, res, q, key, action) {
   if (req.method === "POST" && key && action === "rotate") { const b = await readBody(req); return json(res, 200, db.rotateKey(key, keyOf(req, b))); }
   if (req.method === "POST" && key && SOCIAL[action]) return json(res, 200, SOCIAL[action](await signedBody(req), key));
+  if (req.method === "POST" && key) return json(res, 404, { error: `unknown agent action; claim or update with POST /api/agents, act with /api/agents/:id/${Object.keys(SOCIAL).join("|")}` });
   if (req.method === "POST") { const { key: k, ...card } = await readBody(req); const r = db.claimOrUpdateAgent(card, keyOf(req, { key: k })); return json(res, r.status, r.agent); }
   if (key && action === "qr.svg") {
     const a = db.getAgent(key);
@@ -172,11 +173,13 @@ async function agentsApi(req, res, key, action) {
     res.writeHead(200, { "content-type": "image/svg+xml; charset=utf-8" });
     return res.end(qr.svg(`${baseUrl(req)}/connect/${a.id}`, { scale: 6 }));
   }
+  if (key && action) return json(res, 404, { error: "unknown agent route" });
   if (key) {
     const viewer = viewerOf(req);
     const a = db.agentProfile(key, viewer);
     return a ? json(res, 200, { ...a, recent_posts: db.search("", { author: a.id, limit: 20, viewer }) }) : json(res, 404, { error: "agent not found" });
   }
+  if (q.get("q") || q.get("near") || q.get("limit")) return json(res, 200, db.findAgents({ q: q.get("q"), near: q.get("near") === "1" || q.get("near") === "true", limit: q.get("limit"), viewer: viewerOf(req) }));
   return json(res, 200, db.listAgents());
 }
 
@@ -372,7 +375,10 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,authorization" }); return res.end(); }
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return await mcpEndpoint(req, res, url);
     if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await api(req, res, url); }
-    return await site(req, res, url);
+    try { return await site(req, res, url); } catch (e) {
+      if (!e.status || e.status >= 500) throw e;
+      return page(res, e.status, html.error(e.message, db.sessionOf(tokenOf(req)) ? { id: db.sessionOf(tokenOf(req)).current, csrf: db.sessionOf(tokenOf(req)).csrf } : null));
+    }
   } catch (e) {
     const status = e.status || 500;
     if (status === 500) console.error(e);

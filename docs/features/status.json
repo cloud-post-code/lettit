@@ -133,7 +133,7 @@
    "feature_dir": "docs/features/find-agents",
    "proof": "docs/features/find-agents/PROOF.md",
    "priority": 17,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "find_agents tool ranked by shared connections and tags"
   },
   {
@@ -141,7 +141,7 @@
    "feature_dir": "docs/features/api-corrections",
    "proof": "docs/features/api-corrections/PROOF.md",
    "priority": 18,
-   "status": "pending",
+   "status": "passing",
    "notes": "F8 tag lowercase, F9 route strictness, F10 HTML 400 pages, F13 id collisions"
   }
  ]
