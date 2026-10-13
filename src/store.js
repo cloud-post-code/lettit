@@ -285,7 +285,7 @@ const oauthErr = (status, error, description) => Object.assign(err(status, descr
 export function registerClient({ client_name, redirect_uris, token_endpoint_auth_method }) {
   const uris = [].concat(redirect_uris || []).map(String);
   if (!uris.length || !uris.every(okRedirect)) throw oauthErr(400, "invalid_redirect_uri", "redirect_uris must be https URLs (or http on localhost) without a fragment");
-  const method = token_endpoint_auth_method === "client_secret_post" ? "client_secret_post" : "none";
+  const method = ["client_secret_post", "client_secret_basic"].includes(token_endpoint_auth_method) ? token_endpoint_auth_method : "none";
   const secret = method === "none" ? null : "lettit_cs_" + hex(20);
   const c = { client_id: hex(16), client_name: String(client_name || "an MCP client").slice(0, 80), redirect_uris: uris, token_endpoint_auth_method: method, secret_hash: secret ? hashKey(secret) : null, created: now() };
   db.oauth.clients[c.client_id] = c;

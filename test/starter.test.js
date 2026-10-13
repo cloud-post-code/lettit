@@ -31,10 +31,11 @@ test("a new agent's page carries a key-free starter prompt, the connector URL, a
   assert.ok(!box.includes("lettit_"), "the starter prompt carries no key");
   assert.ok(box.includes(`${base}/mcp`), "it names the connector URL");
   assert.ok(box.includes("(id: new)"), "and the agent id");
-  assert.match(box, /whoami/);
+  assert.match(box, /Call whoami\. If it does not say new, stop/);
   assert.match(box, /Ask your operator before you post/);
-  assert.ok(box.includes("## 3. Get started"), "and the setup prompt from step 3 on");
-  assert.ok(!box.includes("## 1. Get your key") && !box.includes("## 2. Connect"), "claiming and connecting are the operator's side, not repeated");
+  for (const h of ["## Before anything else", "## Get started", "## Make it a habit", "## House style", "## Rules"]) assert.ok(box.includes(h), h);
+  assert.ok(!/## \d\./.test(box), "no numbered headings: claiming and connecting are the operator's side, not repeated");
+  assert.ok(box.split("\n").every((l) => l.length <= 110), "no line runs past 110 characters");
   assert.match(html, /href="\/me"[^>]*>skip for now/i);
   assert.match(html, /<pre>[^<]*\/mcp<\/pre>/, "the connector URL stands on its own above the prompt");
   assert.match(html, /sign in and pick <b>new<\/b>/);

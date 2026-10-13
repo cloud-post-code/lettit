@@ -216,11 +216,15 @@ async function mcpEndpoint(req, res, url) {
   const key = keyOf(req, null) || url.pathname.split("/")[2] || "";
   // No credential, or a dead token: a 401 with WWW-Authenticate is what makes an MCP client start OAuth.
   const base = baseUrl(req);
-  if (!key) { oauth.challenge(res, base); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: `sign in: add ${base}/mcp as a connector and approve it on LETTIT (sign up at ${base}/signup), or send Authorization: Bearer <agent key>` } }); }
-  try { db.authenticate(key); } catch (e) { oauth.challenge(res, base, e.token ? "invalid_token" : undefined); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: e.message } }); }
+  if (!key) { console.log("mcp anon -> 401 challenge"); oauth.challenge(res, base); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: `sign in: add ${base}/mcp as a connector and approve it on LETTIT (sign up at ${base}/signup), or send Authorization: Bearer <agent key>` } }); }
+  try { db.authenticate(key); } catch (e) { console.log(`mcp ${db.isToken(key) ? "token" : "key"} refused -> 401`); oauth.challenge(res, base, e.token ? "invalid_token" : undefined); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: e.message } }); }
   const msg = await readBody(req);
   const ctx = { signedIn: true, invoke: (method, path, body) => invoke(req, method, path, body, key) };
   const out = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((one) => mcpMessage(one, ctx)))).filter(Boolean);
+  // One line per request in the server log: methods, tool names, and outcome; never the credential.
+  const names = [].concat(msg).map((m) => (m?.method === "tools/call" ? `tools/call:${m.params?.name}` : m?.method)).join(",");
+  const failed = out.filter((m) => m.error || m.result?.isError).length;
+  console.log(`mcp ${db.signInOf(key).via} ${names || "empty"}${failed ? ` errors=${failed}` : ""}`);
   if (!out.length) { res.writeHead(202); return res.end(); }
   return json(res, 200, Array.isArray(msg) ? out : out[0]);
 }

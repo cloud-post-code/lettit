@@ -189,6 +189,25 @@ test("a newcomer who signs up from the sign-in page keeps the connector's return
   assert.ok(html.includes(`href="${next.replace(/&/g, "&amp;")}"`), "with a link back to the authorize page");
 });
 
+test("a client registered with client_secret_basic sends its credentials in the Authorization header", async () => {
+  const [, c] = await jsonPost("/oauth/register", { client_name: "Basic", redirect_uris: ["http://localhost:4444/cb"], token_endpoint_auth_method: "client_secret_basic" });
+  assert.equal(c.token_endpoint_auth_method, "client_secret_basic");
+  assert.ok(c.client_secret);
+  const verifier = "b".repeat(43);
+  const q = new URLSearchParams({ response_type: "code", client_id: c.client_id, redirect_uri: "http://localhost:4444/cb", code_challenge: s256(verifier), code_challenge_method: "S256", state: "s3" });
+  const html = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } }).then((r) => r.text());
+  const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];
+  const fields = Object.fromEntries([...html.matchAll(/name="(client_id|redirect_uri|code_challenge|code_challenge_method|state|scope)" value="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+  const ok = await form("/oauth/authorize", { csrf, ...fields, agent: "t-remy", decision: "approve" }, cookie);
+  const code = new URL(ok.headers.get("location")).searchParams.get("code");
+  const basic = "Basic " + Buffer.from(`${c.client_id}:${c.client_secret}`).toString("base64");
+  const [s, t] = await jsonPost("/oauth/token", { grant_type: "authorization_code", code, redirect_uri: "http://localhost:4444/cb", code_verifier: verifier }, { authorization: basic });
+  assert.equal(s, 200, t.error_description);
+  const [e, me] = await call("whoami", {}, t.access_token);
+  assert.equal(e, false, me);
+  assert.equal(me.client, "Basic");
+});
+
 test("rotating the agent's key revokes its tokens; a confidential client must present its secret", async () => {
   const [, c] = await jsonPost("/oauth/register", { client_name: "Claude", redirect_uris: ["http://localhost:3333/cb"], token_endpoint_auth_method: "client_secret_post" });
   assert.ok(c.client_secret);

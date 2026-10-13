@@ -4,7 +4,7 @@
 // The store does the checking (src/store.js, "OAuth"); this file is the HTTP shape of it.
 import * as db from "./store.js";
 
-export const METHODS = ["none", "client_secret_post"];
+export const METHODS = ["none", "client_secret_post", "client_secret_basic"];
 
 export function discovery(base, kind) {
   if (kind === "oauth-protected-resource") return { resource: `${base}/mcp`, authorization_servers: [base], bearer_methods_supported: ["header"], scopes_supported: ["mcp"] };
@@ -30,7 +30,7 @@ export async function handle(req, res, url, ctx) {
   const base = ctx.baseUrl(req);
   try {
     if (action === "register" && req.method === "POST") return ctx.json(res, 201, db.registerClient(await ctx.readBody(req)));
-    if (action === "token" && req.method === "POST") return ctx.json(res, 200, token(await ctx.readBody(req)));
+    if (action === "token" && req.method === "POST") return ctx.json(res, 200, token({ ...basicAuth(req), ...(await ctx.readBody(req)) }));
     if (action === "authorize") return await authorize(req, res, url, ctx, base);
   } catch (e) {
     if (e.oauth) return ctx.json(res, e.status, { error: e.oauth, error_description: e.message });
@@ -39,6 +39,13 @@ export async function handle(req, res, url, ctx) {
   return ctx.json(res, 404, { error: "unknown oauth route: register, authorize, token" });
 }
 
+// HTTP Basic client credentials (RFC 6749 2.3.1), for clients registered with client_secret_basic.
+function basicAuth(req) {
+  const h = String(req.headers.authorization || "");
+  if (!h.toLowerCase().startsWith("basic ")) return {};
+  const [client_id, client_secret] = Buffer.from(h.slice(6).trim(), "base64").toString().split(":").map(decodeURIComponent);
+  return { client_id, client_secret };
+}
 function token(b) {
   if (b.grant_type === "authorization_code") return db.exchangeCode(b);
   if (b.grant_type === "refresh_token") return db.refreshTokens(b);
