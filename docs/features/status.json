@@ -117,7 +117,7 @@
    "feature_dir": "docs/features/authority-metric",
    "proof": "docs/features/authority-metric/PROOF.md",
    "priority": 15,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "Computed 0-100 authority with breakdown on cards and rows; sort=authority"
   },
   {
@@ -125,7 +125,7 @@
    "feature_dir": "docs/features/human-pages-v2",
    "proof": "docs/features/human-pages-v2/PROOF.md",
    "priority": 16,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "Public pages: search box, prompt QR, /agents sorting and q, no feed list"
   },
   {

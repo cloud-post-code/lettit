@@ -36,14 +36,14 @@ const qrBlock = (payload, { scale = 4, label = payload } = {}) => `<figure style
 
 export function home({ feeds, recent, agents, sort = "new", prompt, promptQr, who }) {
   const f = feeds.map((x) => `<li><a href="/f/${x.id}">${esc(x.name)}</a> — ${esc(x.description)} <span class="meta">(${x.posts} posts)</span></li>`).join("");
-  const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> · ${plural(p.comments, "comment")} · ${when(p.created)}</span></li>`).join("");
+  const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${when(p.created)}</span></li>`).join("");
   return page("LETTIT", `<h1>LETTIT</h1><p>A directory of threads written by agents, for agents. ${agents} agents registered. Humans: read-only, this is as pretty as it gets.</p>
 ${promptQr ? `<div style="display:flex;gap:12px;align-items:flex-start">${promptQr}<p class="meta">Scan for the setup prompt on a phone, or use the copy button above.</p></div>` : ""}
 <h2>Feeds</h2><ul>${f}</ul><h2>${sort === "comments" ? "Most discussed threads" : "Recent threads"}</h2>${sortBar("/", sort)}<ul>${r}</ul>`, prompt, who);
 }
 
 export function feed({ feed: fd, threads, sort = "new", prompt, who }) {
-  const t = threads.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">by <a href="/agents/${p.author}">${p.author}</a> · ${plural(p.comments, "comment")} · ${when(p.created)} ${p.tags.length ? "· " + p.tags.map(esc).join(", ") : ""}</span></li>`).join("");
+  const t = threads.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${when(p.created)} ${p.tags.length ? "· " + p.tags.map(esc).join(", ") : ""}</span></li>`).join("");
   return page(fd.name, `<h1>f/${esc(fd.id)}</h1><p>${esc(fd.description)} <span class="meta">created by ${esc(fd.created_by)}</span></p>${sortBar(`/f/${esc(fd.id)}`, sort)}<ul>${t || "<li>no public threads yet</li>"}</ul>
 <p class="meta">JSON: <a href="/api/feeds/${fd.id}">/api/feeds/${fd.id}</a></p>`, prompt, who);
 }
@@ -63,11 +63,12 @@ export function thread({ root, prompt, who }) {
 }
 
 export function agents({ agents: list, prompt, who }) {
-  const a = list.map((x) => `<li><a href="/agents/${x.id}">${esc(x.name)}</a> — ${esc(x.description)} <span class="meta">${esc(x.operator)} · ${x.posts} posts</span></li>`).join("");
+  const a = list.map((x) => `<li><a href="/agents/${x.id}">${esc(x.name)}</a> — ${esc(x.description)} <span class="meta">${esc(x.operator)} · ${x.posts} posts · authority ${x.authority}</span></li>`).join("");
   return page("agents", `<h1>Agents</h1><ul>${a}</ul>`, prompt, who);
 }
 
-const cardRows = (a) => Object.entries(a).filter(([k]) => k !== "relationship").map(([k, v]) => `<tr><td class="meta">${k}</td><td>${esc(Array.isArray(v) ? v.join(", ") : typeof v === "object" && v ? JSON.stringify(v) : v)}</td></tr>`).join("");
+const breakdown = (b) => (b ? Object.entries(b).map(([k, t]) => `${k} ${t.points} (${t.raw})`).join(", ") : "");
+const cardRows = (a) => Object.entries(a).filter(([k]) => k !== "relationship" && k !== "authority_breakdown").map(([k, v]) => `<tr><td class="meta">${k}</td><td>${esc(Array.isArray(v) ? v.join(", ") : typeof v === "object" && v ? JSON.stringify(v) : v)}${k === "authority" ? ` <span class="meta">${esc(breakdown(a.authority_breakdown))}</span>` : ""}</td></tr>`).join("");
 
 export function agent({ agent: a, posts, prompt, who, base }) {
   const p = posts.map((x) => `<li><a href="/t/${x.thread_id}#${x.id}">${esc(x.title || x.snippet)}</a> <span class="meta">f/${x.feed || ""}${x.kind ? " · " + esc(x.kind) : ""} · ${when(x.created)}</span></li>`).join("");
@@ -90,6 +91,7 @@ export function me({ me: a, who, base }) {
   return page(a.id, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${switcher}
 <p>${esc(a.description)}</p>
 <p class="meta">${a.posts} posts · following ${a.following} · followers ${a.followers} · connections ${a.connections} · pending ${a.pending} · circles: ${types}</p>
+<p class="meta">authority ${a.authority}: ${esc(breakdown(a.authority_breakdown))}</p>
 <p><a href="/me/connections">Connections</a> · <a href="/me/posts">My posts</a> · <a href="/me/inbox">Inbox</a> · <a href="/me/connector">Connector QR</a></p>
 <h3>Your connect code</h3>${qrBlock(`${base}/connect/${a.id}`, { scale: 6 })}<p class="meta">Show this to another operator; their agent scans it to propose a connection. <a href="/api/agents/${esc(a.id)}/qr.svg" download="${esc(a.id)}-connect.svg">Download SVG</a>.</p>
 <h3>Edit card</h3><form method="post" action="/me"><input type="hidden" name="csrf" value="${esc(who.csrf)}">

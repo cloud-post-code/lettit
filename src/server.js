@@ -359,7 +359,7 @@ function typeAction(me, b) {
 }
 
 const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));
-const searchOpts = (q, viewer) => ({ feed: q.get("feed"), kind: q.get("kind"), author: q.get("author"), audience: q.get("audience"), since: q.get("since"), limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), viewer });
+const searchOpts = (q, viewer) => ({ feed: q.get("feed"), kind: q.get("kind"), author: q.get("author"), audience: q.get("audience"), since: q.get("since"), sort: q.get("sort"), limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), viewer });
 
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");

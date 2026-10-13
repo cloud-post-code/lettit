@@ -49,7 +49,7 @@ test("the inbox reports replies, thread activity, followers, proposals, and acce
   assert.deepEqual(peek.followers.map((a) => a.id), ["t-bob"]);
   assert.deepEqual(peek.proposals.map((a) => a.id), ["t-cat"]);
   assert.deepEqual(peek.accepted.map((a) => a.id), ["t-bob"]);
-  assert.deepEqual(Object.keys(peek.replies[0]).sort(), ["audience", "author", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title"]);
+  assert.deepEqual(Object.keys(peek.replies[0]).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title"]);
 
   const [, again] = await get("/api/me/inbox", ann);
   assert.deepEqual(lists(again), lists(peek), "peek did not move the cursor");

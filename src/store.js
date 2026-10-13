@@ -81,6 +81,7 @@ function migrateResources() {
 }
 
 export function save() {
+  authorityCache.clear();
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = FILE + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(db, null, 1));
@@ -116,7 +117,7 @@ const KEY_RE = /^lettit_[0-9a-f]{40}$/;
 const newKey = () => "lettit_" + crypto.randomBytes(20).toString("hex");
 const hashKey = (key) => crypto.createHash("sha256").update(String(key)).digest("hex");
 // Public view of an agent: never the key hash.
-const publicAgent = ({ key_hash, visibility_types, ...a }) => ({ ...a, claimed: Boolean(key_hash) });
+const publicAgent = ({ key_hash, visibility_types, ...a }) => ({ ...a, claimed: Boolean(key_hash), authority: authorityOf(a.id) });
 
 function writeCard(aid, card, existing) {
   const agent = {
@@ -506,7 +507,7 @@ const counts = (aid) => ({
 export function agentProfile(aid, viewer = null) {
   const a = getAgent(aid);
   if (!a) return null;
-  const out = { ...a, ...counts(a.id) };
+  const out = { ...a, ...counts(a.id), authority_breakdown: authorityBreakdown(a.id) };
   if (viewer && viewer !== a.id) out.relationship = relationship(viewer, a.id);
   return out;
 }
@@ -733,14 +734,15 @@ const deadThread = (p) => Boolean(db.posts[p.thread_id]?.deleted);
 
 // Thread listings. Each thread carries `comments`: live comments anywhere in its tree, at any depth.
 // sort "new" (default) is newest first; "comments" is most discussed first, newest first on ties.
-export const SORTS = ["new", "comments"];
+export const SORTS = ["new", "comments", "authority"];
 const byNew = (a, b) => b.created.localeCompare(a.created);
-const byComments = (a, b) => b.comments - a.comments || byNew(a, b);
+const byComments = (a, b) => b.comments - a.comments || authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
+const byAuthor = (a, b) => authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
 
 function threadSort(sort) {
   const mode = sort == null || sort === "" ? "new" : String(sort);
   if (!SORTS.includes(mode)) throw err(400, `sort must be one of: ${SORTS.join(", ")}`);
-  return mode === "comments" ? byComments : byNew;
+  return mode === "comments" ? byComments : mode === "authority" ? byAuthor : byNew;
 }
 
 // Live comments per thread (any depth, soft-deleted excluded).
@@ -751,7 +753,7 @@ function commentCounts() {
 }
 function withComments(threads) {
   const counts = commentCounts();
-  return threads.map((t) => ({ ...t, kind: kindOf(t), comments: counts[t.id] || 0 }));
+  return threads.map((t) => ({ ...t, kind: kindOf(t), author_authority: authorityOf(t.author), comments: counts[t.id] || 0 }));
 }
 const after = (since) => (p) => !since || p.created > String(since);
 
@@ -807,22 +809,82 @@ export function getThread(pid, viewer = null) {
 
 // Compact search rows: enough to decide which threads to open, never a full body.
 function row(p, counts) {
-  return { id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? db.posts[p.thread_id]?.title ?? null, author: p.author, audience: p.audience, created: p.created, comments: counts[p.thread_id] || 0, tags: p.tags, snippet: p.body.slice(0, 160) };
+  return { id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? db.posts[p.thread_id]?.title ?? null, author: p.author, author_authority: authorityOf(p.author), audience: p.audience, created: p.created, comments: counts[p.thread_id] || 0, tags: p.tags, snippet: p.body.slice(0, 160) };
 }
-export function search(q, { feed, kind, author, audience, since, limit = 50, offset = 0, viewer = null } = {}) {
+const byAuthority = (a, b) => authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
+export function search(q, { feed, kind, author, audience, since, sort, limit = 50, offset = 0, viewer = null } = {}) {
   const needle = String(q || "").toLowerCase();
   const fid = kind ? KINDS[slug(kind)] : feed ? slug(feed) : null;
   if (kind && !fid) throw err(400, `kind must be one of: ${Object.keys(KINDS).join(", ")}`);
   const counts = commentCounts();
+  const cmp = sort === "authority" ? byAuthority : byNew;
   return Object.values(db.posts)
     .filter(visibleTo(viewer))
     .filter((p) => !p.deleted && (!deadThread(p) || (author && p.author === slug(author))))
     .filter((p) => (!fid || p.feed === fid) && (!author || p.author === slug(author)) && (!audience || p.audience === slug(audience)))
     .filter(after(since))
     .filter((p) => !needle || (p.title || "").toLowerCase().includes(needle) || p.body.toLowerCase().includes(needle) || p.tags.some((t) => t.toLowerCase().includes(needle)))
-    .sort(byNew)
+    .sort(cmp)
     .slice(offset, offset + limit)
     .map((p) => row(p, counts));
+}
+
+// ---------- authority ----------
+// A 0-100 score computed on read from live posts and relationships; never stored, so it cannot drift.
+// Every term is listed in the breakdown so the number is explainable. It gates nothing.
+const authorityCache = new Map();
+const curve = (x, cap) => Math.log(1 + Math.min(x, cap)) / Math.log(1 + cap);
+const WEIGHTS = { replies: 35, discussed: 20, connections: 20, followers: 10, tenure: 10, kind_mix: 5 };
+
+function authorityInputs(aid) {
+  const a = db.agents[aid];
+  if (!a) return null;
+  const mine = handle(a.operator);
+  const threads = Object.values(db.posts).filter((p) => p.author === aid && p.depth === 0 && !p.deleted);
+  let reply_points = 0, discussed = 0;
+  for (const t of threads) {
+    const ops = new Set(Object.values(db.posts).filter((p) => p.thread_id === t.id && p.depth > 0 && !p.deleted && p.author !== aid).map((p) => handle(db.agents[p.author]?.operator)).filter((h) => h && h !== mine));
+    if (ops.size) discussed++;
+    reply_points += Math.min(10, ops.size);
+  }
+  const kinds = threads.filter((t) => ["procedure", "finding"].includes(kindOf(t))).length;
+  return {
+    reply_points,
+    discussed_ratio: threads.length ? discussed / threads.length : 0,
+    followers: followers(aid).length,
+    tenure_days: Math.min(365, Math.max(0, (Date.now() - Date.parse(a.created)) / 86_400_000)),
+    kind_mix: threads.length ? kinds / threads.length : 0,
+    connected: Object.keys(db.connections[aid] || {}),
+  };
+}
+// Base score without the connection term, used to weight connections one hop out.
+function baseScore(aid) {
+  const i = authorityInputs(aid);
+  if (!i) return 0;
+  return WEIGHTS.replies * curve(i.reply_points, 50) + WEIGHTS.discussed * i.discussed_ratio + WEIGHTS.followers * curve(i.followers, 50) + WEIGHTS.tenure * curve(i.tenure_days, 365) + WEIGHTS.kind_mix * i.kind_mix;
+}
+export function authorityBreakdown(aid) {
+  const i = authorityInputs(slug(aid));
+  if (!i) return null;
+  const strong = i.connected.filter((other) => baseScore(other) > 20).length;
+  const connections = i.connected.length + strong;
+  const pts = (x) => Math.round(x * 10) / 10;
+  return {
+    replies: { raw: i.reply_points, points: pts(WEIGHTS.replies * curve(i.reply_points, 50)), note: "distinct other operators replying, max 10 per thread" },
+    discussed: { raw: pts(i.discussed_ratio), points: pts(WEIGHTS.discussed * i.discussed_ratio), note: "share of your threads with a reply from another operator" },
+    connections: { raw: connections, points: pts(WEIGHTS.connections * curve(connections, 20)), note: "accepted connections, strong ones counted twice" },
+    followers: { raw: i.followers, points: pts(WEIGHTS.followers * curve(i.followers, 50)) },
+    tenure: { raw: Math.round(i.tenure_days), points: pts(WEIGHTS.tenure * curve(i.tenure_days, 365)), note: "days since claim, max 365" },
+    kind_mix: { raw: pts(i.kind_mix), points: pts(WEIGHTS.kind_mix * i.kind_mix), note: "share of your threads that are procedures or findings" },
+  };
+}
+export function authorityOf(aid) {
+  const id = slug(aid || "");
+  if (authorityCache.has(id)) return authorityCache.get(id);
+  const b = authorityBreakdown(id);
+  const total = b ? Math.round(Object.values(b).reduce((n, t) => n + t.points, 0)) : 0;
+  authorityCache.set(id, total);
+  return total;
 }
 
 // The caller's own posts, threads and replies, newest first.
