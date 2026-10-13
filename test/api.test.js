@@ -24,10 +24,10 @@ test("seeds the lettit-feedback feed and house agents", async () => {
 });
 
 test("lettit-feedback always lists last, even when it has the most posts", async () => {
-  await post("/api/agents", { name: "Sorter", model: "m", purpose: "p" });
-  await post("/api/feeds", { name: "alpha", description: "d", author: "sorter" });
-  await post("/api/posts", { feed: "lettit-feedback", title: "one", body: "b", author: "sorter" });
-  await post("/api/posts", { feed: "lettit-feedback", title: "two", body: "b", author: "sorter" });
+  await post("/api/agents", { name: "Sorter", operator: "t" });
+  await post("/api/feeds", { name: "alpha", description: "d", author: "t-sorter" });
+  await post("/api/posts", { feed: "lettit-feedback", title: "one", body: "b", author: "t-sorter" });
+  await post("/api/posts", { feed: "lettit-feedback", title: "two", body: "b", author: "t-sorter" });
   const [, feeds] = await get("/api/feeds");
   assert.equal(feeds.at(-1).id, "lettit-feedback");
   assert.ok(feeds.at(-1).posts > feeds[0].posts);
@@ -43,14 +43,14 @@ test("an agent without a key cannot write", async () => {
 });
 
 test("register, post thread, nested replies, search", async () => {
-  const [s1, card] = await post("/api/agents", { name: "Test Bot", model: "m", purpose: "p", capabilities: "a,b" });
+  const [s1, card] = await post("/api/agents", { name: "Test Bot", operator: "t", description: "d" });
   assert.equal(s1, 201);
-  assert.equal(card.id, "test-bot");
-  assert.deepEqual(card.capabilities, ["a", "b"]);
+  assert.equal(card.id, "t-test-bot");
+  assert.equal(card.description, "d");
 
-  const [, thread] = await post("/api/posts", { feed: "lettit-feedback", title: "Zebra question", body: "why stripes", author: "test-bot", tags: ["zoo"] });
-  const [, reply] = await post("/api/posts", { parent_id: thread.id, body: "camouflage", author: "test-bot" });
-  const [, sub] = await post("/api/posts", { parent_id: reply.id, body: "source?", author: "test-bot" });
+  const [, thread] = await post("/api/posts", { feed: "lettit-feedback", title: "Zebra question", body: "why stripes", author: "t-test-bot", tags: ["zoo"] });
+  const [, reply] = await post("/api/posts", { parent_id: thread.id, body: "camouflage", author: "t-test-bot" });
+  const [, sub] = await post("/api/posts", { parent_id: reply.id, body: "source?", author: "t-test-bot" });
   assert.equal(sub.depth, 2);
   assert.equal(sub.thread_id, thread.id);
 

@@ -60,7 +60,7 @@ test("the seed no longer creates the resources feed or thread on a fresh store",
 
 test("package and both MCP transports are named lettit", async () => {
   assert.equal(JSON.parse(fs.readFileSync("package.json", "utf8")).name, "lettit");
-  const child = spawn(process.execPath, ["src/mcp.js"], { env: { ...process.env, AGENTBOARD_URL: base, AGENTBOARD_AGENT: "" }, stdio: ["pipe", "pipe", "inherit"] });
+  const child = spawn(process.execPath, ["src/mcp.js"], { env: { ...process.env, LETTIT_URL: base, LETTIT_AGENT: "" }, stdio: ["pipe", "pipe", "inherit"] });
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
   const line = await new Promise((r) => child.stdout.once("data", (d) => r(String(d))));
   child.kill();

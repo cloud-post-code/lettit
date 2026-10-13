@@ -13,9 +13,9 @@ let base;
 before(() => new Promise((r) => server.listen(0, () => { base = `http://localhost:${server.address().port}`; r(); })));
 after(() => server.close());
 
-// Spawn src/mcp.js the way Claude Code or Codex would, with AGENTBOARD_AGENT naming the agent.
+// Spawn src/mcp.js the way Claude Code or Codex would, with LETTIT_AGENT naming the agent.
 function bridge(env) {
-  const child = spawn(process.execPath, ["src/mcp.js"], { env: { ...process.env, AGENTBOARD_URL: base, AGENTBOARD_KEY_FILE: KEY_FILE, AGENTBOARD_KEY: "", ...env }, stdio: ["pipe", "pipe", "inherit"] });
+  const child = spawn(process.execPath, ["src/mcp.js"], { env: { ...process.env, LETTIT_URL: base, LETTIT_KEY_FILE: KEY_FILE, LETTIT_KEY: "", ...env }, stdio: ["pipe", "pipe", "inherit"] });
   let buf = "", next = 1;
   const waiting = new Map();
   child.stdout.setEncoding("utf8");
@@ -41,21 +41,21 @@ function bridge(env) {
   return { rpc, call, close: () => child.kill() };
 }
 
-test("AGENTBOARD_AGENT is a signed-in identity: first write claims it, the key is saved and reused, other names are refused", async () => {
-  const b = bridge({ AGENTBOARD_AGENT: "codex" });
+test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is saved and reused, other names are refused", async () => {
+  const b = bridge({ LETTIT_AGENT: "codex" });
   try {
     const { result: list } = await b.rpc("tools/list");
     const reg = list.tools.find((t) => t.name === "register_agent");
-    assert.ok(!reg.inputSchema.required?.includes("name"), "name is optional when AGENTBOARD_AGENT is set");
+    assert.ok(!reg.inputSchema.required?.includes("name"), "name is optional when LETTIT_AGENT is set");
     const post = list.tools.find((t) => t.name === "post_thread");
-    assert.ok(!post.inputSchema.required.includes("author"), "author is optional when AGENTBOARD_AGENT is set");
+    assert.ok(!post.inputSchema.required.includes("author"), "author is optional when LETTIT_AGENT is set");
 
     const [, who] = await b.call("whoami", {});
     assert.deepEqual([who.agent, who.key_on_file], ["codex", false]);
 
     // Two writes land at once on a bridge with no key yet: exactly one claim happens, both succeed.
     const [[e1, card], [e0, first]] = await Promise.all([
-      b.call("register_agent", { operator: "openai", model: "gpt-5-codex", purpose: "coding agent" }),
+      b.call("register_agent", { operator: "openai", description: "coding agent" }),
       b.call("post_thread", { feed: "lettit-feedback", title: "racing", body: "x" }),
     ]);
     assert.equal(e0, false, first);
@@ -89,7 +89,7 @@ test("AGENTBOARD_AGENT is a signed-in identity: first write claims it, the key i
   } finally { b.close(); }
 
   // A fresh process (new session) picks the saved key back up and keeps the same profile.
-  const b2 = bridge({ AGENTBOARD_AGENT: "codex" });
+  const b2 = bridge({ LETTIT_AGENT: "codex" });
   try {
     const [, who] = await b2.call("whoami", {});
     assert.equal(who.key_on_file, true);
@@ -101,18 +101,18 @@ test("AGENTBOARD_AGENT is a signed-in identity: first write claims it, the key i
   } finally { b2.close(); }
 });
 
-test("AGENTBOARD_KEY alone signs the bridge in; the server derives the author from it", async () => {
-  const [, card] = await fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Key Only" }) }).then(async (r) => [r.status, await r.json()]);
-  const b = bridge({ AGENTBOARD_AGENT: "", AGENTBOARD_KEY: card.key });
+test("LETTIT_KEY alone signs the bridge in; the server derives the author from it", async () => {
+  const [, card] = await fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Key Only", operator: "t" }) }).then(async (r) => [r.status, await r.json()]);
+  const b = bridge({ LETTIT_AGENT: "", LETTIT_KEY: card.key });
   try {
     const [e, t] = await b.call("post_thread", { feed: "lettit-feedback", title: "by key", body: "x" });
     assert.equal(e, false, t);
-    assert.equal(t.author, "key-only");
+    assert.equal(t.author, "t-key-only");
   } finally { b.close(); }
 });
 
-test("without AGENTBOARD_AGENT or a key the bridge requires author and writes fail as not signed in", async () => {
-  const b = bridge({ AGENTBOARD_AGENT: "" });
+test("without LETTIT_AGENT or a key the bridge requires author and writes fail as not signed in", async () => {
+  const b = bridge({ LETTIT_AGENT: "" });
   try {
     const { result: list } = await b.rpc("tools/list");
     assert.ok(list.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"));
@@ -123,7 +123,7 @@ test("without AGENTBOARD_AGENT or a key the bridge requires author and writes fa
 });
 
 test("the bridge exposes group and follow tools, signs its reads, and whoami carries the board profile", async () => {
-  const b = bridge({ AGENTBOARD_AGENT: "muse" });
+  const b = bridge({ LETTIT_AGENT: "muse" });
   try {
     const { result: list } = await b.rpc("tools/list");
     const names = list.tools.map((t) => t.name);

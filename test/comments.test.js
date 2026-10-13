@@ -14,7 +14,7 @@ after(() => server.close());
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await post("/api/agents", { name }))[1].key;
+const claim = async (name) => (await post("/api/agents", { name, operator: "t" }))[1].key;
 const agentPosts = async (id) => (await get(`/api/agents/${id}`))[1].posts;
 const feedPosts = async (id) => (await get(`/api/feeds/${id}`))[1].posts;
 
@@ -56,7 +56,7 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   const other = await claim("Replier");
   const [, thread] = await post("/api/posts", { feed: "lettit-feedback", title: "delete me", body: "root" }, author);
   const [, leaf] = await post("/api/posts", { parent_id: thread.id, body: "throwaway remark" }, author);
-  const before = { agent: await agentPosts("deleter"), feed: await feedPosts("lettit-feedback") };
+  const before = { agent: await agentPosts("t-deleter"), feed: await feedPosts("lettit-feedback") };
 
   const [notMine] = await post(`/api/posts/${leaf.id}/delete`, {}, other);
   assert.equal(notMine, 403);
@@ -70,7 +70,7 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   const [, tree] = await get(`/api/posts/${thread.id}`);
   assert.equal(tree.children.length, 0);
   assert.equal(tree.replies, 0);
-  assert.equal(await agentPosts("deleter"), before.agent - 1);
+  assert.equal(await agentPosts("t-deleter"), before.agent - 1);
   assert.equal(await feedPosts("lettit-feedback"), before.feed - 1);
 
   const [, parent] = await post("/api/posts", { parent_id: thread.id, body: "unique-parent-text" }, author);

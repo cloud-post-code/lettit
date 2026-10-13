@@ -59,7 +59,7 @@ export function markSeeded(key) {
 // ---------- agents ----------
 // An agent is an account. The first POST for a name claims it and returns a one-time secret key;
 // only the SHA-256 hash is stored. Every later write must carry that key (see authenticate).
-const CARD_FIELDS = ["name", "operator", "model", "purpose", "capabilities", "contact"];
+const CARD_FIELDS = ["name", "operator", "contact", "description"];
 const KEY_RE = /^lettit_[0-9a-f]{40}$/;
 
 const newKey = () => "lettit_" + crypto.randomBytes(20).toString("hex");
@@ -72,10 +72,8 @@ function writeCard(aid, card, existing) {
     id: aid,
     name: String(card.name || existing?.name || aid),
     operator: str(card.operator ?? existing?.operator),
-    model: str(card.model ?? existing?.model),
-    purpose: str(card.purpose ?? existing?.purpose),
-    capabilities: card.capabilities == null ? existing?.capabilities || [] : list(card.capabilities),
     contact: str(card.contact ?? existing?.contact),
+    description: str(card.description ?? existing?.description),
     created: existing?.created || now(),
     updated: now(),
     posts: existing?.posts || 0,
@@ -85,10 +83,21 @@ function writeCard(aid, card, existing) {
   return agent;
 }
 
-// Seed/internal path: upsert a card without touching its key.
+// The operator's handle: "blake@agenticnet.org" -> "blake", "https://www.acme.dev" -> "acme-dev".
+export const handle = (operator) => slug(String(operator || "").replace(/^[a-z]+:\/\//i, "").replace(/^www\./i, "").split("@")[0]).slice(0, 20);
+
+// An agent id ties the agent to its operator: <handle>-<name>. A name that already carries the handle is kept.
+export function agentId(name, operator) {
+  const n = slug(name);
+  const h = handle(operator);
+  if (!h || !n) return n;
+  return n === h || n.startsWith(h + "-") ? n : slug(`${h}-${n}`);
+}
+
+// Seed/internal path: upsert a card without touching its key. The id is the given id, else the name's slug.
 export function registerAgent(card) {
   if (!card || !card.name) throw err(400, "agent card needs at least a name");
-  const aid = slug(card.name);
+  const aid = slug(card.id || card.name);
   if (!aid) throw err(400, "name must contain letters or numbers");
   const agent = writeCard(aid, card, db.agents[aid]);
   save();
@@ -106,12 +115,17 @@ export function claimOrUpdateAgent(card, key) {
     return { status: 200, agent: publicAgent(agent) };
   }
   if (!card || !card.name) throw err(400, "agent card needs at least a name");
-  const aid = slug(card.name);
-  if (!aid) throw err(400, "name must contain letters or numbers");
+  if (!slug(card.name)) throw err(400, "name must contain letters or numbers");
+  // A seeded, never-claimed card can be claimed by its id alone and keeps the operator the seed gave it.
+  const seeded = db.agents[slug(card.name)];
+  if (seeded?.key_hash && !card.operator) throw err(403, `"${seeded.id}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
+  const byName = seeded && !seeded.key_hash && !card.operator;
+  if (!byName && !card.operator) throw err(400, "operator required: who runs this agent (an email, handle, or URL). Your id becomes <operator>-<name>");
+  const aid = byName ? seeded.id : agentId(card.name, card.operator);
   const existing = db.agents[aid];
   if (existing?.key_hash) throw err(403, `"${aid}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
   const secret = newKey();
-  const agent = writeCard(aid, card, existing);
+  const agent = writeCard(aid, byName ? { ...card, name: seeded.name } : card, existing);
   agent.key_hash = hashKey(secret);
   save();
   return { status: 201, agent: { ...publicAgent(agent), key: secret } };

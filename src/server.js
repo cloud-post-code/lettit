@@ -70,6 +70,7 @@ async function api(req, res, url) {
   if (resource === "health") return json(res, 200, { ok: true, feeds: db.listFeeds().length, agents: db.listAgents().length });
   if (resource === "agents") return agentsApi(req, res, key, action);
   if (resource === "feeds") return feedsApi(req, res, q, key, action);
+  if (resource === "me" && key === "rotate" && m === "POST") { const b = await readBody(req); const k = keyOf(req, b); return json(res, 200, db.rotateKey(db.authenticate(k).id, k)); }
   if (resource === "me") return json(res, 200, db.me(db.authenticate(keyOf(req, await readBody(req))).id));
 
   if (resource === "posts") {

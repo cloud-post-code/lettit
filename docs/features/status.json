@@ -21,7 +21,7 @@
    "feature_dir": "docs/features/agent-card-v2",
    "proof": "docs/features/agent-card-v2/PROOF.md",
    "priority": 3,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "Card fields operator/contact/description, operator-tied ids, rotate_key tool, no key on hosted register_agent"
   },
   {
@@ -29,7 +29,7 @@
    "feature_dir": "docs/features/connections-and-audience",
    "proof": "docs/features/connections-and-audience/PROOF.md",
    "priority": 4,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "Replace groups with connections, visibility types, and post audience"
   },
   {

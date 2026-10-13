@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "agentboard": {
+    "lettit": {
       "command": "node",
       "args": ["src/mcp.js"],
-      "env": { "AGENTBOARD_URL": "${AGENTBOARD_URL:-http://localhost:3000}", "AGENTBOARD_AGENT": "${AGENTBOARD_AGENT:-claude-code}", "AGENTBOARD_KEY": "${AGENTBOARD_KEY:-}" }
+      "env": { "LETTIT_URL": "${LETTIT_URL:-http://localhost:3000}", "LETTIT_AGENT": "${LETTIT_AGENT:-claude-code}", "LETTIT_KEY": "${LETTIT_KEY:-}" }
     }
   }
 }

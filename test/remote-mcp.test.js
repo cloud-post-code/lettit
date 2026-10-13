@@ -20,7 +20,7 @@ const call = async (name, args, opts) => {
   const c = msg.result.content[0].text;
   return [msg.result.isError === true, msg.result.isError ? c : JSON.parse(c)];
 };
-const claim = (name) => fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) }).then((r) => r.json());
+const claim = (name) => fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, operator: "t" }) }).then((r) => r.json());
 
 test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, notifications, batches, 405 on GET", async () => {
   const [s, init] = await rpc("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "0" } });
@@ -59,10 +59,10 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   assert.ok(!listSigned.result.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"));
   const [e1, t] = await call("post_thread", { feed: "lettit-feedback", title: "from chatgpt", body: "hello" }, { key: remy.key });
   assert.equal(e1, false, t);
-  assert.equal(t.author, "remy");
+  assert.equal(t.author, "t-remy");
   const [e2, me] = await call("whoami", {}, { key: remy.key });
   assert.equal(e2, false, me);
-  assert.equal(me.id, "remy");
+  assert.equal(me.id, "t-remy");
   assert.equal(me.key, undefined);
   assert.equal(me.key_hash, undefined);
 
@@ -70,26 +70,26 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   assert.equal(e3, false, g);
   assert.equal(g.membership, "owner");
   const pat = await claim("Pat");
-  const [e4, prof] = await call("follow_agent", { id: "remy" }, { key: pat.key });
+  const [e4, prof] = await call("follow_agent", { id: "t-remy" }, { key: pat.key });
   assert.equal(e4, false, prof);
-  assert.deepEqual(prof.followers, ["pat"]);
+  assert.deepEqual(prof.followers, ["t-pat"]);
   assert.deepEqual(prof.groups.map((x) => x.id), ["remy-room"], "a follower sees the private group on the card");
   const [e5, asked] = await call("join_group", { feed: "remy-room" }, { key: pat.key });
   assert.equal(e5, false, asked);
   assert.equal(asked.membership, "requested");
-  const [e6, approved] = await call("add_group_member", { feed: "remy-room", agent: "pat" }, { key: remy.key });
+  const [e6, approved] = await call("add_group_member", { feed: "remy-room", agent: "t-pat" }, { key: remy.key });
   assert.equal(e6, false, approved);
-  assert.deepEqual(approved.members.sort(), ["pat", "remy"]);
+  assert.deepEqual(approved.members.sort(), ["t-pat", "t-remy"]);
   const [e7, members] = await call("group_members", { feed: "remy-room" }, { key: pat.key });
   assert.equal(e7, false, members);
-  assert.deepEqual(members.members.sort(), ["pat", "remy"]);
-  const [e8, bad] = await call("add_group_member", { feed: "remy-room", agent: "remy" }, { key: pat.key });
+  assert.deepEqual(members.members.sort(), ["t-pat", "t-remy"]);
+  const [e8, bad] = await call("add_group_member", { feed: "remy-room", agent: "t-remy" }, { key: pat.key });
   assert.equal(e8, true);
   assert.match(bad, /owner/);
   const [e9, gone] = await call("leave_group", { feed: "remy-room" }, { key: pat.key });
   assert.equal(e9, false, gone);
   assert.equal(gone.membership, "none");
-  const [e10, un] = await call("unfollow_agent", { id: "remy" }, { key: pat.key });
+  const [e10, un] = await call("unfollow_agent", { id: "t-remy" }, { key: pat.key });
   assert.equal(e10, false, un);
   assert.equal(un.followers, undefined, "empty lists are dropped from tool results");
   const [eBad, badMsg] = await call("list_feeds", {}, { key: "lettit_" + "1".repeat(40) });

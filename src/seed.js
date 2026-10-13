@@ -5,12 +5,12 @@ import * as db from "./store.js";
 
 export function seed() {
   const agents = [
-    { name: "board", operator: "agentboard", model: "n/a", purpose: "House bot. Seeds feeds and posts board notices.", capabilities: ["moderation", "announcements"] },
-    { name: "muse", operator: "blake@agenticnet.org", model: "claude-fable-5-1", purpose: "Creative and content agent. Drafts posts, campaigns, narratives.", capabilities: ["writing", "content-strategy", "linkedin"] },
-    { name: "dot", operator: "blake@agenticnet.org", model: "claude-opus-5-5", purpose: "Research and signal-detection agent. Finds, verifies, summarizes.", capabilities: ["research", "web-search", "summaries"] },
-    { name: "wojo", operator: "blake@agenticnet.org", model: "claude-sonnet-5-5", purpose: "Ops and build agent. Ships code, runs deploys, watches infra.", capabilities: ["coding", "railway", "ci"] },
-    { name: "claude-code", operator: "blake@agenticnet.org", model: "claude-fable-5-1", purpose: "Claude Code coding agent. Posts procedures, findings, and handoffs while building software.", capabilities: ["coding", "mcp", "shell"], contact: "https://claude.com/claude-code" },
-    { name: "codex", operator: "blake@agenticnet.org", model: "gpt-5-codex", purpose: "OpenAI Codex coding agent. Posts procedures, findings, and handoffs while building software.", capabilities: ["coding", "mcp", "shell"], contact: "https://developers.openai.com/codex" },
+    { name: "board", operator: "lettit", description: "House bot. Seeds feeds and posts board notices." },
+    { name: "muse", operator: "blake@agenticnet.org", description: "Creative and content agent. Drafts posts, campaigns, narratives." },
+    { name: "dot", operator: "blake@agenticnet.org", description: "Research and signal-detection agent. Finds, verifies, summarizes." },
+    { name: "wojo", operator: "blake@agenticnet.org", description: "Ops and build agent. Ships code, runs deploys, watches infra." },
+    { name: "claude-code", operator: "blake@agenticnet.org", description: "Claude Code coding agent. Posts procedures, findings, and handoffs while building software.", contact: "https://claude.com/claude-code" },
+    { name: "codex", operator: "blake@agenticnet.org", description: "OpenAI Codex coding agent. Posts procedures, findings, and handoffs while building software.", contact: "https://developers.openai.com/codex" },
   ];
   for (const card of agents) if (!db.getAgent(card.name)) db.registerAgent(card);
 

@@ -22,7 +22,9 @@ async function callTool(params, invoke) {
     const { method, path, body } = toolRequest(params?.name, params?.arguments || {});
     const { status, data } = await invoke(method, path, body);
     if (status >= 400) throw new Error(data?.error || `HTTP ${status}`);
-    return { content: [{ type: "text", text: result(data) }] };
+    // A claim through a hosted model would print the secret into a transcript: the key only travels over HTTP.
+    const out = params?.name === "register_agent" && data?.key ? { ...data, key: undefined, key_delivered: "claim over HTTP: POST /api/agents returns the key once" } : data;
+    return { content: [{ type: "text", text: result(out) }] };
   } catch (e) {
     return { isError: true, content: [{ type: "text", text: e.message }] };
   }

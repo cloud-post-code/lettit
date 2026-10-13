@@ -14,7 +14,7 @@ after(() => server.close());
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await post("/api/agents", { name }))[1].key;
+const claim = async (name) => (await post("/api/agents", { name, operator: "t" }))[1].key;
 
 test("open feeds have nothing to join; a public group lets anyone read and only members post", async () => {
   const owner = await claim("Owner");
@@ -26,8 +26,8 @@ test("open feeds have nothing to join; a public group lets anyone read and only 
   const [s, g] = await post("/api/feeds", { name: "Pub Club", description: "ungated", access: "public" }, owner);
   assert.equal(s, 201);
   assert.equal(g.access, "public");
-  assert.equal(g.owner, "owner");
-  assert.deepEqual(g.members, ["owner"]);
+  assert.equal(g.owner, "t-owner");
+  assert.deepEqual(g.members, ["t-owner"]);
   assert.equal(g.membership, "owner");
   const [bad, e2] = await post("/api/feeds", { name: "Weird", access: "secret" }, owner);
   assert.equal(bad, 400);
@@ -50,7 +50,7 @@ test("open feeds have nothing to join; a public group lets anyone read and only 
   const [ok] = await post("/api/posts", { feed: "pub-club", title: "me too", body: "x" }, guest);
   assert.equal(ok, 201);
   const [, members] = await get("/api/feeds/pub-club/members");
-  assert.deepEqual(members.members.sort(), ["guest", "owner"]);
+  assert.deepEqual(members.members.sort(), ["t-guest", "t-owner"]);
 
   const [, feeds] = await get("/api/feeds");
   const card = feeds.find((f) => f.id === "pub-club");
@@ -93,7 +93,7 @@ test("a private group hides its threads from non-members; join is a request the 
   // the owner reads everything, including the thread tree
   const [, mine] = await get("/api/feeds/inner-circle", owner);
   assert.equal(mine.threads.length, 1);
-  assert.deepEqual(mine.members, ["gate-keeper"]);
+  assert.deepEqual(mine.members, ["t-gate-keeper"]);
   assert.deepEqual(mine.requests, []);
 
   const [cannotPost] = await post("/api/posts", { feed: "inner-circle", title: "x", body: "y" }, asker);
@@ -102,13 +102,13 @@ test("a private group hides its threads from non-members; join is a request the 
   assert.equal(reqStatus, 200);
   assert.equal(requested.membership, "requested");
   const [, pending] = await get("/api/feeds/inner-circle", owner);
-  assert.deepEqual(pending.requests, ["asker"]);
-  const [notOwner, e] = await post("/api/feeds/inner-circle/approve", { agent: "asker" }, bystander);
+  assert.deepEqual(pending.requests, ["t-asker"]);
+  const [notOwner, e] = await post("/api/feeds/inner-circle/approve", { agent: "t-asker" }, bystander);
   assert.equal(notOwner, 403);
   assert.match(e.error, /owner/);
-  const [approved, after] = await post("/api/feeds/inner-circle/approve", { agent: "asker" }, owner);
+  const [approved, after] = await post("/api/feeds/inner-circle/approve", { agent: "t-asker" }, owner);
   assert.equal(approved, 200);
-  assert.deepEqual(after.members.sort(), ["asker", "gate-keeper"]);
+  assert.deepEqual(after.members.sort(), ["t-asker", "t-gate-keeper"]);
   assert.deepEqual(after.requests, []);
 
   // a member reads and posts
@@ -126,15 +126,15 @@ test("a private group hides its threads from non-members; join is a request the 
   assert.equal(posted, 201);
 
   // invite adds directly; remove kicks; leave works; the owner cannot leave or be removed
-  const [, invited] = await post("/api/feeds/inner-circle/invite", { agent: "bystander" }, owner);
-  assert.ok(invited.members.includes("bystander"));
-  const [, removed] = await post("/api/feeds/inner-circle/remove", { agent: "bystander" }, owner);
-  assert.ok(!removed.members.includes("bystander"));
+  const [, invited] = await post("/api/feeds/inner-circle/invite", { agent: "t-bystander" }, owner);
+  assert.ok(invited.members.includes("t-bystander"));
+  const [, removed] = await post("/api/feeds/inner-circle/remove", { agent: "t-bystander" }, owner);
+  assert.ok(!removed.members.includes("t-bystander"));
   const [, left] = await post("/api/feeds/inner-circle/leave", {}, asker);
   assert.equal(left.membership, "none");
   const [ownerLeave] = await post("/api/feeds/inner-circle/leave", {}, owner);
   assert.equal(ownerLeave, 400);
-  const [ownerRemove] = await post("/api/feeds/inner-circle/remove", { agent: "gate-keeper" }, owner);
+  const [ownerRemove] = await post("/api/feeds/inner-circle/remove", { agent: "t-gate-keeper" }, owner);
   assert.equal(ownerRemove, 400);
   const [unknown] = await post("/api/feeds/inner-circle/invite", { agent: "nobody" }, owner);
   assert.equal(unknown, 404);
@@ -155,13 +155,13 @@ test("the owner can delete a group only while every post in it is the owner's", 
   // once only the owner's posts remain (simulate: a fresh group with owner posts only)
   await post("/api/feeds", { name: "Solo", access: "private" }, owner);
   await post("/api/posts", { feed: "solo", title: "a", body: "x" }, owner);
-  const [, me0] = await get("/api/agents/deleter");
+  const [, me0] = await get("/api/agents/t-deleter");
   const [s, out] = await post("/api/feeds/solo/delete", {}, owner);
   assert.equal(s, 200, out.error);
   assert.deepEqual(out, { deleted: "solo", posts: 1 });
   const [gone] = await get("/api/feeds/solo");
   assert.equal(gone, 404);
-  const [, me1] = await get("/api/agents/deleter");
+  const [, me1] = await get("/api/agents/t-deleter");
   assert.equal(me1.posts, me0.posts - 1);
   assert.ok(reply.id);
 });

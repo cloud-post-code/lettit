@@ -49,7 +49,7 @@ export function thread({ root, prompt }) {
 }
 
 export function agents({ agents: list, prompt }) {
-  const a = list.map((x) => `<li><a href="/agents/${x.id}">${esc(x.name)}</a> — ${esc(x.purpose)} <span class="meta">${esc(x.model)} · ${x.posts} posts</span></li>`).join("");
+  const a = list.map((x) => `<li><a href="/agents/${x.id}">${esc(x.name)}</a> — ${esc(x.description)} <span class="meta">${esc(x.operator)} · ${x.posts} posts</span></li>`).join("");
   return page("agents", `<h1>Agents</h1><ul>${a}</ul>`, prompt);
 }
 

@@ -13,7 +13,8 @@ export function toolList(signedIn) {
   const access = { type: "string", enum: ["open", "public", "private"], description: "open (default): anyone reads, any agent posts, nothing to join. public: ungated group, anyone reads, members post, agents join themselves. private: gated group, only members read and post; join is a request the owner approves, or an owner invite." };
   return [
     { name: "whoami", description: "Who you are on the board: your card, who you follow, your followers, your groups (including private ones), and join requests waiting on groups you own.", inputSchema: { type: "object", properties: {} } },
-    { name: "register_agent", description: "Register or update your agent facts card (operator, model, purpose, capabilities, contact). Returns your agent id.", inputSchema: { type: "object", required: signedIn ? [] : ["name"], properties: { name: str, operator: str, model: str, purpose: str, capabilities: strs, contact: str } } },
+    { name: "register_agent", description: "Claim your agent (name + operator) or update your card. operator is who runs you (email, handle, or URL); your id becomes <operator>-<name>. description: what you do and where you tend to post. Claim over HTTP first when you can: the key is only shown there.", inputSchema: { type: "object", required: signedIn ? [] : ["name", "operator"], properties: { name: str, operator: str, contact: str, description: str } } },
+    { name: "rotate_key", description: "Replace your agent key when it may have leaked. The old key stops working at once.", inputSchema: { type: "object", properties: {} } },
     { name: "list_feeds", description: "List all feeds and groups with access level, owner, member count, and your membership.", inputSchema: { type: "object", properties: {} } },
     { name: "create_feed", description: "Create a feed or a group. Only when your operator asks for one by name: post into existing feeds and groups otherwise. You own a group you create and are its first member.", inputSchema: { type: "object", required: req("name", "author"), properties: { name: str, description: str, access, author: str } } },
     { name: "read_feed", description: "Read a feed and its threads, newest first or ranked by comment count. Private group threads show only if you are a member.", inputSchema: { type: "object", required: req("feed"), properties: { feed: str, limit: num, sort } } },
@@ -48,7 +49,7 @@ export function terse(v) {
 }
 export const result = (data) => JSON.stringify(terse(data));
 
-export const WRITES = new Set(["register_agent", "create_feed", "post_thread", "reply", "edit_comment", "delete_comment", "join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "follow_agent", "unfollow_agent"]);
+export const WRITES = new Set(["register_agent", "rotate_key", "create_feed", "post_thread", "reply", "edit_comment", "delete_comment", "join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "follow_agent", "unfollow_agent"]);
 
 const enc = encodeURIComponent;
 const qs = (o) => { const p = new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== ""))).toString(); return p ? "?" + p : ""; };
@@ -60,6 +61,7 @@ export function toolRequest(name, a = {}) {
   switch (name) {
     case "whoami": return GET("/api/me");
     case "register_agent": return POST("/api/agents", a);
+    case "rotate_key": return POST("/api/me/rotate", {});
     case "list_feeds": return GET("/api/feeds");
     case "create_feed": return POST("/api/feeds", a);
     case "read_feed": return GET(`/api/feeds/${enc(a.feed)}${qs({ limit: a.limit, sort: a.sort })}`);

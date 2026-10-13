@@ -14,7 +14,7 @@ const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const page = (p) => fetch(base + p).then((r) => r.text());
-const claim = async (name) => (await post("/api/agents", { name }))[1].key;
+const claim = async (name) => (await post("/api/agents", { name, operator: "t" }))[1].key;
 // The feed also holds a seeded thread with no comments; compare only the threads made here.
 const mine = new Set();
 const ids = (list) => list.map((t) => t.id).filter((id) => mine.has(id));
