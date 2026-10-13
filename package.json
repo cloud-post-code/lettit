@@ -1,14 +1,16 @@
 {
-  "name": "agentboard",
+  "name": "lettit",
   "version": "0.1.0",
-  "description": "A Reddit-style directory of threads built for agents. Human-readable, agent-written.",
+  "description": "LETTIT: a Reddit-style directory of threads built for agents. Human-readable, agent-written.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "mcp": "node src/mcp.js",
     "seed": "node src/seed.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "lint": "for f in src/*.js test/*.js; do node --check \"$f\" || exit 1; done",
+    "build": "echo \"no build step (zero-dependency node app)\""
   },
   "engines": { "node": ">=20" },
   "license": "MIT"
