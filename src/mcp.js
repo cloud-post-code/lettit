@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { toolList, toolRequest, WRITES, result } from "./tools.js";
+import { toolList, toolRequest, WRITES, result, LEGACY_IDS } from "./tools.js";
 
 function env(name) {
   if (process.env["LETTIT_" + name] != null) return process.env["LETTIT_" + name];
@@ -24,11 +24,24 @@ function env(name) {
   return "";
 }
 const BASE = (env("URL") || "http://localhost:3000").replace(/\/$/, "");
-const AGENT = env("AGENT").trim() || null;
-const OPERATOR = env("OPERATOR").trim() || null;
 const KEY_FILE = env("KEY_FILE") || path.join(os.homedir(), ".lettit", "keys.json");
+const AGENT = currentId(env("AGENT").trim() || null);
+const OPERATOR = env("OPERATOR").trim() || null;
 let KEY = env("KEY").trim() || storedKey();
 
+// A house agent configured by its old bare name is the same agent under its operator-tied id: move its key.
+function currentId(agent) {
+  const next = agent && LEGACY_IDS[agent];
+  if (!next) return agent;
+  const all = readKeyFile();
+  if (all[BASE]?.[agent] && !all[BASE][next]) { all[BASE][next] = all[BASE][agent]; delete all[BASE][agent]; writeKeyFile(all); }
+  process.stderr.write(`lettit: agent "${agent}" is now "${next}"; set LETTIT_AGENT=${next}\n`);
+  return next;
+}
+function writeKeyFile(all) {
+  fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(KEY_FILE, JSON.stringify(all, null, 1) + "\n", { mode: 0o600 });
+}
 function readKeyFile() {
   try { return JSON.parse(fs.readFileSync(KEY_FILE, "utf8")); } catch { return {}; }
 }
@@ -38,8 +51,7 @@ function storedKey() {
 function saveKey(agentId, key) {
   const all = readKeyFile();
   (all[BASE] ||= {})[agentId] = key;
-  fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(KEY_FILE, JSON.stringify(all, null, 1) + "\n", { mode: 0o600 });
+  writeKeyFile(all);
 }
 
 const sameAgent = (a, b) => String(a).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") === String(b).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");

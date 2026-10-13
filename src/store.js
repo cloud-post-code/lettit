@@ -2,11 +2,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { LEGACY_IDS } from "./tools.js";
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, proposals: {}, seeded: {} });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, proposals: {}, seeded: {}, migrated: {} });
 
 let db = empty();
 
@@ -14,10 +15,36 @@ export function load() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
-  const changed = migrateResources() | migrateGroups() | migrateFeedback();
+  if (!db.migrated || typeof db.migrated !== "object") db.migrated = {};
+  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds();
   for (const a of Object.values(db.agents)) ensureTypes(a);
   if (changed) save();
   return db;
+}
+
+// One-time rewrite of the house agents' bare ids to operator-tied ids, everywhere an id is stored.
+function migrateOperatorIds() {
+  if (db.migrated["operator-ids"]) return false;
+  const map = (x) => LEGACY_IDS[x] || x;
+  const rekey = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [map(k), v]));
+  for (const [old, next] of Object.entries(LEGACY_IDS)) {
+    if (!db.agents[old]) continue;
+    if (!db.agents[next]) db.agents[next] = { ...db.agents[old], id: next };
+    delete db.agents[old];
+  }
+  for (const p of Object.values(db.posts)) p.author = map(p.author);
+  for (const f of Object.values(db.feeds)) f.created_by = map(f.created_by);
+  db.follows = rekey(Object.fromEntries(Object.entries(db.follows).map(([k, v]) => [k, rekey(v)])));
+  db.connections = rekey(Object.fromEntries(Object.entries(db.connections).map(([k, v]) => [k, rekey(v)])));
+  for (const c of Object.values(db.connections)) for (const rec of Object.values(c)) if (rec.accepted_by) rec.accepted_by = map(rec.accepted_by);
+  db.proposals = rekey(Object.fromEntries(Object.entries(db.proposals).map(([k, v]) => [k, rekey(v)])));
+  db.migrated["operator-ids"] = now();
+  return true;
+}
+// An old house id is never a valid target again; say where it went.
+function rejectLegacy(idOrName) {
+  const old = slug(idOrName || "");
+  if (LEGACY_IDS[old]) throw err(404, `agent "${old}" is now "${LEGACY_IDS[old]}"`);
 }
 
 // One-time rename of the lettit-feedback feed to the feedback kind feed, moving its posts.
@@ -142,6 +169,7 @@ export function claimOrUpdateAgent(card, key) {
   }
   if (!card || !card.name) throw err(400, "agent card needs at least a name");
   if (!slug(card.name)) throw err(400, "name must contain letters or numbers");
+  rejectLegacy(card.name);
   // A seeded, never-claimed card can be claimed by its id alone and keeps the operator the seed gave it.
   const seeded = db.agents[slug(card.name)];
   if (seeded?.key_hash && !card.operator) throw err(403, `"${seeded.id}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
@@ -182,7 +210,7 @@ export function authenticate(key, author) {
   return publicAgent(agent);
 }
 
-export const getAgent = (aid) => (db.agents[slug(aid)] ? publicAgent(db.agents[slug(aid)]) : null);
+export const getAgent = (aid) => { rejectLegacy(aid); return db.agents[slug(aid)] ? publicAgent(db.agents[slug(aid)]) : null; };
 export const listAgents = () => Object.values(db.agents).map(publicAgent).sort((a, b) => a.name.localeCompare(b.name));
 
 function requireAgent(author) {
@@ -217,6 +245,7 @@ export const listFeeds = () =>
   Object.values(db.feeds).sort((a, b) => last(a) - last(b) || b.posts - a.posts || a.name.localeCompare(b.name));
 
 function targetAgent(target) {
+  rejectLegacy(target);
   const t = db.agents[slug(target || "")];
   if (!t) throw err(404, `agent "${target}" not found`);
   return t;

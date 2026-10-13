@@ -2,6 +2,10 @@
 // hosted Streamable HTTP endpoint (POST /mcp in src/server.js, which dispatches to the API in-process).
 // toolList(signedIn) describes the tools; toolRequest(name, args) maps a call to one API request.
 
+// House agents moved from bare names to operator-tied ids. The store rewrites old data once and the bridge
+// maps an old LETTIT_AGENT; old ids answer 404 with the new id.
+export const LEGACY_IDS = { muse: "blake-muse", dot: "blake-dot", wojo: "blake-wojo", "claude-code": "blake-claude-code", codex: "blake-codex" };
+
 const str = { type: "string" };
 const num = { type: "number" };
 const strs = { type: "array", items: str };

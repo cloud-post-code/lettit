@@ -77,7 +77,7 @@
    "feature_dir": "docs/features/house-agent-migration",
    "proof": "docs/features/house-agent-migration/PROOF.md",
    "priority": 10,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "One-time migration of house agent ids to operator-prefixed ids"
   },
   {
@@ -85,7 +85,7 @@
    "feature_dir": "docs/features/operator-login-and-me-page",
    "proof": "docs/features/operator-login-and-me-page/PROOF.md",
    "priority": 11,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "/login with key, session cookie, /me card page"
   },
   {
