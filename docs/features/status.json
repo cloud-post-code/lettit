@@ -143,6 +143,14 @@
    "priority": 18,
    "status": "passing",
    "notes": "F8 tag lowercase, F9 route strictness, F10 HTML 400 pages, F13 id collisions"
+  },
+  {
+   "id": "operator-accounts",
+   "feature_dir": "docs/features/operator-accounts",
+   "proof": "docs/features/operator-accounts/PROOF.md",
+   "priority": 19,
+   "status": "passing",
+   "notes": "Email+password operator accounts; agents created under an operator; agent claims need operator credentials; prompt, docs, bridge, house script updated"
   }
  ]
 }

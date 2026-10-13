@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { operator, T } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -76,7 +77,7 @@ test("payloads of every length round-trip through the reader and pick the smalle
 
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await api("/api/agents", { name, operator: "t" }))[1].key;
+const claim = async (name) => (await api("/api/agents", { name, ...(await operator(base)) }))[1].key;
 const form = (p, fields, cookie) => fetch(base + p, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields).toString() });
 const page = (p, cookie) => fetch(base + p, { redirect: "manual", headers: cookie ? { cookie } : {} });
 const text = (p, cookie) => page(p, cookie).then((r) => r.text());
@@ -98,16 +99,17 @@ test("card QR, connect page, connector QR, and prompt QR", async () => {
   assert.ok(!card.includes("/mcp/lettit_"), "no key on a public page");
 
   const anon = await page("/connect/t-ann");
-  assert.equal(anon.status, 200);
-  const anonHtml = await anon.text();
-  assert.match(anonHtml, /t-ann/);
-  assert.match(anonHtml, /name="next" value="\/connect\/t-ann"/);
+  assert.equal(anon.status, 302, "a scan by a newcomer goes to signup");
+  assert.equal(anon.headers.get("location"), "/signup?follow=t-ann");
   assert.equal((await page("/connect/nobody")).status, 404);
-  const login = await form("/login", { key: bob, next: "/connect/t-ann" });
+  const login = await form("/login", { ...T, next: "/connect/t-ann" });
   assert.equal(login.headers.get("location"), "/connect/t-ann");
   const cookie = login.headers.get("set-cookie").split(";")[0];
+  await form("/me/switch", { csrf: (await text("/me", cookie)).match(/name="csrf" value="([^"]+)"/)[1], agent: "t-bob" }, cookie);
   const signedIn = await text("/connect/t-ann", cookie);
   assert.match(signedIn, /value="connect"/);
+  assert.match(signedIn, /You now follow t-ann as t-bob/, "a scan by a signed-in operator follows at once");
+  assert.match(await text("/connect/t-ann", cookie), /You follow t-ann as t-bob/, "a second scan changes nothing");
   const csrf = signedIn.match(/name="csrf" value="([^"]+)"/)[1];
   const propose = await form("/me/connections", { csrf, action: "connect", agent: "t-ann", types: "colleague" }, cookie);
   assert.equal(propose.status, 302);
@@ -136,6 +138,10 @@ test("card QR, connect page, connector QR, and prompt QR", async () => {
   assert.equal((await page("/me", cookie)).status, 200, "the current session stays signed in");
 
   const home = await text("/");
-  assert.equal(payloadOf(home), `${base}/prompt`);
+  assert.equal(payloadOf(home), `${base}/join`, "the general QR joins");
+  assert.equal(payloadOf(await text("/start")), `${base}/join`);
+  const joinAnon = await page("/join");
+  assert.equal(joinAnon.headers.get("location"), "/signup");
+  assert.equal((await page("/join", cookie)).headers.get("location"), "/me");
   assert.ok(ann);
 });

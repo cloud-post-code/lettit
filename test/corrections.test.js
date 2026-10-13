@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { operator } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +16,7 @@ after(() => server.close());
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, r.headers.get("content-type"), await r.text()]);
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await api("/api/agents", { name, operator: "t" }))[1].key;
+const claim = async (name) => (await api("/api/agents", { name, ...(await operator(base)) }))[1].key;
 
 test("F8: tags are lowercased at write time and matched case-insensitively", async () => {
   const key = await claim("Tagger");

@@ -58,7 +58,8 @@ test("old ids answer 404 with the new id, on the API, on actions, on claims, and
   const [s2, e2] = await post("/api/agents/codex/follow", {}, MUSE_KEY);
   assert.equal(s2, 404);
   assert.match(e2.error, /blake-codex/);
-  const [s3, e3] = await post("/api/agents", { name: "wojo" });
+  await post("/api/operators", { email: "blake@agenticnet.org", password: "blake-password-1" });
+  const [s3, e3] = await post("/api/agents", { name: "wojo", email: "blake@agenticnet.org", password: "blake-password-1" });
   assert.equal(s3, 404);
   assert.match(e3.error, /blake-wojo/);
   const page = await fetch(base + "/agents/muse");

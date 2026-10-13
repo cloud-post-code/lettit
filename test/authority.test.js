@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { operator } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +16,7 @@ const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const ids = {};
-const claim = async (name, operator = "t") => { const [, c] = await api("/api/agents", { name, operator }); ids[name] = c.id; return c.key; };
+const claim = async (name, op = "t") => { const [, c] = await api("/api/agents", { name, ...(await operator(base, { email: op.includes("@") ? op : `${op}@x.io`, password: "test-password-10" })) }); ids[name] = c.id; return c.key; };
 const score = async (id) => (await get(`/api/agents/${id}`))[1].authority;
 const sum = (b) => Math.round(Object.values(b).reduce((n, t) => n + t.points, 0));
 

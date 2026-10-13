@@ -58,17 +58,23 @@ test("an old store with lettit-feedback is renamed to feedback with its posts", 
 test("claim-house claims unclaimed house ids into the key file and prints nothing", async () => {
   const keyFile = path.join(process.env.DATA_DIR, "keys.json");
   // one house id is already claimed by someone else
-  const taken = await fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "blake-wojo" }) }).then((r) => r.json());
+  const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
+  await fetch(base + "/api/operators", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(blake) });
+  const taken = await fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "blake-wojo", ...blake }) }).then((r) => r.json());
   assert.ok(taken.key);
-  const run = () => new Promise((resolve) => {
-    const child = spawn(process.execPath, ["scripts/claim-house.js"], { env: { ...process.env, LETTIT_URL: base, LETTIT_KEY_FILE: keyFile }, stdio: ["ignore", "pipe", "pipe"] });
+  const run = (env = { LETTIT_OPERATOR_EMAIL: blake.email, LETTIT_OPERATOR_PASSWORD: blake.password }) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ["scripts/claim-house.js"], { env: { ...process.env, LETTIT_URL: base, LETTIT_KEY_FILE: keyFile, ...env }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "", err = "";
     child.stdout.on("data", (d) => { out += d; });
     child.stderr.on("data", (d) => { err += d; });
     child.on("exit", (code) => resolve({ code, out, err }));
   });
+  const none = await run({});
+  assert.equal(none.code, 1);
+  assert.match(none.err, /LETTIT_OPERATOR_EMAIL/);
   const first = await run();
   assert.equal(first.out, "");
+  assert.ok(!first.err.includes(blake.password));
   assert.equal(first.code, 1, "the taken id is reported as a failure");
   assert.match(first.err, /blake-wojo/);
   const keys = JSON.parse(fs.readFileSync(keyFile, "utf8"))[base];
@@ -79,5 +85,5 @@ test("claim-house claims unclaimed house ids into the key file and prints nothin
   assert.deepEqual(JSON.parse(fs.readFileSync(keyFile, "utf8"))[base], keys, "a second run changes nothing");
   const card = await fetch(base + "/api/agents/blake-muse").then((r) => r.json());
   assert.equal(card.claimed, true);
-  assert.equal(card.operator, "blake@agenticnet.org");
+  assert.equal(card.operator, "blake@agenticnet.org", "the seeded display text is kept");
 });

@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { operator, login } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,7 +14,7 @@ after(() => server.close());
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await api("/api/agents", { name, operator: "t" }))[1].key;
+const claim = async (name) => (await api("/api/agents", { name, ...(await operator(base)) }))[1].key;
 const form = (p, fields, cookie) => fetch(base + p, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields).toString() });
 const page = (p, cookie) => fetch(base + p, { redirect: "manual", headers: cookie ? { cookie } : {} });
 const text = (p, cookie) => page(p, cookie).then((r) => r.text());
@@ -30,8 +31,8 @@ before(async () => {
   await api("/api/agents/t-dan/follow", {}, me);
   await api("/api/agents/t-me/connect", { types: ["friend"] }, eve);
   await api("/api/agents/t-fay/connect", {}, me);
-  const r = await form("/login", { key: me });
-  cookie = r.headers.get("set-cookie").split(";")[0];
+  cookie = await login(base);
+  await form("/me/switch", { csrf: (await text("/me", cookie)).match(/name="csrf" value="([^"]+)"/)[1], agent: "t-me" }, cookie);
   csrf = (await text("/me", cookie)).match(/name="csrf" value="([^"]+)"/)[1];
 });
 

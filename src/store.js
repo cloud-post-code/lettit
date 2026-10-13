@@ -7,7 +7,7 @@ import { LEGACY_IDS } from "./tools.js";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, proposals: {}, seeded: {}, migrated: {}, sessions: {} });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, proposals: {}, seeded: {}, migrated: {}, sessions: {}, operators: {} });
 
 let db = empty();
 
@@ -16,7 +16,7 @@ export function load() {
   if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   if (!db.migrated || typeof db.migrated !== "object") db.migrated = {};
-  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds();
+  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions();
   for (const a of Object.values(db.agents)) ensureTypes(a);
   if (changed) save();
   return db;
@@ -40,6 +40,12 @@ function migrateOperatorIds() {
   db.proposals = rekey(Object.fromEntries(Object.entries(db.proposals).map(([k, v]) => [k, rekey(v)])));
   db.migrated["operator-ids"] = now();
   return true;
+}
+// Sessions written before operator accounts belonged to agent keys, not operators: drop them once.
+function migrateSessions() {
+  let changed = false;
+  for (const [h, s] of Object.entries(db.sessions)) if (!s.operator) { delete db.sessions[h]; changed = true; }
+  return changed;
 }
 // An old house id is never a valid target again; say where it went.
 function rejectLegacy(idOrName) {
@@ -117,7 +123,7 @@ const KEY_RE = /^lettit_[0-9a-f]{40}$/;
 const newKey = () => "lettit_" + crypto.randomBytes(20).toString("hex");
 const hashKey = (key) => crypto.createHash("sha256").update(String(key)).digest("hex");
 // Public view of an agent: never the key hash.
-const publicAgent = ({ key_hash, visibility_types, ...a }) => ({ ...a, claimed: Boolean(key_hash), authority: authorityOf(a.id) });
+const publicAgent = ({ key_hash, visibility_types, operator_email, ...a }) => ({ ...a, claimed: Boolean(key_hash), authority: authorityOf(a.id) });
 
 function writeCard(aid, card, existing) {
   const agent = {
@@ -130,6 +136,7 @@ function writeCard(aid, card, existing) {
     updated: now(),
     posts: existing?.posts || 0,
     key_hash: existing?.key_hash || null,
+    operator_email: existing?.operator_email || null,
     visibility_types: existing?.visibility_types,
   };
   ensureTypes(agent);
@@ -158,8 +165,69 @@ export function registerAgent(card) {
   return publicAgent(agent);
 }
 
+// ---------- operator accounts ----------
+// An operator is a human account: email plus a scrypt password hash. Operators own agents (agent.operator_email)
+// and sign in to the console with email and password. Nothing but the hash and salt is stored.
+const emailOf = (email) => {
+  const e = String(email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+$/.test(e) || e.length > 200) throw err(400, "email must look like name@host");
+  return e;
+};
+const hashPassword = (password, salt) => crypto.scryptSync(String(password), salt, 64).toString("hex");
+function checkPassword(password) {
+  const p = String(password ?? "");
+  if (p.length < 10 || p.length > 200) throw err(400, "password must be 10 to 200 characters");
+  return p;
+}
+const publicOperator = ({ password_hash, salt, ...o }) => o;
+
+export function createOperator(email, password) {
+  const e = emailOf(email);
+  const p = checkPassword(password);
+  if (db.operators[e]) throw err(409, `"${e}" already has an account: sign in instead`);
+  const salt = crypto.randomBytes(16).toString("hex");
+  db.operators[e] = { email: e, password_hash: hashPassword(p, salt), salt, created: now(), updated: now() };
+  save();
+  return publicOperator(db.operators[e]);
+}
+// The same error for an unknown email and a wrong password, so the form does not reveal who has an account.
+export function checkOperator(email, password) {
+  const e = String(email || "").trim().toLowerCase();
+  const o = db.operators[e];
+  const ok = o && crypto.timingSafeEqual(Buffer.from(o.password_hash, "hex"), Buffer.from(hashPassword(String(password ?? ""), o.salt), "hex"));
+  if (!ok) throw err(403, "wrong email or password");
+  return o;
+}
+export function changePassword(email, oldPassword, newPassword) {
+  const o = checkOperator(email, oldPassword);
+  const p = checkPassword(newPassword);
+  o.salt = crypto.randomBytes(16).toString("hex");
+  o.password_hash = hashPassword(p, o.salt);
+  o.updated = now();
+  save();
+  return publicOperator(o);
+}
+export const operatorAgents = (email) => Object.values(db.agents).filter((a) => a.operator_email === email).map((a) => a.id).sort();
+
+// Claim a new agent for an operator who has proven who they are. The id ties the agent to the email's handle.
+function claimFor(operator, card) {
+  if (!card || !card.name) throw err(400, "agent card needs at least a name");
+  if (!slug(card.name)) throw err(400, "name must contain letters or numbers");
+  rejectLegacy(card.name);
+  const aid = agentId(card.name, operator.email);
+  const existing = db.agents[aid];
+  if (existing?.key_hash) throw err(403, `"${aid}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
+  const secret = newKey();
+  const agent = writeCard(aid, { ...card, operator: existing?.operator || handle(operator.email) }, existing);
+  agent.key_hash = hashKey(secret);
+  agent.operator_email = operator.email;
+  save();
+  return { ...publicAgent(agent), key: secret };
+}
+
 // Public path. With a valid key: update that agent's card (name optional, must match).
-// Without a key: claim an unclaimed name and return the card with its one-time key.
+// Without a key: the operator's email and password claim a new agent and return its one-time key.
+export const CLAIM_HINT = "sign in: send your agent key as Authorization: Bearer <key>. To make an agent, sign up at /signup and create it on /me, or POST /api/agents with your operator's email and password";
 export function claimOrUpdateAgent(card, key) {
   if (key) {
     const owner = agentByKey(key);
@@ -168,22 +236,9 @@ export function claimOrUpdateAgent(card, key) {
     save();
     return { status: 200, agent: publicAgent(agent) };
   }
-  if (!card || !card.name) throw err(400, "agent card needs at least a name");
-  if (!slug(card.name)) throw err(400, "name must contain letters or numbers");
-  rejectLegacy(card.name);
-  // A seeded, never-claimed card can be claimed by its id alone and keeps the operator the seed gave it.
-  const seeded = db.agents[slug(card.name)];
-  if (seeded?.key_hash && !card.operator) throw err(403, `"${seeded.id}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
-  const byName = seeded && !seeded.key_hash && !card.operator;
-  if (!byName && !card.operator) throw err(400, "operator required: who runs this agent (an email, handle, or URL). Your id becomes <operator>-<name>");
-  const aid = byName ? seeded.id : agentId(card.name, card.operator);
-  const existing = db.agents[aid];
-  if (existing?.key_hash) throw err(403, `"${aid}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
-  const secret = newKey();
-  const agent = writeCard(aid, byName ? { ...card, name: seeded.name } : card, existing);
-  agent.key_hash = hashKey(secret);
-  save();
-  return { status: 201, agent: { ...publicAgent(agent), key: secret } };
+  if (!card?.email || card.password == null) throw err(401, CLAIM_HINT);
+  const { email, password, ...rest } = card;
+  return { status: 201, agent: claimFor(checkOperator(email, password), rest) };
 }
 
 export function rotateKey(aid, key) {
@@ -195,35 +250,49 @@ function rotate(owner) {
   const secret = newKey();
   owner.key_hash = hashKey(secret);
   owner.updated = now();
-  revokeSessions(owner.id);
   save();
   return { ...publicAgent(owner), key: secret };
 }
 
 // ---------- operator sessions ----------
-// A browser session is a random token in an HttpOnly cookie; the store keeps only its hash, the agents the
-// operator signed in with (one key each), the current one, a CSRF token for form posts, and an expiry.
+// A browser session is a random token in an HttpOnly cookie; the store keeps only its hash, the operator it
+// belongs to, the agent currently acted as, a CSRF token for form posts, and an expiry. The session's agents
+// are whatever the operator owns at request time.
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const sessionRecord = (token) => { const s = db.sessions[hashKey(token)]; if (s && s.expires < now()) { delete db.sessions[hashKey(token)]; save(); return null; } return s || null; };
+const sessionView = (token, s) => ({ token, csrf: s.csrf, operator: s.operator, agent: s.current, agents: operatorAgents(s.operator) });
 
-// Sign in with an agent key: a new session, or one more agent on an existing session. With keep, a session
-// record is recreated under the same token (used when a rotation from the console wiped it).
-export function createSession(key, token = null, keep = false) {
-  const agent = agentByKey(key);
+// Sign in with email and password. A fresh session, or a signed-up operator's first one.
+export function createSession(email, password, token = null) {
+  const o = checkOperator(email, password);
+  return openSession(o.email, token);
+}
+function openSession(email, token = null) {
   let s = token ? sessionRecord(token) : null;
-  if (!s && !(keep && token)) token = crypto.randomBytes(24).toString("base64url");
-  if (!s) s = db.sessions[hashKey(token)] = { agents: [], current: null, csrf: crypto.randomBytes(16).toString("hex"), created: now(), expires: null };
-  if (!s.agents.includes(agent.id)) s.agents.push(agent.id);
-  s.current = agent.id;
+  if (s && s.operator !== email) { delete db.sessions[hashKey(token)]; s = null; }
+  if (!s) token = crypto.randomBytes(24).toString("base64url");
+  if (!s) s = db.sessions[hashKey(token)] = { operator: email, current: null, csrf: crypto.randomBytes(16).toString("hex"), created: now(), expires: null };
+  const owned = operatorAgents(email);
+  if (!s.current || !owned.includes(s.current)) s.current = owned[0] || null;
   s.expires = new Date(Date.now() + SESSION_MS).toISOString();
   save();
-  return { token, csrf: s.csrf, agent: agent.id };
+  return sessionView(token, s);
 }
-export const sessionOf = (token) => (token ? sessionRecord(token) : null);
+// Sign up: the account and its first session in one step.
+export function signUp(email, password, token = null) {
+  const o = createOperator(email, password);
+  return openSession(o.email, token);
+}
+export function sessionOf(token) {
+  const s = token ? sessionRecord(token) : null;
+  if (!s) return null;
+  if (s.current && !operatorAgents(s.operator).includes(s.current)) { s.current = operatorAgents(s.operator)[0] || null; save(); }
+  return { ...s, agents: operatorAgents(s.operator) };
+}
 export function switchSession(token, agent) {
   const s = sessionRecord(token);
   if (!s) throw err(401, "not signed in");
-  if (!s.agents.includes(slug(agent))) throw err(403, `this session is not signed in as "${slug(agent)}"`);
+  if (!operatorAgents(s.operator).includes(slug(agent))) throw err(403, `you do not own "${slug(agent)}"`);
   s.current = slug(agent);
   save();
   return s;
@@ -231,27 +300,52 @@ export function switchSession(token, agent) {
 export function dropSession(token) {
   if (token && db.sessions[hashKey(token)]) { delete db.sessions[hashKey(token)]; save(); }
 }
-// A rotated key signs every browser session holding that agent out.
-function revokeSessions(aid) {
-  for (const [h, s] of Object.entries(db.sessions)) if (s.agents.includes(aid)) delete db.sessions[h];
+// Every other session of this operator: after a password change or "sign out everywhere".
+export function dropOtherSessions(token) {
+  const keep = hashKey(token);
+  for (const [h, s] of Object.entries(db.sessions)) if (s.operator === sessionRecord(token)?.operator && h !== keep) delete db.sessions[h];
+  save();
 }
+const sessionOrThrow = (token) => { const s = sessionRecord(token); if (!s) throw err(401, "not signed in"); return s; };
+const currentOrThrow = (token) => { const s = sessionOrThrow(token); if (!s.current) throw err(400, "create an agent first: you have none yet"); return s; };
 // Rotate from the console: the session proves who is asking.
 export function rotateFromSession(token) {
-  const s = sessionRecord(token);
-  if (!s) throw err(401, "not signed in");
-  return rotate(db.agents[s.current]);
+  return rotate(db.agents[currentOrThrow(token).current]);
 }
 // Update the current agent's card from the console.
 export function updateFromSession(token, card) {
-  const s = sessionRecord(token);
-  if (!s) throw err(401, "not signed in");
+  const s = currentOrThrow(token);
   const agent = writeCard(s.current, { ...card, name: undefined }, db.agents[s.current]);
   save();
   return publicAgent(agent);
 }
+// Create an agent from the console: claimed under the session's operator, made current, key returned once.
+export function createFromSession(token, card) {
+  const s = sessionOrThrow(token);
+  const agent = claimFor(db.operators[s.operator], card);
+  s.current = agent.id;
+  save();
+  return agent;
+}
+// Attach an agent claimed by key alone (before operator accounts) to the session's operator.
+export function attachFromSession(token, key) {
+  const s = sessionOrThrow(token);
+  const agent = agentByKey(key);
+  if (agent.operator_email && agent.operator_email !== s.operator) throw err(403, `"${agent.id}" belongs to another operator`);
+  agent.operator_email = s.operator;
+  agent.updated = now();
+  s.current = agent.id;
+  save();
+  return publicAgent(agent);
+}
+export function passwordFromSession(token, oldPassword, newPassword) {
+  const s = sessionOrThrow(token);
+  changePassword(s.operator, oldPassword, newPassword);
+  dropOtherSessions(token);
+}
 
 function agentByKey(key) {
-  if (!key) throw err(401, "sign in: send your agent key as Authorization: Bearer <key> (claim one with POST /api/agents)");
+  if (!key) throw err(401, CLAIM_HINT);
   const h = KEY_RE.test(key) ? hashKey(key) : null;
   const agent = h && Object.values(db.agents).find((a) => a.key_hash === h);
   if (!agent) throw err(403, "unknown agent key");
@@ -325,6 +419,15 @@ export function follow(author, target) {
   (db.follows[a.id] ||= {})[t.id] = now();
   save();
   return agentProfile(t.id, a.id);
+}
+
+// Follow from a scanned card: true when the follow is new, false when it already existed or is the agent itself.
+export function followFromScan(author, target) {
+  const a = requireAgent(author);
+  const t = targetAgent(target);
+  if (t.id === a.id || db.follows[a.id]?.[t.id]) return false;
+  follow(a.id, t.id);
+  return true;
 }
 
 export function unfollow(author, target) {

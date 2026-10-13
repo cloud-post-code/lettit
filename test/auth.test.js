@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { claimCard } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +16,7 @@ const get = (p) => fetch(base + p).then(async (r) => [r.status, await r.json()])
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 
 test("claiming a name returns a key once; reads never expose it", async () => {
-  const [s, card] = await post("/api/agents", { name: "Keyed Bot", operator: "t" });
+  const [s, card] = await claimCard(base, { name: "Keyed Bot" });
   assert.equal(s, 201);
   assert.equal(card.id, "t-keyed-bot");
   assert.match(card.key, /^lettit_[0-9a-f]{40}$/);
@@ -30,7 +31,7 @@ test("claiming a name returns a key once; reads never expose it", async () => {
 });
 
 test("writes need the key; author comes from the key", async () => {
-  const [, card] = await post("/api/agents", { name: "Writer", operator: "t" });
+  const [, card] = await claimCard(base, { name: "Writer" });
   const [noKey, e1] = await post("/api/posts", { feed: "feedback", title: "t", body: "b", author: "t-writer" });
   assert.equal(noKey, 401);
   assert.match(e1.error, /key/i);
@@ -56,8 +57,8 @@ test("writes need the key; author comes from the key", async () => {
 });
 
 test("a claimed name cannot be re-claimed; the key updates the card and can be rotated", async () => {
-  const [, card] = await post("/api/agents", { name: "Rotor", operator: "t", description: "old" });
-  const [again, e1] = await post("/api/agents", { name: "Rotor", operator: "t", description: "hijack" });
+  const [, card] = await claimCard(base, { name: "Rotor", description: "old" });
+  const [again, e1] = await claimCard(base, { name: "Rotor", description: "hijack" });
   assert.equal(again, 403);
   assert.match(e1.error, /claimed/i);
   const [upd, updated] = await post("/api/agents", { description: "new" }, card.key);
@@ -80,12 +81,17 @@ test("a claimed name cannot be re-claimed; the key updates the card and can be r
   assert.equal(noKeyRotate, 401);
 });
 
-test("seeded house agents stay unclaimed until claimed once", async () => {
-  const [s1, codex] = await post("/api/agents", { name: "blake-codex" });
+test("seeded house agents stay unclaimed until their operator claims them once", async () => {
+  const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
+  const [anon, e] = await post("/api/agents", { name: "blake-codex" });
+  assert.equal(anon, 401, "no claim without the operator's credentials");
+  assert.match(e.error, /\/signup/);
+  const [s1, codex] = await claimCard(base, { name: "blake-codex" }, blake);
   assert.equal(s1, 201);
+  assert.equal(codex.id, "blake-codex", "the seeded id is kept, not doubled");
   assert.match(codex.key, /^lettit_/);
-  assert.equal(codex.operator, "blake@agenticnet.org", "a seeded card keeps the operator the seed gave it");
-  const [s2] = await post("/api/agents", { name: "blake-codex" });
+  assert.equal(codex.description.startsWith("Codex session"), true, "the seeded card text is kept");
+  const [s2] = await claimCard(base, { name: "blake-codex" }, blake);
   assert.equal(s2, 403);
   const [w] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, codex.key);
   assert.equal(w, 201);

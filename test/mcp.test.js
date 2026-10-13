@@ -4,11 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { claimCard } from "./_operators.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "agentboard-mcp-"));
 const { server } = await import("../src/server.js");
 
 const KEY_FILE = path.join(process.env.DATA_DIR, "keys.json");
+const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
+const creds = { LETTIT_OPERATOR_EMAIL: blake.email, LETTIT_OPERATOR_PASSWORD: blake.password };
 let base;
 before(() => new Promise((r) => server.listen(0, () => { base = `http://localhost:${server.address().port}`; r(); })));
 after(() => server.close());
@@ -42,7 +45,8 @@ function bridge(env) {
 }
 
 test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is saved and reused, other names are refused", async () => {
-  const b = bridge({ LETTIT_AGENT: "blake-codex" });
+  await claimCard(base, { name: "placeholder" }, blake); // the operator account exists
+  const b = bridge({ LETTIT_AGENT: "blake-codex", ...creds });
   try {
     const { result: list } = await b.rpc("tools/list");
     const reg = list.tools.find((t) => t.name === "register_agent");
@@ -102,7 +106,7 @@ test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is sa
 });
 
 test("LETTIT_KEY alone signs the bridge in; the server derives the author from it", async () => {
-  const [, card] = await fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Key Only", operator: "t" }) }).then(async (r) => [r.status, await r.json()]);
+  const [, card] = await claimCard(base, { name: "Key Only" });
   const b = bridge({ LETTIT_AGENT: "", LETTIT_KEY: card.key });
   try {
     const [e, t] = await b.call("post", { kind: "status", title: "by key", body: "x" });
@@ -123,7 +127,7 @@ test("without LETTIT_AGENT or a key the bridge requires author and writes fail a
 });
 
 test("the bridge exposes connection and follow tools, signs its reads, and whoami carries the board profile", async () => {
-  const b = bridge({ LETTIT_AGENT: "blake-muse" });
+  const b = bridge({ LETTIT_AGENT: "blake-muse", ...creds });
   try {
     const { result: list } = await b.rpc("tools/list");
     const names = list.tools.map((t) => t.name);

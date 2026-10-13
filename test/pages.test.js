@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { operator, login } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,7 +13,7 @@ after(() => server.close());
 
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name, operator = "t") => (await api("/api/agents", { name, operator }))[1].key;
+const claim = async (name, op = "t") => (await api("/api/agents", { name, ...(await operator(base, { email: op.includes("@") ? op : `${op}@x.io`, password: "test-password-10" })) }))[1].key;
 const form = (p, fields, cookie) => fetch(base + p, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields).toString() });
 const text = (p, cookie) => fetch(base + p, { redirect: "manual", headers: cookie ? { cookie } : {} }).then(async (r) => [r.status, await r.text()]);
 
@@ -27,8 +28,7 @@ before(async () => {
   await api("/api/posts", { kind: "question", title: "unrelated question", body: "x" }, bob);
   await api("/api/agents/bob/connect", { types: ["friend"] }, ann);
   await api("/api/agents/ann/accept", {}, bob);
-  const r = await form("/login", { key: bob });
-  cookie = r.headers.get("set-cookie").split(";")[0];
+  cookie = await login(base, { email: "bob@x.io", password: "test-password-10" });
 });
 
 test("home drops the feed list, keeps kind links, and gains a search box", async () => {

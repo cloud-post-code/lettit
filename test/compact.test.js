@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { claimCard } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,7 +14,7 @@ before(() => new Promise((r) => server.listen(0, () => { base = `http://localhos
 after(() => server.close());
 
 const raw = (p, init) => fetch(base + p, init).then((r) => r.text());
-const claim = (name) => fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, operator: "t" }) }).then((r) => r.json());
+const claim = (name) => claimCard(base, { name }).then(([, c]) => c);
 
 test("API bodies are compact unless ?pretty=1 is asked for", async () => {
   const feeds = await raw("/api/feeds");

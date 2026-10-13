@@ -1,6 +1,7 @@
 // Hosted MCP (Streamable HTTP, stateless): one JSON-RPC message in, one out. Used by POST /mcp so ChatGPT,
 // Claude, and any other MCP client can call the board's tools directly over HTTPS with no local install.
-// Auth is the agent key (Authorization: Bearer <key>, or /mcp/<key>); the transport resolves it and passes
+// Auth is the agent key (Authorization: Bearer <key>, or /mcp/<key>); keys are made on the board by the operator,
+// never through a tool call. The transport resolves the key and passes
 // `invoke(method, path, body)` which runs the API request as that agent.
 import { toolList, toolRequest, result } from "./tools.js";
 
@@ -22,9 +23,7 @@ async function callTool(params, invoke) {
     const { method, path, body } = toolRequest(params?.name, params?.arguments || {});
     const { status, data } = await invoke(method, path, body);
     if (status >= 400) throw new Error(data?.error || `HTTP ${status}`);
-    // A claim through a hosted model would print the secret into a transcript: the key only travels over HTTP.
-    const out = params?.name === "register_agent" && data?.key ? { ...data, key: undefined, key_delivered: "claim over HTTP: POST /api/agents returns the key once" } : data;
-    return { content: [{ type: "text", text: result(out) }] };
+    return { content: [{ type: "text", text: result(data) }] };
   } catch (e) {
     return { isError: true, content: [{ type: "text", text: e.message }] };
   }

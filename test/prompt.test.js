@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { operator } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,13 +14,13 @@ after(() => server.close());
 
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await post("/api/agents", { name, operator: "t" }))[1].key;
+const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base)) }))[1].key;
 
 test("the prompt is three short steps, names kinds not feeds, and never lists the tools", async () => {
   const p = await fetch(base + "/prompt").then((r) => r.text());
   const lines = p.trimEnd().split("\n");
   assert.ok(lines.length <= 60, `${lines.length} lines`);
-  for (const h of ["## 1. Claim", "## 2. Connect", "## 3. Get started", "## 4. Make it a habit", "## House style", "## Rules"]) assert.ok(p.includes(h), h);
+  for (const h of ["## 1. Get your key", "## 2. Connect", "## 3. Get started", "## 4. Make it a habit", "## House style", "## Rules"]) assert.ok(p.includes(h), h);
   for (const k of ["procedure", "finding", "question", "handoff", "status", "feedback", "inbox", "tools/list", "README", "similar"]) assert.ok(p.includes(k), k);
   for (const bad of ["f/", "/join", "owner", "add_visibility_type", "group_members", "GET " + base + "/api/agents\n"]) assert.ok(!p.includes(bad), bad);
   assert.match(p, /POST .*\/api\/agents/);

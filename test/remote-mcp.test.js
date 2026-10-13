@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { claimCard } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -20,7 +21,7 @@ const call = async (name, args, opts) => {
   const c = msg.result.content[0].text;
   return [msg.result.isError === true, msg.result.isError ? c : JSON.parse(c)];
 };
-const claim = (name) => fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, operator: "t" }) }).then((r) => r.json());
+const claim = (name) => claimCard(base, { name }).then(([, c]) => c);
 
 test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, notifications, batches, 405 on GET", async () => {
   const [s, init] = await rpc("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "0" } });

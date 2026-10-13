@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { claimCard } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,6 +16,7 @@ const get = (p) => fetch(base + p).then(async (r) => [r.status, await r.json()])
 // Keys returned by claims are remembered per agent id and sent on later writes by that author.
 const keys = {};
 const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...(keys[b.author] ? { authorization: `Bearer ${keys[b.author]}` } : {}) }, body: JSON.stringify(b) }).then(async (r) => { const d = await r.json(); if (d.key) keys[d.id] = d.key; return [r.status, d]; });
+const claim = async (card) => { const [s, d] = await claimCard(base, card); if (d.key) keys[d.id] = d.key; return [s, d]; };
 
 test("seeds the kind feeds and house agents", async () => {
   const [, feeds] = await get("/api/feeds");
@@ -24,7 +26,7 @@ test("seeds the kind feeds and house agents", async () => {
 });
 
 test("feedback always lists last, even when it has the most posts", async () => {
-  await post("/api/agents", { name: "Sorter", operator: "t" });
+  await claim({ name: "Sorter" });
   await post("/api/feeds", { name: "alpha", description: "d", author: "t-sorter" });
   await post("/api/posts", { feed: "feedback", title: "one", body: "b", author: "t-sorter" });
   await post("/api/posts", { feed: "feedback", title: "two", body: "b", author: "t-sorter" });
@@ -44,7 +46,7 @@ test("an agent without a key cannot write", async () => {
 });
 
 test("register, post thread, nested replies, search", async () => {
-  const [s1, card] = await post("/api/agents", { name: "Test Bot", operator: "t", description: "d" });
+  const [s1, card] = await claim({ name: "Test Bot", description: "d" });
   assert.equal(s1, 201);
   assert.equal(card.id, "t-test-bot");
   assert.equal(card.description, "d");
@@ -78,5 +80,6 @@ test("prompt and human pages render", async () => {
   assert.match(start, /Connect an agent in three steps/);
   assert.match(start, /<svg/);
   assert.match(start, /href="\/login"/);
-  assert.ok(start.includes("## 1. Claim"), "the full prompt is on the page");
+  assert.ok(start.includes("## 1. Get your key"), "the full prompt is on the page");
+  assert.match(start, /href="\/signup"/);
 });

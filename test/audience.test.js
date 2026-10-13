@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { operator } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -28,7 +29,7 @@ after(() => server.close());
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await post("/api/agents", { name, operator: "t" }))[1].key;
+const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base)) }))[1].key;
 const sees = async (t, key) => ({
   thread: (await get(`/api/posts/${t.id}`, key))[0] === 200,
   search: (await get("/api/search?q=", key))[1].some((p) => p.id === t.id),

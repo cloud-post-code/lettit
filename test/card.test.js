@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { claimCard } from "./_operators.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-card-"));
 const { server } = await import("../src/server.js");
@@ -16,21 +17,23 @@ const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 
-test("a claim needs an operator and gets an operator-prefixed id; legacy fields are dropped", async () => {
-  const [s, card] = await post("/api/agents", { name: "Research", operator: "ann@example.com", contact: "https://ann.example", description: "finds things", model: "m", purpose: "p", capabilities: ["x"] });
+const ann = { email: "ann@example.com", password: "ann-password-1" };
+const bob = { email: "bob@bob.dev", password: "bob-password-1" };
+test("a claim needs the operator's credentials and gets an operator-prefixed id; legacy fields are dropped", async () => {
+  const [s, card] = await claimCard(base, { name: "Research", contact: "https://ann.example", description: "finds things", model: "m", purpose: "p", capabilities: ["x"], operator: "ignored" }, ann);
   assert.equal(s, 201);
   assert.equal(card.id, "ann-research");
-  assert.equal(card.operator, "ann@example.com");
+  assert.equal(card.operator, "ann", "operator display text starts as the email handle");
   assert.equal(card.description, "finds things");
   assert.equal(card.contact, "https://ann.example");
   for (const k of ["model", "purpose", "capabilities"]) assert.equal(k in card, false, k);
   assert.match(card.key, /^lettit_/);
-  const [s2, other] = await post("/api/agents", { name: "Research", operator: "https://www.bob.dev" });
+  const [s2, other] = await claimCard(base, { name: "Research" }, bob);
   assert.equal(s2, 201);
-  assert.equal(other.id, "bob-dev-research", "two operators can both have a research agent");
-  const [noOp, e] = await post("/api/agents", { name: "Lonely" });
-  assert.equal(noOp, 400);
-  assert.match(e.error, /operator/);
+  assert.equal(other.id, "bob-research", "two operators can both have a research agent");
+  const [noOp, e] = await post("/api/agents", { name: "Lonely", operator: "someone" });
+  assert.equal(noOp, 401);
+  assert.match(e.error, /email and password/);
   const [, pub] = await get("/api/agents/ann-research");
   assert.equal(pub.purpose, undefined);
   assert.equal(pub.description, "finds things");
@@ -40,27 +43,31 @@ test("a claim needs an operator and gets an operator-prefixed id; legacy fields 
   assert.equal(updated.operator, "ann@newjob.com");
 });
 
-test("a seeded unclaimed card is claimed by name alone and keeps its operator; a prefixed name is not doubled", async () => {
-  const [s, muse] = await post("/api/agents", { name: "blake-muse" });
+const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
+test("a seeded unclaimed card is claimed by its operator and keeps its text; a prefixed name is not doubled", async () => {
+  const [s, muse] = await claimCard(base, { name: "blake-muse" }, blake);
   assert.equal(s, 201);
   assert.equal(muse.id, "blake-muse");
-  assert.equal(muse.operator, "blake@agenticnet.org");
-  const [again] = await post("/api/agents", { name: "blake-muse" });
+  assert.match(muse.description, /^Drafts posts/);
+  const [again] = await claimCard(base, { name: "blake-muse" }, blake);
   assert.equal(again, 403);
-  const [s2, pre] = await post("/api/agents", { name: "blake-scout", operator: "blake@agenticnet.org" });
+  const [s2, pre] = await claimCard(base, { name: "blake-scout" }, blake);
   assert.equal(s2, 201);
   assert.equal(pre.id, "blake-scout");
 });
 
-test("rotate_key is a hosted MCP tool; hosted register_agent never returns the key", async () => {
+test("rotate_key is a hosted MCP tool; hosted register_agent only updates a card", async () => {
   const rpc = (method, params, key) => fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
   const call = async (name, args, key) => { const { result } = await rpc("tools/call", { name, arguments: args }, key); return [result.isError === true, result.isError ? result.content[0].text : JSON.parse(result.content[0].text)]; };
-  const [e0, reg] = await call("register_agent", { name: "Hosted", operator: "op@x.io" });
-  assert.equal(e0, false, reg);
-  assert.equal(reg.id, "op-hosted");
-  assert.equal(reg.key, undefined, "the key never reaches a hosted model");
-  assert.match(reg.key_delivered, /POST \/api\/agents/);
-  const [, card] = await post("/api/agents", { name: "Rotor", operator: "op@x.io" });
+  const [e0, msg0] = await call("register_agent", { name: "Hosted", operator: "op@x.io" });
+  assert.equal(e0, true, "no claim through a hosted tool");
+  assert.match(msg0, /\/signup/);
+  const [, card] = await claimCard(base, { name: "Rotor" }, { email: "op@x.io", password: "op-password-10" });
+  const [e00, reg] = await call("register_agent", { description: "from the tool" }, card.key);
+  assert.equal(e00, false, reg);
+  assert.equal(reg.id, "op-rotor");
+  assert.equal(reg.key, undefined);
+  assert.equal(reg.description, "from the tool");
   const [e1, rotated] = await call("rotate_key", {}, card.key);
   assert.equal(e1, false, rotated);
   assert.equal(rotated.id, "op-rotor");
@@ -93,7 +100,7 @@ function bridge(env) {
 
 test("the bridge reads LETTIT_* variables, still honours AGENTBOARD_* with a warning, and rotates keys into the key file", async () => {
   const KEY_FILE = path.join(process.env.DATA_DIR, "keys.json");
-  const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "blake-dot", LETTIT_KEY_FILE: KEY_FILE });
+  const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "blake-dot", LETTIT_KEY_FILE: KEY_FILE, LETTIT_OPERATOR_EMAIL: blake.email, LETTIT_OPERATOR_PASSWORD: blake.password });
   try {
     const [e1, t] = await b.call("post", { kind: "status", title: "from dot", body: "x" });
     assert.equal(e1, false, t);
@@ -121,7 +128,8 @@ test("the bridge reads LETTIT_* variables, still honours AGENTBOARD_* with a war
 
 test("a bridge claim that lands on a different id saves the key under that id and says so", async () => {
   const KEY_FILE = path.join(process.env.DATA_DIR, "keys2.json");
-  const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "scout", LETTIT_OPERATOR: "carol@x.io", LETTIT_KEY_FILE: KEY_FILE });
+  await claimCard(base, { name: "placeholder" }, { email: "carol@x.io", password: "carol-password-1" });
+  const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "scout", LETTIT_OPERATOR_EMAIL: "carol@x.io", LETTIT_OPERATOR_PASSWORD: "carol-password-1", LETTIT_KEY_FILE: KEY_FILE });
   try {
     const [e, msg] = await b.call("post", { kind: "status", title: "t", body: "b" });
     assert.equal(e, true);

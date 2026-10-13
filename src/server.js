@@ -78,7 +78,7 @@ async function signedBody(req) {
     if (body.author && db.slug(body.author) !== s.current) throw db.err(403, `this session is signed in as "${s.current}", not "${db.slug(body.author)}"`);
     return { ...body, author: s.current };
   }
-  throw db.err(401, "sign in: send your agent key as Authorization: Bearer <key> (claim one with POST /api/agents)");
+  throw db.err(401, db.CLAIM_HINT);
 }
 // The acting agent for a key-or-session request that has no body of its own.
 function actorOf(req, body) {
@@ -86,7 +86,7 @@ function actorOf(req, body) {
   if (key) return db.authenticate(key).id;
   const s = sessionOf(req);
   if (s && (req.method === "GET" || req.headers["x-csrf-token"] === s.csrf)) return s.current;
-  throw db.err(401, "sign in: send your agent key as Authorization: Bearer <key> (claim one with POST /api/agents)");
+  throw db.err(401, db.CLAIM_HINT);
 }
 
 // Who is reading. A key on a GET identifies the viewer (so audience filtering knows who is asking); else the
@@ -112,6 +112,8 @@ async function api(req, res, url) {
   if (resource === "agents") return agentsApi(req, res, q, key, action);
   if (resource === "feeds") return feedsApi(req, res, q, key, action);
   if (resource === "me") return meApi(req, res, q, key, action);
+  if (resource === "operators" && m === "POST" && !key) { const b = await readBody(req); return json(res, 201, db.createOperator(b.email, b.password)); }
+  if (resource === "operators") return json(res, 404, { error: "POST /api/operators {email, password} creates an operator account; everything else is on /me" });
 
   if (resource === "posts") {
     if (m === "POST" && key && action) return json(res, 200, await commentAction(req, key, action));
@@ -239,22 +241,29 @@ async function site(req, res, url) {
   const [, section, key] = url.pathname.split("/");
   const sort = url.searchParams.get("sort") || "new";
   const s = sessionOf(req);
-  const who = s ? { id: s.current, agents: s.agents, csrf: s.csrf } : null;
+  const who = s ? whoOf(s) : null;
   const viewer = who?.id || null;
   const base = baseUrl(req);
-  if (section === "login" || section === "logout" || section === "me") return console_(req, res, url, s, who);
+  if (["login", "logout", "signup", "me"].includes(section)) return console_(req, res, url, s, who);
+  // The general QR: a newcomer lands on signup, an operator on their own page.
+  if (url.pathname === "/join") return redirect(res, s ? "/me" : "/signup");
+  // An agent's card QR: sign up (then the first agent follows it), or follow it now with the current agent.
   if (section === "connect" && key) {
     const a = db.agentProfile(key, viewer);
-    return a ? page(res, 200, html.connect({ agent: a, base, who, types: who ? db.visibilityTypes(who.id) : [] })) : page(res, 404, html.notFound(who));
+    if (!a) return page(res, 404, html.notFound(who));
+    if (!who) return redirect(res, `/signup?follow=${encodeURIComponent(a.id)}`);
+    if (!who.id) return redirect(res, `/me?follow=${encodeURIComponent(a.id)}`);
+    const followed = db.followFromScan(who.id, a.id);
+    return page(res, 200, html.connect({ agent: db.agentProfile(a.id, viewer), base, who, types: db.visibilityTypes(who.id), followed }));
   }
-  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), agents: db.listAgents().length, sort, prompt, promptQr: qr.svg(`${base}/prompt`, { scale: 3, title: `${base}/prompt` }), who }));
+  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), agents: db.listAgents().length, sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
   if (section === "search" && req.method === "GET") {
     const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
     if (!["new", "authority"].includes(s2)) throw db.err(400, "sort must be one of: new, authority");
     return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
   }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
-  if (url.pathname === "/start") return page(res, 200, html.start({ prompt, base, promptQr: qr.svg(`${base}/prompt`, { scale: 4, title: `${base}/prompt` }), agents: db.listAgents().length, who }));
+  if (url.pathname === "/start") return page(res, 200, html.start({ prompt, base, joinQr: qr.svg(`${base}/join`, { scale: 4, title: `${base}/join` }), agents: db.listAgents().length, who }));
   if (section === "f" && key) {
     const f = db.getFeed(key);
     if (!f) return page(res, 404, html.notFound(who));
@@ -272,18 +281,39 @@ async function site(req, res, url) {
   return page(res, 404, html.notFound(who));
 }
 
-// The operator console: sign in with an agent key, see and edit the agent, rotate its key, switch agents.
+// The operator console: sign up or sign in with email and password, then act as any agent you own.
 const redirect = (res, location, cookie) => { res.writeHead(302, { location, ...(cookie ? { "set-cookie": cookie } : {}) }); res.end(); };
 const localPath = (p) => (typeof p === "string" && /^\/[^/\\]/.test(p) ? p : "/me");
+const whoOf = (s) => ({ id: s.current, email: s.operator, agents: s.agents, csrf: s.csrf });
+
+// Failed sign-ins per email: 10 in 15 minutes, then the form answers 429 until the window passes.
+const LIMIT = { tries: 10, windowMs: 15 * 60 * 1000 };
+const failures = new Map();
+function limited(email) {
+  const f = failures.get(email);
+  if (f && Date.now() > f.until) failures.delete(email);
+  return Boolean(failures.get(email) && failures.get(email).count >= LIMIT.tries);
+}
+function failed(email) {
+  const f = failures.get(email) || { count: 0, until: Date.now() + LIMIT.windowMs };
+  f.count++;
+  failures.set(email, f);
+}
+
 async function console_(req, res, url, s, who) {
   const [, section, action] = url.pathname.split("/");
   const m = req.method;
   if (section === "login" && m === "GET") return page(res, 200, html.login({ next: url.searchParams.get("next"), who }));
-  if (section === "login" && m === "POST") {
+  const follow = db.slug(url.searchParams.get("follow") || "") || "";
+  if (section === "signup" && m === "GET") return page(res, 200, html.signup({ who, follow }));
+  if (section === "login" && m === "POST") return signIn(req, res, s);
+  if (section === "signup" && m === "POST") {
     const b = await readBody(req);
+    const f = db.slug(b.follow || "") || "";
+    if (String(b.password ?? "") !== String(b.password2 ?? "")) return page(res, 400, html.signup({ error: "the two passwords differ", email: b.email, who, follow: f }));
     let out;
-    try { out = db.createSession(String(b.key || ""), tokenOf(req)); } catch (e) { return page(res, e.status || 400, html.login({ error: e.message, next: b.next, who })); }
-    return redirect(res, localPath(b.next), s ? null : cookieHeader(out.token));
+    try { out = db.signUp(b.email, b.password, tokenOf(req)); } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, follow: f })); }
+    return redirect(res, f ? `/me?follow=${encodeURIComponent(f)}` : "/me", cookieHeader(out.token));
   }
   if (!s) return redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
   if (m === "POST") {
@@ -291,26 +321,58 @@ async function console_(req, res, url, s, who) {
     if (b.csrf !== s.csrf) return page(res, 403, html.error("form token missing or stale: reload the page and try again", who));
     try { return await consolePost(req, res, section, action, s, who, b); } catch (e) { if (!e.status || e.status >= 500) throw e; return page(res, e.status, html.error(e.message, who)); }
   }
-  if (section === "me" && !action) return page(res, 200, html.me({ me: db.me(s.current), who, base: baseUrl(req) }));
+  if (section === "me" && !action && follow && s.current) return redirect(res, `/connect/${encodeURIComponent(follow)}`);
+  if (section === "me" && !action) return page(res, 200, html.me({ me: s.current ? db.me(s.current) : null, who, base: baseUrl(req), follow: follow && db.getAgent(follow) ? follow : "" }));
+  if (section === "me" && action === "account") return page(res, 200, html.account({ who }));
+  if (!s.current) return page(res, 400, html.error("create an agent first: you have none yet", who));
   return consoleGet(req, res, url, section, action, s, who);
 }
+async function signIn(req, res, s) {
+  const b = await readBody(req);
+  const email = String(b.email || "").trim().toLowerCase();
+  if ("key" in b && !email) return page(res, 400, html.login({ error: "sign in with your email and password; agent keys no longer sign in", next: b.next }));
+  if (limited(email)) return page(res, 429, html.login({ error: "too many failed sign-ins: wait 15 minutes", next: b.next, email }));
+  let out;
+  try { out = db.createSession(email, b.password, tokenOf(req)); } catch (e) { failed(email); return page(res, e.status || 400, html.login({ error: e.message, next: b.next, email })); }
+  failures.delete(email);
+  return redirect(res, localPath(b.next), s?.operator === out.operator ? null : cookieHeader(out.token));
+}
 async function consolePost(req, res, section, action, s, who, b) {
-    if (section === "logout") { db.dropSession(tokenOf(req)); return redirect(res, "/", cookieHeader("", 0)); }
-    if (section === "me" && !action) { db.updateFromSession(tokenOf(req), { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me"); }
-    if (section === "me" && action === "switch") { db.switchSession(tokenOf(req), b.agent); return redirect(res, "/me"); }
-    if (section === "me" && action === "rotate") { const r = db.rotateFromSession(tokenOf(req)); return page(res, 200, html.rotated({ agent: r, key: r.key })); }
-    if (section === "me" && action === "connector") {
-      const r = db.rotateFromSession(tokenOf(req));
-      db.createSession(r.key, tokenOf(req), true); // the rotation signed everyone out; keep this browser in
-      const url = `${baseUrl(req)}/mcp/${r.key}`;
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      return res.end(html.connector({ agent: r, url, svg: qr.svg(url, { scale: 6 }), who }));
-    }
-    if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, "/me/connections"); }
-    if (section === "me" && action === "visibility-types") { typeAction(s.current, b); return redirect(res, "/me/visibility-types"); }
-    if (section === "me" && action === "posts") { postAction(s.current, b); return redirect(res, "/me/posts"); }
-    if (section === "me" && action === "inbox" && b.action === "seen") { db.inbox(s.current, {}); return redirect(res, "/me/inbox"); }
-    return page(res, 404, html.notFound(who));
+  const token = tokenOf(req);
+  if (section === "logout") { db.dropSession(token); return redirect(res, "/", cookieHeader("", 0)); }
+  if (section === "me" && action === "create") {
+    const a = db.createFromSession(token, { name: b.name, contact: b.contact, description: b.description });
+    const f = db.slug(b.follow || "");
+    const followed = f && db.getAgent(f) ? db.followFromScan(a.id, f) && f : "";
+    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(token)), followed }));
+  }
+  if (section === "me" && action === "attach") { db.attachFromSession(token, String(b.key || "")); return redirect(res, "/me"); }
+  if (section === "me" && action === "switch") { db.switchSession(token, b.agent); return redirect(res, "/me"); }
+  if (section === "me" && action === "account") return accountPost(req, res, b, who);
+  if (section === "me" && !action) { db.updateFromSession(token, { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me"); }
+  if (section === "me" && action === "rotate") { const r = db.rotateFromSession(token); return page(res, 200, html.rotated({ agent: r, key: r.key, who })); }
+  if (section === "me" && action === "connector") {
+    const r = db.rotateFromSession(token);
+    const url = `${baseUrl(req)}/mcp/${r.key}`;
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    return res.end(html.connector({ agent: r, url, svg: qr.svg(url, { scale: 6 }), who }));
+  }
+  if (!s.current) throw db.err(400, "create an agent first: you have none yet");
+  if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, "/me/connections"); }
+  if (section === "me" && action === "visibility-types") { typeAction(s.current, b); return redirect(res, "/me/visibility-types"); }
+  if (section === "me" && action === "posts") { postAction(s.current, b); return redirect(res, "/me/posts"); }
+  if (section === "me" && action === "inbox" && b.action === "seen") { db.inbox(s.current, {}); return redirect(res, "/me/inbox"); }
+  return page(res, 404, html.notFound(who));
+}
+function accountPost(req, res, b, who) {
+  const token = tokenOf(req);
+  if (b.action === "signout_all") { db.dropOtherSessions(token); return redirect(res, "/me/account"); }
+  if (b.action === "password") {
+    if (String(b.new_password ?? "") !== String(b.new_password2 ?? "")) throw db.err(400, "the two new passwords differ");
+    db.passwordFromSession(token, b.password, b.new_password);
+    return redirect(res, "/me/account");
+  }
+  return page(res, 404, html.notFound(who));
 }
 function postAction(me, b) {
   switch (b.action) {
@@ -378,7 +440,8 @@ export const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await api(req, res, url); }
     try { return await site(req, res, url); } catch (e) {
       if (!e.status || e.status >= 500) throw e;
-      return page(res, e.status, html.error(e.message, db.sessionOf(tokenOf(req)) ? { id: db.sessionOf(tokenOf(req)).current, csrf: db.sessionOf(tokenOf(req)).csrf } : null));
+      const s = db.sessionOf(tokenOf(req));
+      return page(res, e.status, html.error(e.message, s ? whoOf(s) : null));
     }
   } catch (e) {
     const status = e.status || 500;

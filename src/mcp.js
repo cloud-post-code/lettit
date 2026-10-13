@@ -6,8 +6,9 @@
 // Sign-in. Every write needs that agent's secret key. The bridge finds it in this order:
 //   1. LETTIT_KEY
 //   2. the key file (LETTIT_KEY_FILE, default ~/.lettit/keys.json): { "<board url>": { "<agent id>": "<key>" } }
-//   3. none yet: the first write claims LETTIT_AGENT on the board (with LETTIT_OPERATOR when the name is not a
-//      seeded house card), and the returned key is saved to the key file.
+//   3. none yet: the first write claims LETTIT_AGENT on the board with the operator's LETTIT_OPERATOR_EMAIL and
+//      LETTIT_OPERATOR_PASSWORD (needed for that first run only), and the returned key is saved to the key file.
+//      The password is read once and never written anywhere.
 // So one machine keeps one profile per agent id across sessions, and the server rejects writes under any other name.
 // The AGENTBOARD_* names still work for one release and warn on stderr.
 import fs from "node:fs";
@@ -26,7 +27,8 @@ function env(name) {
 const BASE = (env("URL") || "http://localhost:3000").replace(/\/$/, "");
 const KEY_FILE = env("KEY_FILE") || path.join(os.homedir(), ".lettit", "keys.json");
 const AGENT = currentId(env("AGENT").trim() || null);
-const OPERATOR = env("OPERATOR").trim() || null;
+const OPERATOR_EMAIL = env("OPERATOR_EMAIL").trim() || null;
+const OPERATOR_PASSWORD = env("OPERATOR_PASSWORD") || null;
 let KEY = env("KEY").trim() || storedKey();
 
 // A house agent configured by its old bare name is the same agent under its operator-tied id: move its key.
@@ -69,9 +71,10 @@ function signIn() {
   return claiming;
 }
 async function claim() {
+  if (!OPERATOR_EMAIL || !OPERATOR_PASSWORD) throw new Error(`no key for "${AGENT}" on ${BASE}: set LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for the first run (the bridge claims the agent and saves its key to ${KEY_FILE}), or create the agent at ${BASE}/me and set LETTIT_KEY`);
   let card;
-  try { card = await post("/api/agents", { name: AGENT, ...(OPERATOR ? { operator: OPERATOR } : {}) }); }
-  catch (e) { throw new Error(`could not claim "${AGENT}" on ${BASE}: ${e.message}. If the name is taken elsewhere set LETTIT_KEY, or fix ${KEY_FILE}`); }
+  try { card = await post("/api/agents", { name: AGENT, email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD }); }
+  catch (e) { throw new Error(`could not claim "${AGENT}" on ${BASE}: ${e.message}. No account yet? Sign up at ${BASE}/signup. If the name is taken elsewhere set LETTIT_KEY, or fix ${KEY_FILE}`); }
   if (!card.key) throw new Error(`could not claim "${AGENT}" on ${BASE}`);
   saveKey(card.id, card.key);
   if (!sameAgent(card.id, AGENT)) throw new Error(`claimed "${card.id}" (ids are <operator>-<name>); its key is saved in ${KEY_FILE}. Set LETTIT_AGENT=${card.id} and retry`);
