@@ -7,7 +7,7 @@ import { LEGACY_IDS } from "./tools.js";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, proposals: {}, seeded: {}, migrated: {} });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, proposals: {}, seeded: {}, migrated: {}, sessions: {} });
 
 let db = empty();
 
@@ -188,11 +188,63 @@ export function claimOrUpdateAgent(card, key) {
 export function rotateKey(aid, key) {
   const owner = agentByKey(key);
   if (owner.id !== slug(aid)) throw err(403, `this key belongs to "${owner.id}", not "${slug(aid)}"`);
+  return rotate(owner);
+}
+function rotate(owner) {
   const secret = newKey();
   owner.key_hash = hashKey(secret);
   owner.updated = now();
+  revokeSessions(owner.id);
   save();
   return { ...publicAgent(owner), key: secret };
+}
+
+// ---------- operator sessions ----------
+// A browser session is a random token in an HttpOnly cookie; the store keeps only its hash, the agents the
+// operator signed in with (one key each), the current one, a CSRF token for form posts, and an expiry.
+const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+const sessionRecord = (token) => { const s = db.sessions[hashKey(token)]; if (s && s.expires < now()) { delete db.sessions[hashKey(token)]; save(); return null; } return s || null; };
+
+// Sign in with an agent key: a new session, or one more agent on an existing session.
+export function createSession(key, token = null) {
+  const agent = agentByKey(key);
+  let s = token ? sessionRecord(token) : null;
+  if (!s) { token = crypto.randomBytes(24).toString("base64url"); s = db.sessions[hashKey(token)] = { agents: [], current: null, csrf: crypto.randomBytes(16).toString("hex"), created: now(), expires: null }; }
+  if (!s.agents.includes(agent.id)) s.agents.push(agent.id);
+  s.current = agent.id;
+  s.expires = new Date(Date.now() + SESSION_MS).toISOString();
+  save();
+  return { token, csrf: s.csrf, agent: agent.id };
+}
+export const sessionOf = (token) => (token ? sessionRecord(token) : null);
+export function switchSession(token, agent) {
+  const s = sessionRecord(token);
+  if (!s) throw err(401, "not signed in");
+  if (!s.agents.includes(slug(agent))) throw err(403, `this session is not signed in as "${slug(agent)}"`);
+  s.current = slug(agent);
+  save();
+  return s;
+}
+export function dropSession(token) {
+  if (token && db.sessions[hashKey(token)]) { delete db.sessions[hashKey(token)]; save(); }
+}
+// A rotated key signs every browser session holding that agent out.
+function revokeSessions(aid) {
+  for (const [h, s] of Object.entries(db.sessions)) if (s.agents.includes(aid)) delete db.sessions[h];
+}
+// Rotate from the console: the session proves who is asking.
+export function rotateFromSession(token) {
+  const s = sessionRecord(token);
+  if (!s) throw err(401, "not signed in");
+  return rotate(db.agents[s.current]);
+}
+// Update the current agent's card from the console.
+export function updateFromSession(token, card) {
+  const s = sessionRecord(token);
+  if (!s) throw err(401, "not signed in");
+  const agent = writeCard(s.current, { ...card, name: undefined }, db.agents[s.current]);
+  save();
+  return publicAgent(agent);
 }
 
 function agentByKey(key) {

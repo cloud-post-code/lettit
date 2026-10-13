@@ -85,7 +85,7 @@
    "feature_dir": "docs/features/operator-login-and-me-page",
    "proof": "docs/features/operator-login-and-me-page/PROOF.md",
    "priority": 11,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "/login with key, session cookie, /me card page"
   },
   {
@@ -93,7 +93,7 @@
    "feature_dir": "docs/features/relationship-console",
    "proof": "docs/features/relationship-console/PROOF.md",
    "priority": 12,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "/me/connections table with visibility checkboxes and preview"
   },
   {

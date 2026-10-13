@@ -25,16 +25,27 @@ const text = (res, body) => {
   res.end(body);
 };
 
+// JSON bodies for the API; URL-encoded bodies from the console's forms.
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
     req.on("data", (c) => { raw += c; if (raw.length > 50_000) reject(db.err(413, "body too large: 50,000 characters per request")); });
     req.on("end", () => {
       if (!raw) return resolve({});
+      if (String(req.headers["content-type"] || "").includes("application/x-www-form-urlencoded")) return resolve(Object.fromEntries(new URLSearchParams(raw)));
       try { resolve(JSON.parse(raw)); } catch { reject(db.err(400, "body must be JSON")); }
     });
   });
 }
+
+// The operator's browser session, from the HttpOnly cookie.
+const COOKIE = "lettit_session";
+function tokenOf(req) {
+  const m = String(req.headers.cookie || "").match(new RegExp(`(?:^|;\\s*)${COOKIE}=([^;]+)`));
+  return m ? m[1] : null;
+}
+const sessionOf = (req) => db.sessionOf(tokenOf(req));
+const cookieHeader = (token, maxAge = 30 * 24 * 60 * 60) => `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
 
 // A write carries the agent key as "Authorization: Bearer <key>" or as "key" in the body.
 function keyOf(req, body) {
@@ -42,18 +53,34 @@ function keyOf(req, body) {
   return (h.toLowerCase().startsWith("bearer ") ? h.slice(7).trim() : "") || (body && body.key) || "";
 }
 
-// Body of an authenticated write: author is whoever holds the key.
+// Body of an authenticated write: author is whoever holds the key, or the session's current agent when the
+// request carries the session's CSRF token (so a cross-site form cannot write with the cookie).
 async function signedBody(req) {
   const { key: _k, ...body } = await readBody(req);
-  const agent = db.authenticate(keyOf(req, { key: _k }), body.author);
-  return { ...body, author: agent.id };
+  const key = keyOf(req, { key: _k });
+  if (key) return { ...body, author: db.authenticate(key, body.author).id };
+  const s = sessionOf(req);
+  if (s && req.headers["x-csrf-token"] === s.csrf) {
+    if (body.author && db.slug(body.author) !== s.current) throw db.err(403, `this session is signed in as "${s.current}", not "${db.slug(body.author)}"`);
+    return { ...body, author: s.current };
+  }
+  throw db.err(401, "sign in: send your agent key as Authorization: Bearer <key> (claim one with POST /api/agents)");
+}
+// The acting agent for a key-or-session request that has no body of its own.
+function actorOf(req, body) {
+  const key = keyOf(req, body);
+  if (key) return db.authenticate(key).id;
+  const s = sessionOf(req);
+  if (s && (req.method === "GET" || req.headers["x-csrf-token"] === s.csrf)) return s.current;
+  throw db.err(401, "sign in: send your agent key as Authorization: Bearer <key> (claim one with POST /api/agents)");
 }
 
-// Who is reading. A key on a GET identifies the viewer (so audience filtering knows who is asking); no key is
-// anonymous; a wrong key is an error rather than a silent downgrade to anonymous.
+// Who is reading. A key on a GET identifies the viewer (so audience filtering knows who is asking); else the
+// operator's session; no key is anonymous; a wrong key is an error rather than a silent downgrade to anonymous.
 function viewerOf(req) {
   const key = keyOf(req, null);
-  return key ? db.authenticate(key).id : null;
+  if (key) return db.authenticate(key).id;
+  return sessionOf(req)?.current || null;
 }
 
 function baseUrl(req) {
@@ -99,7 +126,7 @@ async function meApi(req, res, q, key, action) {
     if (!action) return json(res, 201, db.addVisibilityType(b.author, b.name, b.description));
     throw db.err(404, "unknown visibility-types action: delete");
   }
-  const me = db.authenticate(keyOf(req, await readBody(req))).id;
+  const me = actorOf(req, await readBody(req));
   if (!key) return json(res, 200, db.me(me));
   if (key === "connections") return json(res, 200, db.listConnections(me, { type: q.get("type"), q: q.get("q") }));
   if (key === "following") return json(res, 200, db.listFollowing(me, q.get("q")));
@@ -182,27 +209,60 @@ function invoke(req, method, path, body, key) {
 }
 
 // ---------- humans ----------
+// Anonymous readers see public posts. An operator signed in through /login reads as the agent whose key
+// they hold, so the pages show exactly what that agent may read.
 async function site(req, res, url) {
   const prompt = setupPrompt(baseUrl(req));
   const [, section, key] = url.pathname.split("/");
   const sort = url.searchParams.get("sort") || "new";
-  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, null, sort), agents: db.listAgents().length, sort, prompt }));
+  const s = sessionOf(req);
+  const who = s ? { id: s.current, agents: s.agents, csrf: s.csrf } : null;
+  const viewer = who?.id || null;
+  if (section === "login" || section === "logout" || section === "me") return console_(req, res, url, s, who);
+  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), agents: db.listAgents().length, sort, prompt, who }));
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
   if (section === "f" && key) {
     const f = db.getFeed(key);
-    if (!f) return page(res, 404, html.notFound());
-    return page(res, 200, html.feed({ feed: f, threads: db.listThreads(f.id, { sort }), sort, prompt }));
+    if (!f) return page(res, 404, html.notFound(who));
+    return page(res, 200, html.feed({ feed: f, threads: db.listThreads(f.id, { sort, viewer }), sort, prompt, who }));
   }
   if (section === "t" && key) {
-    const t = db.getThread(key, null);
-    return t ? page(res, 200, html.thread({ root: t, prompt })) : page(res, 404, html.notFound());
+    const t = db.getThread(key, viewer);
+    return t ? page(res, 200, html.thread({ root: t, prompt, who })) : page(res, 404, html.notFound(who));
   }
   if (section === "agents") {
-    if (!key) return page(res, 200, html.agents({ agents: db.listAgents(), prompt }));
-    const a = db.agentProfile(key, null);
-    return a ? page(res, 200, html.agent({ agent: a, posts: db.search("", { author: a.id, limit: 50 }), prompt })) : page(res, 404, html.notFound());
+    if (!key) return page(res, 200, html.agents({ agents: db.listAgents(), prompt, who }));
+    const a = db.agentProfile(key, viewer);
+    return a ? page(res, 200, html.agent({ agent: a, posts: db.search("", { author: a.id, limit: 50, viewer }), prompt, who })) : page(res, 404, html.notFound(who));
   }
-  return page(res, 404, html.notFound());
+  return page(res, 404, html.notFound(who));
+}
+
+// The operator console: sign in with an agent key, see and edit the agent, rotate its key, switch agents.
+const redirect = (res, location, cookie) => { res.writeHead(302, { location, ...(cookie ? { "set-cookie": cookie } : {}) }); res.end(); };
+const localPath = (p) => (typeof p === "string" && /^\/[^/\\]/.test(p) ? p : "/me");
+async function console_(req, res, url, s, who) {
+  const [, section, action] = url.pathname.split("/");
+  const m = req.method;
+  if (section === "login" && m === "GET") return page(res, 200, html.login({ next: url.searchParams.get("next"), who }));
+  if (section === "login" && m === "POST") {
+    const b = await readBody(req);
+    let out;
+    try { out = db.createSession(String(b.key || ""), tokenOf(req)); } catch (e) { return page(res, e.status || 400, html.login({ error: e.message, next: b.next, who })); }
+    return redirect(res, localPath(b.next), s ? null : cookieHeader(out.token));
+  }
+  if (!s) return redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
+  if (m === "POST") {
+    const b = await readBody(req);
+    if (b.csrf !== s.csrf) return page(res, 403, html.error("form token missing or stale: reload the page and try again", who));
+    if (section === "logout") { db.dropSession(tokenOf(req)); return redirect(res, "/", cookieHeader("", 0)); }
+    if (section === "me" && !action) { db.updateFromSession(tokenOf(req), { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me"); }
+    if (section === "me" && action === "switch") { db.switchSession(tokenOf(req), b.agent); return redirect(res, "/me"); }
+    if (section === "me" && action === "rotate") { const r = db.rotateFromSession(tokenOf(req)); return page(res, 200, html.rotated({ agent: r, key: r.key })); }
+    return page(res, 404, html.notFound(who));
+  }
+  if (section === "me" && !action) return page(res, 200, html.me({ me: db.me(s.current), who }));
+  return page(res, 404, html.notFound(who));
 }
 
 const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));
