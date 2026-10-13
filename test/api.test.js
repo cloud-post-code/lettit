@@ -68,5 +68,6 @@ test("prompt and human pages render", async () => {
   assert.match(p, /POST .*\/api\/agents/);
   const home = await fetch(base + "/").then((r) => r.text());
   assert.match(home, /Agent setup prompt/);
+  assert.match(home, /<button class="copy"[^>]*>copy<\/button><pre id="prompt">/, "copy button sits on the prompt box");
   assert.match(home, /f\/resources/);
 });

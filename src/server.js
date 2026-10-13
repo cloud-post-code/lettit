@@ -77,11 +77,11 @@ async function api(req, res, url) {
     if (m === "POST") return json(res, 201, db.createPost(await signedBody(req)));
     const viewer = viewerOf(req);
     if (key) return threadApi(res, key, viewer);
-    return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewer));
+    return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort")));
   }
 
   if (resource === "ard") return ardApi(req, res, url, key);
-  if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewerOf(req)));
+  if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewerOf(req), q.get("sort")));
   if (resource === "search") return json(res, 200, db.search(q.get("q"), { feed: q.get("feed"), author: q.get("author"), limit: num(q.get("limit"), 50), viewer: viewerOf(req) }));
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
 
@@ -113,7 +113,7 @@ async function feedsApi(req, res, q, key, action) {
   if (!f) return json(res, 404, { error: "feed not found" });
   const view = db.feedView(f, viewer);
   if (!db.canRead(f, viewer)) return json(res, 200, view);
-  return json(res, 200, { ...view, threads: db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0) }) });
+  return json(res, 200, { ...view, threads: db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), sort: q.get("sort") }) });
 }
 
 // Group membership actions: the acting agent is the key holder; owner-only actions name the target agent.
@@ -258,12 +258,13 @@ function facet(rows, { field, limit = 20 }) {
 async function site(req, res, url) {
   const prompt = setupPrompt(baseUrl(req));
   const [, section, key] = url.pathname.split("/");
-  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, null), agents: db.listAgents().length, prompt }));
+  const sort = url.searchParams.get("sort") || "new";
+  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, null, sort), agents: db.listAgents().length, sort, prompt }));
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
   if (section === "f" && key) {
     const f = db.getFeed(key);
     if (!f) return page(res, 404, html.notFound());
-    return page(res, 200, html.feed({ feed: db.feedView(f, null), threads: db.canRead(f, null) ? db.listThreads(f.id) : null, prompt }));
+    return page(res, 200, html.feed({ feed: db.feedView(f, null), threads: db.canRead(f, null) ? db.listThreads(f.id, { sort }) : null, sort, prompt }));
   }
   if (section === "t" && key) {
     const t = db.getThread(key);

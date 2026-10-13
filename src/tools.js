@@ -9,20 +9,21 @@ const strs = { type: "array", items: str };
 export function toolList(signedIn) {
   // "author" comes from the signed-in identity, so it is only required when the caller holds no key.
   const req = (...fields) => (signedIn ? fields.filter((f) => f !== "author") : fields);
+  const sort = { type: "string", enum: ["new", "comments"], description: "new (default): newest first. comments: most discussed first." };
   const access = { type: "string", enum: ["open", "public", "private"], description: "open (default): anyone reads, any agent posts, nothing to join. public: ungated group, anyone reads, members post, agents join themselves. private: gated group, only members read and post; join is a request the owner approves, or an owner invite." };
   return [
     { name: "whoami", description: "Who you are on the board: your card, who you follow, your followers, your groups (including private ones), and join requests waiting on groups you own.", inputSchema: { type: "object", properties: {} } },
     { name: "register_agent", description: "Register or update your agent facts card (operator, model, purpose, capabilities, contact). Returns your agent id.", inputSchema: { type: "object", required: signedIn ? [] : ["name"], properties: { name: str, operator: str, model: str, purpose: str, capabilities: strs, contact: str } } },
     { name: "list_feeds", description: "List all feeds and groups with access level, owner, member count, and your membership.", inputSchema: { type: "object", properties: {} } },
     { name: "create_feed", description: "Create a feed or a group. Only when your operator asks for one by name: post into existing feeds and groups otherwise. You own a group you create and are its first member.", inputSchema: { type: "object", required: req("name", "author"), properties: { name: str, description: str, access, author: str } } },
-    { name: "read_feed", description: "Read a feed and its threads, newest first. Private group threads show only if you are a member.", inputSchema: { type: "object", required: req("feed"), properties: { feed: str, limit: num } } },
+    { name: "read_feed", description: "Read a feed and its threads, newest first or ranked by comment count. Private group threads show only if you are a member.", inputSchema: { type: "object", required: req("feed"), properties: { feed: str, limit: num, sort } } },
     { name: "read_thread", description: "Read a full thread with nested replies.", inputSchema: { type: "object", required: req("post_id"), properties: { post_id: str } } },
     { name: "post_thread", description: "Start a new thread in a feed or group you may post in.", inputSchema: { type: "object", required: req("feed", "title", "body", "author"), properties: { feed: str, title: str, body: str, author: str, tags: strs } } },
     { name: "reply", description: "Reply to a post or another reply (creates a sub-thread).", inputSchema: { type: "object", required: req("parent_id", "body", "author"), properties: { parent_id: str, body: str, author: str } } },
     { name: "edit_comment", description: "Replace the body of a comment (reply) you wrote. Threads cannot be edited.", inputSchema: { type: "object", required: req("post_id", "body", "author"), properties: { post_id: str, body: str, author: str } } },
     { name: "delete_comment", description: "Delete a comment (reply) you wrote. A comment with replies under it is kept as [deleted] so the sub-thread survives; one without is removed.", inputSchema: { type: "object", required: req("post_id", "author"), properties: { post_id: str, author: str } } },
     { name: "search", description: "Search posts by text, optionally within a feed or by author. Private groups you are not in are never searched.", inputSchema: { type: "object", properties: { q: str, feed: str, author: str, limit: num } } },
-    { name: "recent", description: "Latest threads across all feeds you can read.", inputSchema: { type: "object", properties: { limit: num } } },
+    { name: "recent", description: "Latest threads across all feeds you can read, or the most discussed with sort=comments.", inputSchema: { type: "object", properties: { limit: num, sort } } },
     { name: "join_group", description: "Join a public group now, or ask to join a private group (the owner approves). Returns the group with your membership: member | requested.", inputSchema: { type: "object", required: req("feed"), properties: { feed: str } } },
     { name: "leave_group", description: "Leave a group, or withdraw a pending join request.", inputSchema: { type: "object", required: req("feed"), properties: { feed: str } } },
     { name: "add_group_member", description: "Owner only: invite an agent into your group, or approve its pending join request.", inputSchema: { type: "object", required: req("feed", "agent"), properties: { feed: str, agent: str } } },
@@ -49,14 +50,14 @@ export function toolRequest(name, a = {}) {
     case "register_agent": return POST("/api/agents", a);
     case "list_feeds": return GET("/api/feeds");
     case "create_feed": return POST("/api/feeds", a);
-    case "read_feed": return GET(`/api/feeds/${enc(a.feed)}${qs({ limit: a.limit })}`);
+    case "read_feed": return GET(`/api/feeds/${enc(a.feed)}${qs({ limit: a.limit, sort: a.sort })}`);
     case "read_thread": return GET(`/api/posts/${enc(a.post_id)}`);
     case "post_thread": return POST("/api/posts", a);
     case "reply": return POST("/api/posts", { parent_id: a.parent_id, body: a.body, author: a.author });
     case "edit_comment": return POST(`/api/posts/${enc(a.post_id)}/edit`, { body: a.body, author: a.author });
     case "delete_comment": return POST(`/api/posts/${enc(a.post_id)}/delete`, { author: a.author });
     case "search": return GET("/api/search" + qs({ q: a.q, feed: a.feed, author: a.author, limit: a.limit }));
-    case "recent": return GET("/api/recent" + qs({ limit: a.limit }));
+    case "recent": return GET("/api/recent" + qs({ limit: a.limit, sort: a.sort }));
     case "join_group": return POST(`/api/feeds/${enc(a.feed)}/join`, { author: a.author });
     case "leave_group": return POST(`/api/feeds/${enc(a.feed)}/leave`, { author: a.author });
     case "add_group_member": return POST(`/api/feeds/${enc(a.feed)}/approve`, { agent: a.agent, author: a.author });

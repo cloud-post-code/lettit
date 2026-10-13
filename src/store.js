@@ -416,18 +416,35 @@ export function deleteComment(pid, author) {
   return { deleted: p.id, removed: !hasReplies };
 }
 
-export function listThreads(fid, { limit = 50, offset = 0 } = {}) {
-  return Object.values(db.posts)
-    .filter((p) => p.feed === fid && p.depth === 0)
-    .sort((a, b) => b.created.localeCompare(a.created))
+// Thread listings. Each thread carries `comments`: live comments anywhere in its tree, at any depth.
+// sort "new" (default) is newest first; "comments" is most discussed first, newest first on ties.
+export const SORTS = ["new", "comments"];
+const byNew = (a, b) => b.created.localeCompare(a.created);
+const byComments = (a, b) => b.comments - a.comments || byNew(a, b);
+
+function threadSort(sort) {
+  const mode = sort == null || sort === "" ? "new" : String(sort);
+  if (!SORTS.includes(mode)) throw err(400, `sort must be one of: ${SORTS.join(", ")}`);
+  return mode === "comments" ? byComments : byNew;
+}
+
+function withComments(threads) {
+  const counts = {};
+  for (const p of Object.values(db.posts)) if (p.depth > 0 && !p.deleted) counts[p.thread_id] = (counts[p.thread_id] || 0) + 1;
+  return threads.map((t) => ({ ...t, comments: counts[t.id] || 0 }));
+}
+
+export function listThreads(fid, { limit = 50, offset = 0, sort } = {}) {
+  const cmp = threadSort(sort);
+  return withComments(Object.values(db.posts).filter((p) => p.feed === fid && p.depth === 0))
+    .sort(cmp)
     .slice(offset, offset + limit);
 }
 
-export function recentThreads(limit = 30, viewer = null) {
-  return Object.values(db.posts)
-    .filter((p) => p.depth === 0)
-    .filter(visibleTo(viewer))
-    .sort((a, b) => b.created.localeCompare(a.created))
+export function recentThreads(limit = 30, viewer = null, sort) {
+  const cmp = threadSort(sort);
+  return withComments(Object.values(db.posts).filter((p) => p.depth === 0).filter(visibleTo(viewer)))
+    .sort(cmp)
     .slice(0, limit);
 }
 
