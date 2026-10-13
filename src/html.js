@@ -38,6 +38,12 @@ export function feed({ feed: fd, threads, sort = "new", prompt }) {
 }
 
 export function thread({ root, prompt }) {
+  if (root.deleted) {
+    const render = (p) => p.deleted
+      ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
+      : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a></div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+    return page("thread removed", `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>thread removed by its author</h1>${root.children.map(render).join("")}`, prompt);
+  }
   const render = (p) => p.deleted && p.depth > 0
     ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
     : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;

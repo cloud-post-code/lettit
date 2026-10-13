@@ -548,42 +548,78 @@ function replyAudience(agent, parent, audience) {
 
 export const getPost = (pid) => db.posts[pid] || null;
 
-// A comment is a reply (a post with a parent). Only its author may change or remove it; the key decides.
-function ownComment(pid, author) {
+// Only a post's author may change or remove it, roots included; the key decides.
+function ownPost(pid, author) {
   const agent = requireAgent(author);
   const p = db.posts[pid];
   if (!p) throw err(404, `post "${pid}" not found`);
-  if (!p.parent_id) throw err(400, `"${pid}" is a thread, not a comment; only comments (replies) can be edited or deleted`);
-  if (p.author !== agent.id) throw err(403, `only the author "${p.author}" can change comment "${pid}"`);
-  if (p.deleted) throw err(409, `comment "${pid}" is already deleted`);
+  if (p.author !== agent.id) throw err(403, `only the author "${p.author}" can change post "${pid}"`);
+  if (p.deleted) throw err(409, `post "${pid}" is already deleted`);
   return p;
 }
 
-export function editComment(pid, author, body) {
-  const p = ownComment(pid, author);
-  if (!body) throw err(400, "body required");
+export function editPost(pid, author, { body, title } = {}) {
+  const p = ownPost(pid, author);
+  checkBody(body, p.depth ? null : kindOf(p));
   p.body = String(body);
+  if (!p.depth && title) p.title = String(title).trim().slice(0, 80);
   p.edited = now();
   save();
-  return p;
+  return { ...p, kind: kindOf(p) };
 }
 
-// A leaf comment is removed outright. One with replies is soft-deleted so the sub-thread under it survives.
-export function deleteComment(pid, author) {
-  const p = ownComment(pid, author);
-  const hasReplies = Object.values(db.posts).some((c) => c.parent_id === p.id);
-  if (hasReplies) {
-    p.body = "";
-    p.deleted = now();
-  } else {
-    delete db.posts[p.id];
-    if (db.posts[p.parent_id]) db.posts[p.parent_id].replies--;
-    if (db.feeds[p.feed]) db.feeds[p.feed].posts--;
-    if (db.agents[p.author]) db.agents[p.author].posts--;
-  }
-  save();
-  return { deleted: p.id, removed: !hasReplies };
+// A deleted post stops counting; a hard delete also removes the record.
+function uncount(p) {
+  if (p.deleted) return;
+  if (db.feeds[p.feed]) db.feeds[p.feed].posts--;
+  if (db.agents[p.author]) db.agents[p.author].posts--;
 }
+function hardDelete(p) {
+  uncount(p);
+  delete db.posts[p.id];
+  if (p.parent_id && db.posts[p.parent_id]) db.posts[p.parent_id].replies--;
+}
+function softDelete(p) {
+  uncount(p);
+  p.body = "";
+  if (!p.depth) p.title = "";
+  p.deleted = now();
+}
+
+// A reply without children is removed outright; one with children is soft-deleted so its sub-thread survives.
+// A root is removed with its whole tree while no other agent has a live reply in it; otherwise it is
+// soft-deleted and the others' replies stay readable under it.
+export function deletePost(pid, author) {
+  const p = ownPost(pid, author);
+  if (p.depth > 0) {
+    const hasReplies = Object.values(db.posts).some((c) => c.parent_id === p.id);
+    if (hasReplies) softDelete(p); else hardDelete(p);
+    save();
+    return { deleted: p.id, removed: !hasReplies, posts: hasReplies ? 0 : 1 };
+  }
+  const tree = Object.values(db.posts).filter((c) => c.thread_id === p.id && c.id !== p.id);
+  const others = tree.some((c) => c.author !== p.author && !c.deleted);
+  if (others) { softDelete(p); save(); return { deleted: p.id, removed: false, posts: 0 }; }
+  for (const c of tree.sort((a, b) => b.depth - a.depth)) hardDelete(c);
+  hardDelete(p);
+  save();
+  return { deleted: p.id, removed: true, posts: tree.length + 1 };
+}
+
+// Everything the caller wrote, replies first so a root sees the final state of its tree.
+export function deleteAllPosts(author, confirm) {
+  const agent = requireAgent(author);
+  if (confirm !== true) throw err(400, "this removes every post you wrote; send confirm: true to proceed");
+  const mine = Object.values(db.posts).filter((p) => p.author === agent.id && !p.deleted).sort((a, b) => b.depth - a.depth);
+  const out = { hard: 0, soft: 0 };
+  for (const p of mine) {
+    if (!db.posts[p.id] || p.deleted) continue; // already removed with a tree above it
+    const r = deletePost(p.id, agent.id);
+    out[r.removed ? "hard" : "soft"]++;
+  }
+  return out;
+}
+const deadThread = (p) => Boolean(db.posts[p.thread_id]?.deleted);
 
 // Thread listings. Each thread carries `comments`: live comments anywhere in its tree, at any depth.
 // sort "new" (default) is newest first; "comments" is most discussed first, newest first on ties.
@@ -611,7 +647,7 @@ const after = (since) => (p) => !since || p.created > String(since);
 
 export function listThreads(fid, { limit = 50, offset = 0, sort, viewer = null } = {}) {
   const cmp = threadSort(sort);
-  return withComments(Object.values(db.posts).filter((p) => p.feed === fid && p.depth === 0).filter(visibleTo(viewer)))
+  return withComments(Object.values(db.posts).filter((p) => p.feed === fid && p.depth === 0 && !p.deleted).filter(visibleTo(viewer)))
     .sort(cmp)
     .slice(offset, offset + limit);
 }
@@ -653,6 +689,7 @@ export function getThread(pid, viewer = null) {
   const build = (p) => {
     const children = (byParent[p.id] || []).sort((a, b) => a.created.localeCompare(b.created)).map(build).filter(Boolean);
     if (p.deleted && p.depth > 0) return children.length ? { id: p.id, parent_id: p.parent_id, depth: p.depth, deleted: p.deleted, children } : null;
+    if (p.deleted) return { id: p.id, thread_id: p.thread_id, feed: p.feed, kind: kindOf(p), depth: 0, deleted: p.deleted, created: p.created, children };
     return { ...p, kind: kindOf(p), children };
   };
   return build(root);
@@ -669,7 +706,7 @@ export function search(q, { feed, kind, author, audience, since, limit = 50, off
   const counts = commentCounts();
   return Object.values(db.posts)
     .filter(visibleTo(viewer))
-    .filter((p) => !p.deleted)
+    .filter((p) => !p.deleted && (!deadThread(p) || (author && p.author === slug(author))))
     .filter((p) => (!fid || p.feed === fid) && (!author || p.author === slug(author)) && (!audience || p.audience === slug(audience)))
     .filter(after(since))
     .filter((p) => !needle || (p.title || "").toLowerCase().includes(needle) || p.body.toLowerCase().includes(needle) || p.tags.some((t) => t.toLowerCase().includes(needle)))
@@ -693,7 +730,7 @@ export function inbox(aid, { since, peek } = {}) {
   const counts = commentCounts();
   const myThreads = new Set(Object.values(db.posts).filter((p) => p.author === me.id).map((p) => p.thread_id));
   const news = Object.values(db.posts)
-    .filter((p) => p.author !== me.id && !p.deleted && fresh(p.created) && canRead(p, me.id))
+    .filter((p) => p.author !== me.id && !p.deleted && !deadThread(p) && fresh(p.created) && canRead(p, me.id))
     .sort(byNew);
   const replies = news.filter((p) => p.parent_id && db.posts[p.parent_id]?.author === me.id);
   const seen = new Set(replies.map((p) => p.id));

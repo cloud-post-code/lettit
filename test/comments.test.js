@@ -32,9 +32,6 @@ test("an agent edits its own comment; others, anonymous callers, and thread root
   assert.match(e2.error, /only the author/);
   const [missing] = await post(`/api/posts/nope/edit`, { body: "x" }, author);
   assert.equal(missing, 404);
-  const [root, e3] = await post(`/api/posts/${thread.id}/edit`, { body: "x" }, author);
-  assert.equal(root, 400);
-  assert.match(e3.error, /comment/);
   const [empty] = await post(`/api/posts/${c.id}/edit`, {}, author);
   assert.equal(empty, 400);
 
@@ -60,11 +57,9 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
 
   const [notMine] = await post(`/api/posts/${leaf.id}/delete`, {}, other);
   assert.equal(notMine, 403);
-  const [root] = await post(`/api/posts/${thread.id}/delete`, {}, author);
-  assert.equal(root, 400);
   const [gone, out] = await post(`/api/posts/${leaf.id}/delete`, {}, author);
   assert.equal(gone, 200);
-  assert.deepEqual(out, { deleted: leaf.id, removed: true });
+  assert.deepEqual(out, { deleted: leaf.id, removed: true, posts: 1 });
   const [missing] = await get(`/api/posts/${leaf.id}`);
   assert.equal(missing, 404);
   const [, tree] = await get(`/api/posts/${thread.id}`);
@@ -77,7 +72,7 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   const [, child] = await post("/api/posts", { parent_id: parent.id, body: "child kept" }, other);
   const [soft, out2] = await post(`/api/posts/${parent.id}/delete`, {}, author);
   assert.equal(soft, 200);
-  assert.deepEqual(out2, { deleted: parent.id, removed: false });
+  assert.deepEqual(out2, { deleted: parent.id, removed: false, posts: 0 });
   const [, tree2] = await get(`/api/posts/${thread.id}`);
   assert.equal(tree2.children.length, 1);
   assert.equal(tree2.children[0].body, undefined, "a removed comment keeps no body");
@@ -96,19 +91,19 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   assert.ok(!page.includes("unique-parent-text"));
 });
 
-test("edit_comment and delete_comment are MCP tools on the hosted endpoint", async () => {
+test("edit and delete are MCP tools on the hosted endpoint", async () => {
   const key = await claim("Tooler");
   const rpc = (method, params) => fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
   const call = async (name, args) => { const { result } = await rpc("tools/call", { name, arguments: args }); return [result.isError === true, result.isError ? result.content[0].text : JSON.parse(result.content[0].text)]; };
   const { result } = await rpc("tools/list", {});
   const names = result.tools.map((t) => t.name);
-  assert.ok(names.includes("edit_comment") && names.includes("delete_comment"), names.join(","));
+  assert.ok(names.includes("edit") && names.includes("delete"), names.join(","));
   const [, t] = await call("post", { kind: "status", title: "tooling", body: "root" });
   const [, c] = await call("reply", { parent_id: t.id, body: "v1" });
-  const [e1, edited] = await call("edit_comment", { post_id: c.id, body: "v2" });
+  const [e1, edited] = await call("edit", { post_id: c.id, body: "v2" });
   assert.equal(e1, false, edited);
   assert.equal(edited.body, "v2");
-  const [e2, deleted] = await call("delete_comment", { post_id: c.id });
+  const [e2, deleted] = await call("delete", { post_id: c.id });
   assert.equal(e2, false, deleted);
   assert.equal(deleted.deleted, c.id);
   const [, tree] = await get(`/api/posts/${t.id}`);

@@ -92,6 +92,7 @@ async function api(req, res, url) {
 async function meApi(req, res, q, key, action) {
   const m = req.method;
   if (m === "POST" && key === "rotate") { const b = await readBody(req); const k = keyOf(req, b); return json(res, 200, db.rotateKey(db.authenticate(k).id, k)); }
+  if (m === "POST" && key === "posts" && action === "delete") { const b = await signedBody(req); return json(res, 200, db.deleteAllPosts(b.author, b.confirm)); }
   if (m === "POST" && key === "visibility-types") {
     const b = await signedBody(req);
     if (action === "delete") return json(res, 200, db.removeVisibilityType(b.author, b.name));
@@ -145,8 +146,8 @@ async function feedsApi(req, res, q, key, action) {
 // Comment actions: the acting agent is the key holder and must be the comment's author.
 async function commentAction(req, pid, action) {
   const b = await signedBody(req);
-  if (action === "edit") return db.editComment(pid, b.author, b.body);
-  if (action === "delete") return db.deleteComment(pid, b.author);
+  if (action === "edit") return db.editPost(pid, b.author, { body: b.body, title: b.title });
+  if (action === "delete") return db.deletePost(pid, b.author);
   throw db.err(404, "unknown post action: edit, delete");
 }
 
