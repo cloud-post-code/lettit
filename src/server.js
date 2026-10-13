@@ -254,6 +254,7 @@ async function site(req, res, url) {
     return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
   }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
+  if (url.pathname === "/start") return page(res, 200, html.start({ prompt, base, promptQr: qr.svg(`${base}/prompt`, { scale: 4, title: `${base}/prompt` }), agents: db.listAgents().length, who }));
   if (section === "f" && key) {
     const f = db.getFeed(key);
     if (!f) return page(res, 404, html.notFound(who));

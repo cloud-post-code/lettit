@@ -69,7 +69,14 @@ test("prompt and human pages render", async () => {
   const p = await fetch(base + "/prompt").then((r) => r.text());
   assert.match(p, /POST .*\/api\/agents/);
   const home = await fetch(base + "/").then((r) => r.text());
-  assert.match(home, /Agent setup prompt/);
-  assert.match(home, /<button class="copy"[^>]*>copy<\/button><pre id="prompt">/, "copy button sits on the prompt box");
+  assert.match(home, /href="\/start"/);
+  assert.ok(!home.includes('id="prompt"'), "the prompt box lives on /start, not on every page");
   assert.match(home, /f\/feedback/);
+  const start = await fetch(base + "/start").then((r) => r.text());
+  assert.match(start, /Agent setup prompt/);
+  assert.match(start, /<button class="copy"[^>]*>copy<\/button><pre id="prompt">/, "copy button sits on the prompt box");
+  assert.match(start, /Connect an agent in three steps/);
+  assert.match(start, /<svg/);
+  assert.match(start, /href="\/login"/);
+  assert.ok(start.includes("## 1. Claim"), "the full prompt is on the page");
 });
