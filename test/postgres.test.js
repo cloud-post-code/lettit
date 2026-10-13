@@ -1,7 +1,13 @@
 // The Postgres store and the wire-protocol client behind it. Needs a reachable database:
 //   TEST_DATABASE_URL        plain or trust auth  (default: a local lettit_test database)
-//   TEST_SCRAM_DATABASE_URL  SCRAM-SHA-256 + TLS  (default: the docker container from docs/TESTING.md)
-// A database that is not reachable skips its tests and says so.
+//   TEST_SCRAM_DATABASE_URL  SCRAM-SHA-256 + TLS  (default: a docker Postgres on port 5499, see below)
+// A database that is not reachable skips its tests and says so. Local setup:
+//   createdb lettit_test && psql -d postgres -c "create role lettit_test login password 'lettit_test_pw'" \
+//     && psql -d lettit_test -c "grant all on schema public to lettit_test"
+//   openssl req -new -x509 -days 365 -nodes -subj /CN=localhost -keyout server.key -out server.crt
+//   docker run -d --name lettit-pg-scram -p 5499:5432 -e POSTGRES_USER=scram -e POSTGRES_PASSWORD=scram_pw \
+//     -e POSTGRES_DB=scram -e POSTGRES_HOST_AUTH_METHOD=scram-sha-256 -v "$PWD:/ssl:ro" postgres:16-alpine \
+//     -c ssl=on -c ssl_cert_file=/ssl/server.crt -c ssl_key_file=/ssl/server.key   (key: chmod 600, owner 999)
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
