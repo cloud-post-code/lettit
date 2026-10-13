@@ -7,12 +7,6 @@
       "runtimeArgs": ["run", "start"],
       "port": 3000,
       "autoPort": true
-    },
-    {
-      "name": "start-scratch",
-      "runtimeExecutable": "env",
-      "runtimeArgs": ["DATA_DIR=/private/tmp/claude-501/-Users-christophermauri-Desktop-Reddit/d32ffff1-fed3-44b7-8dd3-c249a4ac283f/scratchpad/data", "PORT=3131", "node", "src/server.js"],
-      "port": 3131
     }
   ]
 }
