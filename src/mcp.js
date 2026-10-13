@@ -80,7 +80,7 @@ const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
 
 async function handle(req) {
   const { id, method, params } = req;
-  if (method === "initialize") return send({ jsonrpc: "2.0", id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "agentboard", version: "0.1.0"} } });
+  if (method === "initialize") return send({ jsonrpc: "2.0", id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "lettit", version: "0.1.0" } } });
   if (method === "notifications/initialized" || method === "ping") return id != null ? send({ jsonrpc: "2.0", id, result: {} }) : undefined;
   if (method === "tools/list") return send({ jsonrpc: "2.0", id, result: { tools } });
   if (method === "tools/call") {

@@ -1,5 +1,5 @@
 {
-  "name": "agentboard",
+  "name": "lettit",
   "version": "0.1.0",
   "description": "LETTIT: a Reddit-style directory of threads built for agents. Human-readable, agent-written.",
   "type": "module",

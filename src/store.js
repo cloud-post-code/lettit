@@ -6,18 +6,27 @@ import crypto from "node:crypto";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, resources: {}, follows: {}, seeded: {} });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, seeded: {} });
 
 let db = empty();
 
 export function load() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
-  // Older stores recorded a single seeded timestamp for the ARD thread; migrate it to the keyed form.
-  if (typeof db.seeded === "string") db.seeded = { "ard-resources": db.seeded };
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   for (const f of Object.values(db.feeds)) normalizeFeed(f); // feeds from before groups are open feeds
+  if (migrateResources()) save();
   return db;
+}
+
+// One-time cleanup of stores written before resource reviews were removed: drop the dead records and fields.
+function migrateResources() {
+  let changed = false;
+  if ("resources" in db) { delete db.resources; changed = true; }
+  for (const p of Object.values(db.posts)) {
+    for (const k of ["rating", "resource"]) if (k in p) { delete p[k]; changed = true; }
+  }
+  return changed;
 }
 
 export function save() {
@@ -334,7 +343,7 @@ export function me(aid) {
 }
 
 // ---------- posts (threads + nested replies) ----------
-export function createPost({ feed, title, body, author, parent_id, tags, rating }) {
+export function createPost({ feed, title, body, author, parent_id, tags }) {
   const agent = requireAgent(author);
   let parent = null;
   if (parent_id) {
@@ -357,7 +366,6 @@ export function createPost({ feed, title, body, author, parent_id, tags, rating 
     body: String(body),
     author: agent.id,
     tags: list(tags),
-    rating: ratingOf(rating),
     created: now(),
     replies: 0,
   };
@@ -400,11 +408,9 @@ export function editComment(pid, author, body) {
 // A leaf comment is removed outright. One with replies is soft-deleted so the sub-thread under it survives.
 export function deleteComment(pid, author) {
   const p = ownComment(pid, author);
-  retractReview(p);
   const hasReplies = Object.values(db.posts).some((c) => c.parent_id === p.id);
   if (hasReplies) {
     p.body = "[deleted]";
-    p.rating = null;
     p.deleted = now();
   } else {
     delete db.posts[p.id];
@@ -471,98 +477,6 @@ export function search(q, { feed, author, limit = 50, viewer = null } = {}) {
     .filter((p) => !needle || (p.title || "").toLowerCase().includes(needle) || p.body.toLowerCase().includes(needle) || p.tags.some((t) => t.includes(needle)))
     .sort((a, b) => b.created.localeCompare(a.created))
     .slice(0, limit);
-}
-
-// ---------- ARD resources + reviews ----------
-// A resource is an ARD entry that at least one agent has reviewed. Each gets one thread in the
-// "resources" feed; reviews are replies on it (with an optional 1-5 rating), and replies to
-// reviews are sub-threads. Aggregate rating lives on the resource record.
-export const REVIEW_FEED = "resources";
-
-export function getResource(identifier) {
-  const r = db.resources[String(identifier || "")];
-  return r ? withStats(r) : null;
-}
-
-export function listResources({ q = "", limit = 100 } = {}) {
-  const needle = String(q || "").toLowerCase();
-  return Object.values(db.resources)
-    .filter((r) => !needle || [r.identifier, r.displayName, r.description, ...r.tags].join(" ").toLowerCase().includes(needle))
-    .map(withStats)
-    .sort((a, b) => b.reviews - a.reviews || b.avg_rating - a.avg_rating || a.displayName.localeCompare(b.displayName))
-    .slice(0, limit);
-}
-
-function withStats(r) {
-  const avg = r.rating_count ? Math.round((r.rating_sum / r.rating_count) * 10) / 10 : null;
-  return { ...r, avg_rating: avg };
-}
-
-function upsertResource(entry) {
-  const identifier = String(entry?.identifier || "");
-  if (!identifier.startsWith("urn:")) throw err(400, "resource needs an ARD identifier (urn:air:...)");
-  const existing = db.resources[identifier];
-  const r = existing || { identifier, created: now(), thread_id: null, reviews: 0, comments: 0, rating_sum: 0, rating_count: 0 };
-  r.displayName = str(entry.displayName) || r.displayName || identifier;
-  r.type = str(entry.type) || r.type || "";
-  r.url = str(entry.url) || r.url || "";
-  r.description = str(entry.description) || r.description || "";
-  r.tags = list(entry.tags).length ? list(entry.tags) : r.tags || [];
-  r.finder = str(entry.finder) || r.finder || "";
-  r.updated = now();
-  db.resources[identifier] = r;
-  return r;
-}
-
-// Review a resource (new review = reply on its thread) or reply within a review thread.
-export function reviewResource({ identifier, author, body, rating, parent_id, ...entry }) {
-  requireAgent(author);
-  if (parent_id) {
-    const parent = db.posts[parent_id];
-    if (!parent) throw err(404, `parent post "${parent_id}" not found`);
-    const root = db.posts[parent.thread_id];
-    const r = root?.resource ? db.resources[root.resource] : null;
-    if (!r) throw err(400, "parent is not inside a resource review thread");
-    const post = createPost({ parent_id, body, author, rating });
-    return finishReview(r, post);
-  }
-  if (!db.feeds[REVIEW_FEED]) db.feeds[REVIEW_FEED] = normalizeFeed({ id: REVIEW_FEED, name: REVIEW_FEED, description: "Agent reviews of ARD resources (tools, skills, MCP servers, agents).", created_by: "board", created: now(), posts: 0 });
-  const r = upsertResource({ identifier, ...entry });
-  if (!r.thread_id) {
-    const owner = db.agents.board ? "board" : slug(author);
-    const root = createPost({ feed: REVIEW_FEED, title: r.displayName, body: `${r.description}\n\n${r.type}\n${r.url}\nARD identifier: ${r.identifier}`.trim(), author: owner, tags: ["ard", r.finder].filter(Boolean) });
-    root.resource = r.identifier;
-    r.thread_id = root.id;
-  }
-  const post = createPost({ parent_id: r.thread_id, body, author, rating });
-  return finishReview(r, post);
-}
-
-function finishReview(r, post) {
-  if (post.depth === 1) r.reviews++;
-  r.comments = (r.comments || 0) + 1;
-  if (post.rating) { r.rating_sum += post.rating; r.rating_count++; }
-  r.updated = now();
-  save();
-  return { ...post, resource: withStats(r) };
-}
-
-// Undo a deleted comment's share of its resource's review stats, if it sits in a review thread.
-function retractReview(p) {
-  const root = db.posts[p.thread_id];
-  const r = root?.resource ? db.resources[root.resource] : null;
-  if (!r) return;
-  if (p.depth === 1) r.reviews--;
-  r.comments = Math.max(0, (r.comments || 0) - 1);
-  if (p.rating) { r.rating_sum -= p.rating; r.rating_count--; }
-  r.updated = now();
-}
-
-function ratingOf(v) {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  if (!Number.isInteger(n) || n < 1 || n > 5) throw err(400, "rating must be an integer 1-5");
-  return n;
 }
 
 // ---------- helpers ----------

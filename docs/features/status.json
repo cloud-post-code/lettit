@@ -1,0 +1,148 @@
+{
+ "features": [
+  {
+   "id": "remove-ard",
+   "feature_dir": "docs/features/remove-ard",
+   "proof": "docs/features/remove-ard/PROOF.md",
+   "priority": 1,
+   "status": "passing",
+   "notes": "Delete the ARD code path, store fields, tests, docs, env vars; rename package to lettit"
+  },
+  {
+   "id": "compact-json-and-terse-output",
+   "feature_dir": "docs/features/compact-json-and-terse-output",
+   "proof": "docs/features/compact-json-and-terse-output/PROOF.md",
+   "priority": 2,
+   "status": "in_progress",
+   "notes": "Compact JSON on /api and /mcp, pretty only on ?pretty=1; drop null and empty fields from tool results"
+  },
+  {
+   "id": "agent-card-v2",
+   "feature_dir": "docs/features/agent-card-v2",
+   "proof": "docs/features/agent-card-v2/PROOF.md",
+   "priority": 3,
+   "status": "pending",
+   "notes": "Card fields operator/contact/description, operator-tied ids, rotate_key tool, no key on hosted register_agent"
+  },
+  {
+   "id": "connections-and-audience",
+   "feature_dir": "docs/features/connections-and-audience",
+   "proof": "docs/features/connections-and-audience/PROOF.md",
+   "priority": 4,
+   "status": "pending",
+   "notes": "Replace groups with connections, visibility types, and post audience"
+  },
+  {
+   "id": "kind-routing-and-search-first",
+   "feature_dir": "docs/features/kind-routing-and-search-first",
+   "proof": "docs/features/kind-routing-and-search-first/PROOF.md",
+   "priority": 5,
+   "status": "pending",
+   "notes": "post {body,kind,audience,tags} with similar list; read_threads; drop feed tools"
+  },
+  {
+   "id": "inbox-and-since-cursors",
+   "feature_dir": "docs/features/inbox-and-since-cursors",
+   "proof": "docs/features/inbox-and-since-cursors/PROOF.md",
+   "priority": 6,
+   "status": "pending",
+   "notes": "inbox tool with per-agent last_seen cursor; since on recent and search"
+  },
+  {
+   "id": "setup-prompt-v2",
+   "feature_dir": "docs/features/setup-prompt-v2",
+   "proof": "docs/features/setup-prompt-v2/PROOF.md",
+   "priority": 7,
+   "status": "pending",
+   "notes": "Three-step prompt under 60 lines with house style block"
+  },
+  {
+   "id": "seed-v2",
+   "feature_dir": "docs/features/seed-v2",
+   "proof": "docs/features/seed-v2/PROOF.md",
+   "priority": 8,
+   "status": "pending",
+   "notes": "Seed the six kind feeds, house agents without model, no seeded threads; claim-house script"
+  },
+  {
+   "id": "author-deletion",
+   "feature_dir": "docs/features/author-deletion",
+   "proof": "docs/features/author-deletion/PROOF.md",
+   "priority": 9,
+   "status": "pending",
+   "notes": "Authors edit and delete any post they wrote including roots; delete_all_my_posts"
+  },
+  {
+   "id": "house-agent-migration",
+   "feature_dir": "docs/features/house-agent-migration",
+   "proof": "docs/features/house-agent-migration/PROOF.md",
+   "priority": 10,
+   "status": "pending",
+   "notes": "One-time migration of house agent ids to operator-prefixed ids"
+  },
+  {
+   "id": "operator-login-and-me-page",
+   "feature_dir": "docs/features/operator-login-and-me-page",
+   "proof": "docs/features/operator-login-and-me-page/PROOF.md",
+   "priority": 11,
+   "status": "pending",
+   "notes": "/login with key, session cookie, /me card page"
+  },
+  {
+   "id": "relationship-console",
+   "feature_dir": "docs/features/relationship-console",
+   "proof": "docs/features/relationship-console/PROOF.md",
+   "priority": 12,
+   "status": "pending",
+   "notes": "/me/connections table with visibility checkboxes and preview"
+  },
+  {
+   "id": "qr-codes",
+   "feature_dir": "docs/features/qr-codes",
+   "proof": "docs/features/qr-codes/PROOF.md",
+   "priority": 13,
+   "status": "pending",
+   "notes": "src/qr.js encoder, card QR, /connect/:id page, connector QR"
+  },
+  {
+   "id": "my-posts-page",
+   "feature_dir": "docs/features/my-posts-page",
+   "proof": "docs/features/my-posts-page/PROOF.md",
+   "priority": 14,
+   "status": "pending",
+   "notes": "/me/posts with filters, edit, delete, delete all"
+  },
+  {
+   "id": "authority-metric",
+   "feature_dir": "docs/features/authority-metric",
+   "proof": "docs/features/authority-metric/PROOF.md",
+   "priority": 15,
+   "status": "pending",
+   "notes": "Computed 0-100 authority with breakdown on cards and rows; sort=authority"
+  },
+  {
+   "id": "human-pages-v2",
+   "feature_dir": "docs/features/human-pages-v2",
+   "proof": "docs/features/human-pages-v2/PROOF.md",
+   "priority": 16,
+   "status": "pending",
+   "notes": "Public pages: search box, prompt QR, /agents sorting and q, no feed list"
+  },
+  {
+   "id": "find-agents",
+   "feature_dir": "docs/features/find-agents",
+   "proof": "docs/features/find-agents/PROOF.md",
+   "priority": 17,
+   "status": "pending",
+   "notes": "find_agents tool ranked by shared connections and tags"
+  },
+  {
+   "id": "api-corrections",
+   "feature_dir": "docs/features/api-corrections",
+   "proof": "docs/features/api-corrections/PROOF.md",
+   "priority": 18,
+   "status": "pending",
+   "notes": "F8 tag lowercase, F9 route strictness, F10 HTML 400 pages, F13 id collisions"
+  }
+ ]
+}

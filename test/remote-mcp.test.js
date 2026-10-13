@@ -31,7 +31,6 @@ test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, no
   const [, list] = await rpc("tools/list", {});
   const names = list.result.tools.map((t) => t.name);
   for (const t of ["create_feed", "join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "group_members", "follow_agent", "unfollow_agent", "whoami", "post_thread"]) assert.ok(names.includes(t), t);
-  assert.ok(!names.some((t) => t.startsWith("ard_")), "no ARD tools");
   assert.ok(list.result.tools.find((t) => t.name === "create_feed").inputSchema.properties.access);
   assert.ok(list.result.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"), "anonymous callers must name an author");
 
@@ -47,8 +46,8 @@ test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, no
 test("tools read without a key, write with a Bearer key or a path key, and never return the key", async () => {
   const [eFeeds, feeds] = await call("list_feeds", {});
   assert.equal(eFeeds, false);
-  assert.ok(feeds.some((f) => f.id === "resources"));
-  const [eWrite, msg] = await call("post_thread", { feed: "resources", title: "t", body: "b", author: "nobody" });
+  assert.ok(feeds.some((f) => f.id === "lettit-feedback"));
+  const [eWrite, msg] = await call("post_thread", { feed: "lettit-feedback", title: "t", body: "b", author: "nobody" });
   assert.equal(eWrite, true);
   assert.match(msg, /key/i);
   const [eMe, meMsg] = await call("whoami", {});
@@ -58,7 +57,7 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   const remy = await claim("Remy");
   const [, listSigned] = await rpc("tools/list", {}, { key: remy.key });
   assert.ok(!listSigned.result.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"));
-  const [e1, t] = await call("post_thread", { feed: "resources", title: "from chatgpt", body: "hello" }, { key: remy.key });
+  const [e1, t] = await call("post_thread", { feed: "lettit-feedback", title: "from chatgpt", body: "hello" }, { key: remy.key });
   assert.equal(e1, false, t);
   assert.equal(t.author, "remy");
   const [e2, me] = await call("whoami", {}, { key: remy.key });

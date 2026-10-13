@@ -56,7 +56,7 @@ test("AGENTBOARD_AGENT is a signed-in identity: first write claims it, the key i
     // Two writes land at once on a bridge with no key yet: exactly one claim happens, both succeed.
     const [[e1, card], [e0, first]] = await Promise.all([
       b.call("register_agent", { operator: "openai", model: "gpt-5-codex", purpose: "coding agent" }),
-      b.call("post_thread", { feed: "resources", title: "racing", body: "x" }),
+      b.call("post_thread", { feed: "lettit-feedback", title: "racing", body: "x" }),
     ]);
     assert.equal(e0, false, first);
     assert.equal(e1, false, card);
@@ -68,7 +68,7 @@ test("AGENTBOARD_AGENT is a signed-in identity: first write claims it, the key i
     assert.match(saved[base].codex, /^lettit_/);
     assert.equal(fs.statSync(KEY_FILE).mode & 0o777, 0o600);
 
-    const [e2, thread] = await b.call("post_thread", { feed: "resources", title: "from codex", body: "hello" });
+    const [e2, thread] = await b.call("post_thread", { feed: "lettit-feedback", title: "from codex", body: "hello" });
     assert.equal(e2, false, thread);
     assert.equal(thread.author, "codex");
 
@@ -76,7 +76,7 @@ test("AGENTBOARD_AGENT is a signed-in identity: first write claims it, the key i
     assert.equal(e3, false, reply);
     assert.equal(reply.author, "codex");
 
-    const [e4, msg] = await b.call("post_thread", { feed: "resources", title: "explicit", body: "x", author: "other-bot" });
+    const [e4, msg] = await b.call("post_thread", { feed: "lettit-feedback", title: "explicit", body: "x", author: "other-bot" });
     assert.equal(e4, true);
     assert.match(msg, /signed in as "codex"/);
     const [e5, msg2] = await b.call("register_agent", { name: "other-bot" });
@@ -93,7 +93,7 @@ test("AGENTBOARD_AGENT is a signed-in identity: first write claims it, the key i
   try {
     const [, who] = await b2.call("whoami", {});
     assert.equal(who.key_on_file, true);
-    const [e, t] = await b2.call("post_thread", { feed: "resources", title: "second session", body: "same me" });
+    const [e, t] = await b2.call("post_thread", { feed: "lettit-feedback", title: "second session", body: "same me" });
     assert.equal(e, false, t);
     assert.equal(t.author, "codex");
     const [, me] = await b2.call("get_agent", { id: "codex" });
@@ -105,7 +105,7 @@ test("AGENTBOARD_KEY alone signs the bridge in; the server derives the author fr
   const [, card] = await fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Key Only" }) }).then(async (r) => [r.status, await r.json()]);
   const b = bridge({ AGENTBOARD_AGENT: "", AGENTBOARD_KEY: card.key });
   try {
-    const [e, t] = await b.call("post_thread", { feed: "resources", title: "by key", body: "x" });
+    const [e, t] = await b.call("post_thread", { feed: "lettit-feedback", title: "by key", body: "x" });
     assert.equal(e, false, t);
     assert.equal(t.author, "key-only");
   } finally { b.close(); }
@@ -116,7 +116,7 @@ test("without AGENTBOARD_AGENT or a key the bridge requires author and writes fa
   try {
     const { result: list } = await b.rpc("tools/list");
     assert.ok(list.tools.find((t) => t.name === "post_thread").inputSchema.required.includes("author"));
-    const [isErr, msg] = await b.call("post_thread", { feed: "resources", title: "t", body: "b", author: "codex" });
+    const [isErr, msg] = await b.call("post_thread", { feed: "lettit-feedback", title: "t", body: "b", author: "codex" });
     assert.equal(isErr, true);
     assert.match(msg, /key/i);
   } finally { b.close(); }

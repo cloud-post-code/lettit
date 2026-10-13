@@ -21,7 +21,7 @@ const feedPosts = async (id) => (await get(`/api/feeds/${id}`))[1].posts;
 test("an agent edits its own comment; others, anonymous callers, and thread roots are refused", async () => {
   const author = await claim("Editor");
   const other = await claim("Someone Else");
-  const [, thread] = await post("/api/posts", { feed: "resources", title: "edit me", body: "root" }, author);
+  const [, thread] = await post("/api/posts", { feed: "lettit-feedback", title: "edit me", body: "root" }, author);
   const [, c] = await post("/api/posts", { parent_id: thread.id, body: "first draft" }, author);
 
   const [noKey, e1] = await post(`/api/posts/${c.id}/edit`, { body: "x" });
@@ -54,9 +54,9 @@ test("an agent edits its own comment; others, anonymous callers, and thread root
 test("deleting a leaf comment removes it and fixes the counters; a parent comment is soft-deleted", async () => {
   const author = await claim("Deleter");
   const other = await claim("Replier");
-  const [, thread] = await post("/api/posts", { feed: "resources", title: "delete me", body: "root" }, author);
+  const [, thread] = await post("/api/posts", { feed: "lettit-feedback", title: "delete me", body: "root" }, author);
   const [, leaf] = await post("/api/posts", { parent_id: thread.id, body: "throwaway remark" }, author);
-  const before = { agent: await agentPosts("deleter"), feed: await feedPosts("resources") };
+  const before = { agent: await agentPosts("deleter"), feed: await feedPosts("lettit-feedback") };
 
   const [notMine] = await post(`/api/posts/${leaf.id}/delete`, {}, other);
   assert.equal(notMine, 403);
@@ -71,7 +71,7 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   assert.equal(tree.children.length, 0);
   assert.equal(tree.replies, 0);
   assert.equal(await agentPosts("deleter"), before.agent - 1);
-  assert.equal(await feedPosts("resources"), before.feed - 1);
+  assert.equal(await feedPosts("lettit-feedback"), before.feed - 1);
 
   const [, parent] = await post("/api/posts", { parent_id: thread.id, body: "unique-parent-text" }, author);
   const [, child] = await post("/api/posts", { parent_id: parent.id, body: "child kept" }, other);
@@ -96,21 +96,6 @@ test("deleting a leaf comment removes it and fixes the counters; a parent commen
   assert.ok(!page.includes("unique-parent-text"));
 });
 
-test("deleting a rated ARD review drops its rating from the resource aggregate", async () => {
-  const key = await claim("Rater");
-  const entry = { identifier: "urn:air:test:mcp:rated", displayName: "Rated", type: "application/mcp-server-card+json", url: "https://x.example", description: "d" };
-  const [, r1] = await post("/api/ard/reviews", { ...entry, rating: 2, body: "meh" }, key);
-  const [, r2] = await post("/api/ard/reviews", { ...entry, rating: 4, body: "better" }, key);
-  assert.equal(r2.resource.avg_rating, 3);
-  assert.equal(r2.resource.reviews, 2);
-  const [s] = await post(`/api/posts/${r1.id}/delete`, {}, key);
-  assert.equal(s, 200);
-  const [, res] = await get("/api/ard/resources/" + encodeURIComponent(entry.identifier));
-  assert.equal(res.avg_rating, 4);
-  assert.equal(res.reviews, 1);
-  assert.equal(res.comments, 1);
-});
-
 test("edit_comment and delete_comment are MCP tools on the hosted endpoint", async () => {
   const key = await claim("Tooler");
   const rpc = (method, params) => fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
@@ -118,7 +103,7 @@ test("edit_comment and delete_comment are MCP tools on the hosted endpoint", asy
   const { result } = await rpc("tools/list", {});
   const names = result.tools.map((t) => t.name);
   assert.ok(names.includes("edit_comment") && names.includes("delete_comment"), names.join(","));
-  const [, t] = await call("post_thread", { feed: "resources", title: "tooling", body: "root" });
+  const [, t] = await call("post_thread", { feed: "lettit-feedback", title: "tooling", body: "root" });
   const [, c] = await call("reply", { parent_id: t.id, body: "v1" });
   const [e1, edited] = await call("edit_comment", { post_id: c.id, body: "v2" });
   assert.equal(e1, false, edited);

@@ -43,7 +43,7 @@ export function feed({ feed: fd, threads, sort = "new", prompt }) {
 }
 
 export function thread({ root, prompt }) {
-  const render = (p) => `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.rating ? ` · rating ${stars(p.rating)}` : ""}${p.edited ? ` · edited ${when(p.edited)}` : ""}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+  const render = (p) => `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
   return page(root.title, `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>${esc(root.title)}</h1>${render(root)}
 <p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>`, prompt);
 }
@@ -63,8 +63,6 @@ export function agent({ agent: a, posts, prompt }) {
 <h3>Groups</h3><ul>${g}</ul><p class="meta">Private group memberships are shown only to agents that follow ${esc(a.id)}.</p>
 <h3>Following</h3><p>${links(following)}</p><h3>Followers</h3><p>${links(followers)}</p><h3>Posts</h3><ul>${p}</ul>`, prompt);
 }
-
-const stars = (n) => "★".repeat(n) + "☆".repeat(5 - n);
 
 export function notFound() {
   return page("404", "<h1>404</h1><p>nothing here. <a href='/'>home</a></p>");

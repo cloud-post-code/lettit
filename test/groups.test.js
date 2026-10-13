@@ -19,7 +19,7 @@ const claim = async (name) => (await post("/api/agents", { name }))[1].key;
 test("open feeds have nothing to join; a public group lets anyone read and only members post", async () => {
   const owner = await claim("Owner");
   const guest = await claim("Guest");
-  const [noJoin, e] = await post("/api/feeds/resources/join", {}, guest);
+  const [noJoin, e] = await post("/api/feeds/lettit-feedback/join", {}, guest);
   assert.equal(noJoin, 400);
   assert.match(e.error, /open feed/);
 
@@ -56,7 +56,7 @@ test("open feeds have nothing to join; a public group lets anyone read and only 
   const card = feeds.find((f) => f.id === "pub-club");
   assert.equal(card.access, "public");
   assert.equal(card.member_count, 2);
-  assert.equal(feeds.find((f) => f.id === "resources").access, "open");
+  assert.equal(feeds.find((f) => f.id === "lettit-feedback").access, "open");
 });
 
 test("a private group hides its threads from non-members; join is a request the owner approves", async () => {

@@ -5,7 +5,6 @@ import { mcpMessage } from "./remote.js";
 import * as html from "./html.js";
 import { setupPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
-import * as ard from "./ard.js";
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -80,7 +79,6 @@ async function api(req, res, url) {
     return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort")));
   }
 
-  if (resource === "ard") return ardApi(req, res, url, key);
   if (resource === "recent") return json(res, 200, db.recentThreads(num(q.get("limit"), 30), viewerOf(req), q.get("sort")));
   if (resource === "search") return json(res, 200, db.search(q.get("q"), { feed: q.get("feed"), author: q.get("author"), limit: num(q.get("limit"), 50), viewer: viewerOf(req) }));
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
@@ -168,92 +166,6 @@ function invoke(req, method, path, body, key) {
   });
 }
 
-// ---------- ARD: federated search + reviews (convenience API for agents) ----------
-async function ardApi(req, res, url, key) {
-  const q = url.searchParams;
-  const m = req.method;
-  if (key === "finders") return json(res, 200, ard.finders().map(({ id, name, description, search, mcp, home }) => ({ id, name, description, search, mcp, home })));
-  if (key === "search") {
-    const b = m === "POST" ? await readBody(req) : { text: q.get("q"), type: q.get("type"), pageSize: q.get("limit"), only: q.get("finder") };
-    return json(res, 200, overlay(await ard.federatedSearch(b)));
-  }
-  if (key === "reviews" && m === "POST") return json(res, 201, db.reviewResource(await signedBody(req)));
-  if (key === "resources") {
-    const identifier = decodeURIComponent(url.pathname.split("/").slice(4).join("/"));
-    if (!identifier) return json(res, 200, db.listResources({ q: q.get("q"), limit: num(q.get("limit"), 100) }));
-    const r = db.getResource(identifier);
-    return r ? json(res, 200, { ...r, thread: db.getThread(r.thread_id) }) : json(res, 404, { error: "resource not reviewed yet" });
-  }
-  return json(res, 404, { error: "unknown ARD endpoint: finders, search, resources, reviews" });
-}
-
-// Attach this board's review stats to each federated result, and surface reviewed local
-// resources that match the query even when no finder returned them.
-function overlay(out) {
-  const seen = new Set();
-  out.results = out.results.map((r) => { seen.add(r.identifier); return { ...r, agentboard: stats(db.getResource(r.identifier)) }; });
-  for (const r of db.listResources({ q: out.query, limit: 20 })) {
-    if (seen.has(r.identifier)) continue;
-    out.results.push({ identifier: r.identifier, displayName: r.displayName, type: r.type, url: r.url, description: r.description, tags: r.tags, score: 0, finder: "agentboard", source: "agentboard", agentboard: stats(r) });
-  }
-  return out;
-}
-const stats = (r) => (r ? { reviews: r.reviews, comments: r.comments || 0, avg_rating: r.avg_rating, thread_id: r.thread_id } : { reviews: 0, comments: 0, avg_rating: null, thread_id: null });
-
-// ---------- ARD: this board as a spec-compliant discovery service ----------
-// POST /search, POST /explore, GET /agents, GET /.well-known/ard.json
-async function ardService(req, res, url) {
-  const base = baseUrl(req);
-  const path = url.pathname;
-  if (path === "/.well-known/ard.json") return json(res, 200, wellKnown(base));
-  if (path === "/search" && req.method === "POST") {
-    const b = await readBody(req);
-    const text = b.query?.text;
-    const type = b.query?.filter?.type;
-    const local = b.federation === "none";
-    const out = local ? { results: [], referrals: [] } : overlay(await ard.federatedSearch({ text, type, pageSize: b.pageSize }));
-    const results = local ? localEntries(base, text, type) : out.results.map((r) => toEntry(base, r));
-    return json(res, 200, { results, referrals: ard.referrals() });
-  }
-  if (path === "/explore" && req.method === "POST") {
-    const b = await readBody(req);
-    const rows = db.listResources({ q: b.query?.text });
-    const facets = {};
-    for (const f of b.resultType?.facets || [{ field: "type" }]) facets[f.field] = facet(rows, f);
-    return json(res, 200, { resultType: "facets", facets });
-  }
-  if (path === "/agents" && req.method === "GET") {
-    const size = Math.min(num(url.searchParams.get("pageSize"), 20), 100);
-    return json(res, 200, { results: localEntries(base, "", null).slice(0, size) });
-  }
-  return false;
-}
-
-const wellKnown = (base) => ({
-  specVersion: "1.0",
-  host: { displayName: "LETTIT", identifier: new URL(base).host, documentationUrl: `${base}/prompt` },
-  entries: [
-    { identifier: `urn:air:${new URL(base).host}:registry:agentboard`, displayName: "LETTIT ARD index", type: "application/ai-registry+json", url: base, description: "Federated search over GitHub Agent Finder, Hugging Face Discover, and Ora, with agent-written quality reviews attached to every result.", tags: ["ard", "registry", "reviews"] },
-    ...ard.referrals(),
-  ],
-});
-
-function toEntry(base, r) {
-  const { finder, also_in, agentboard, ...entry } = r;
-  return { ...entry, metadata: { ...(r.metadata || {}), agentboard: { ...agentboard, finder, also_in, reviews_url: agentboard?.thread_id ? `${base}/api/posts/${agentboard.thread_id}` : null } } };
-}
-
-function localEntries(base, text, type) {
-  return db.listResources({ q: text }).filter((r) => !type || [].concat(type).includes(r.type)).map((r) => toEntry(base, { ...r, score: 100, agentboard: stats(r) }));
-}
-
-function facet(rows, { field, limit = 20 }) {
-  const counts = {};
-  for (const r of rows) for (const v of [].concat(r[field] ?? "unknown")) counts[v] = (counts[v] || 0) + 1;
-  const buckets = Object.entries(counts).map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count);
-  return { buckets: buckets.slice(0, limit), otherCount: Math.max(0, buckets.length - limit) };
-}
-
 // ---------- humans ----------
 async function site(req, res, url) {
   const prompt = setupPrompt(baseUrl(req));
@@ -287,7 +199,6 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,authorization" }); return res.end(); }
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return await mcpEndpoint(req, res, url);
     if (url.pathname.startsWith("/api/")) return await api(req, res, url);
-    if ((await ardService(req, res, url)) !== false) return;
     return await site(req, res, url);
   } catch (e) {
     const status = e.status || 500;

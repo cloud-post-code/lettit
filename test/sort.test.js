@@ -15,7 +15,7 @@ const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) =
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const page = (p) => fetch(base + p).then((r) => r.text());
 const claim = async (name) => (await post("/api/agents", { name }))[1].key;
-// The resources feed also holds a seeded thread with no comments; compare only the threads made here.
+// The feed also holds a seeded thread with no comments; compare only the threads made here.
 const mine = new Set();
 const ids = (list) => list.map((t) => t.id).filter((id) => mine.has(id));
 
@@ -24,9 +24,9 @@ before(async () => {
   await new Promise((r) => server.listen(0, () => { base = `http://localhost:${server.address().port}`; r(); }));
   key = await claim("Ranker");
   const other = await claim("Chatter");
-  quiet = (await post("/api/posts", { feed: "resources", title: "quiet thread", body: "b" }, key))[1];
-  mid = (await post("/api/posts", { feed: "resources", title: "middling thread", body: "b" }, key))[1];
-  busy = (await post("/api/posts", { feed: "resources", title: "busy thread", body: "b" }, key))[1];
+  quiet = (await post("/api/posts", { feed: "lettit-feedback", title: "quiet thread", body: "b" }, key))[1];
+  mid = (await post("/api/posts", { feed: "lettit-feedback", title: "middling thread", body: "b" }, key))[1];
+  busy = (await post("/api/posts", { feed: "lettit-feedback", title: "busy thread", body: "b" }, key))[1];
   for (const t of [quiet, mid, busy]) mine.add(t.id);
   // busy: one direct reply with two nested comments under it = 3 comments; plus a deleted one that must not count
   const [, r] = await post("/api/posts", { parent_id: busy.id, body: "r" }, other);
@@ -40,7 +40,7 @@ before(async () => {
 });
 
 test("listed threads carry a total comment count that spans depths and skips deleted comments", async () => {
-  const [, f] = await get("/api/feeds/resources");
+  const [, f] = await get("/api/feeds/lettit-feedback");
   const by = Object.fromEntries(f.threads.map((t) => [t.id, t]));
   assert.equal(by[busy.id].comments, 3);
   assert.equal(by[busy.id].replies, 1);
@@ -49,39 +49,39 @@ test("listed threads carry a total comment count that spans depths and skips del
 });
 
 test("sort=comments ranks by comment count on feeds, recent, and posts; the default stays newest first", async () => {
-  const [, newest] = await get("/api/feeds/resources");
+  const [, newest] = await get("/api/feeds/lettit-feedback");
   assert.deepEqual(ids(newest.threads), [busy.id, mid.id, quiet.id]);
-  const [, byNew] = await get("/api/feeds/resources?sort=new");
+  const [, byNew] = await get("/api/feeds/lettit-feedback?sort=new");
   assert.deepEqual(ids(byNew.threads), ids(newest.threads));
   // make the tie-break observable: busy is newest, so put quiet (0) last and mid (2) between
-  const [, ranked] = await get("/api/feeds/resources?sort=comments");
+  const [, ranked] = await get("/api/feeds/lettit-feedback?sort=comments");
   assert.deepEqual(ids(ranked.threads), [busy.id, mid.id, quiet.id]);
   const [, recent] = await get("/api/recent?sort=comments");
   assert.deepEqual(ids(recent), [busy.id, mid.id, quiet.id]);
   const [, posts] = await get("/api/posts?sort=comments");
   assert.equal(posts[0].id, busy.id);
-  const [bad, e] = await get("/api/feeds/resources?sort=hot");
+  const [bad, e] = await get("/api/feeds/lettit-feedback?sort=hot");
   assert.equal(bad, 400);
   assert.match(e.error, /sort/);
 });
 
 test("sort=comments puts an older busy thread above a newer quiet one", async () => {
-  const [, late] = await post("/api/posts", { feed: "resources", title: "latest quiet thread", body: "b" }, key);
+  const [, late] = await post("/api/posts", { feed: "lettit-feedback", title: "latest quiet thread", body: "b" }, key);
   mine.add(late.id);
-  const [, newest] = await get("/api/feeds/resources");
+  const [, newest] = await get("/api/feeds/lettit-feedback");
   assert.equal(newest.threads[0].id, late.id);
-  const [, ranked] = await get("/api/feeds/resources?sort=comments");
+  const [, ranked] = await get("/api/feeds/lettit-feedback?sort=comments");
   assert.deepEqual(ids(ranked.threads), [busy.id, mid.id, late.id, quiet.id]);
 });
 
 test("the feed and home pages honour sort=comments and show the toggle", async () => {
-  const feedPage = await page("/f/resources?sort=comments");
+  const feedPage = await page("/f/lettit-feedback?sort=comments");
   assert.ok(feedPage.indexOf("busy thread") < feedPage.indexOf("latest quiet thread"));
   assert.match(feedPage, /3 comments/);
-  assert.match(feedPage, /href="\/f\/resources\?sort=new"/);
-  const feedDefault = await page("/f/resources");
+  assert.match(feedPage, /href="\/f\/lettit-feedback\?sort=new"/);
+  const feedDefault = await page("/f/lettit-feedback");
   assert.ok(feedDefault.indexOf("latest quiet thread") < feedDefault.indexOf("busy thread"));
-  assert.match(feedDefault, /href="\/f\/resources\?sort=comments"/);
+  assert.match(feedDefault, /href="\/f\/lettit-feedback\?sort=comments"/);
   const home = await page("/?sort=comments");
   assert.ok(home.indexOf("busy thread") < home.indexOf("latest quiet thread"));
   assert.match(home, /href="\/\?sort=new"/);
