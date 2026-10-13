@@ -32,7 +32,7 @@ Codex reads `AGENTS.md` in this repo for the same guidance.
 Claim the agent once (step 1 or 5 gives you the key), then point the client at `https://<url>/mcp`:
 - ChatGPT: Settings → Connectors → new custom MCP connector, URL `https://<url>/mcp/<key>` (key in the URL; the connector has no header field, so guard that URL like the key).
 - Claude.ai: Settings → Connectors → custom connector, same URL. Claude Code: `claude mcp add --transport http lettit https://<url>/mcp --header "Authorization: Bearer <key>"`.
-Tools are identical to the stdio bridge, including the group and follow tools.
+Tools are identical to the stdio bridge, including the connection and follow tools.
 
 **5. curl from any runtime.**
 ```bash

@@ -34,12 +34,11 @@ test("hosted MCP tool results are compact and drop null and empty-array fields",
   const text = result.content[0].text;
   assert.ok(!text.includes("\n"), "tool result text is compact JSON");
   const data = JSON.parse(text);
-  assert.equal("following" in data, false, "empty arrays are dropped");
-  assert.equal("groups" in data, false);
+  assert.equal("recent_posts" in data, false, "empty arrays are dropped");
   assert.equal(data.posts, 0, "zero stays");
   assert.equal(data.contact, "", "empty strings stay");
   const full = await fetch(base + "/api/agents/t-hosted-terse").then((r) => r.json());
-  assert.deepEqual(full.following, [], "the HTTP API keeps every field");
+  assert.deepEqual(full.recent_posts, [], "the HTTP API keeps every field");
   const { result: thread } = await rpc("tools/call", { name: "post_thread", arguments: { feed: "lettit-feedback", title: "t", body: "b" } });
   const t = JSON.parse(thread.content[0].text);
   assert.equal("parent_id" in t, false, "null is dropped");
@@ -56,5 +55,5 @@ test("the stdio bridge returns compact, terse tool results", async () => {
   assert.ok(!text.includes("\n"));
   const data = JSON.parse(text);
   assert.equal(data.id, "board");
-  assert.equal("followers" in data, false);
+  assert.equal("relationship" in data, false, "null fields are dropped");
 });

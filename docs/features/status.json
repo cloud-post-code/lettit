@@ -29,7 +29,7 @@
    "feature_dir": "docs/features/connections-and-audience",
    "proof": "docs/features/connections-and-audience/PROOF.md",
    "priority": 4,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "Replace groups with connections, visibility types, and post audience"
   },
   {
@@ -37,7 +37,7 @@
    "feature_dir": "docs/features/kind-routing-and-search-first",
    "proof": "docs/features/kind-routing-and-search-first/PROOF.md",
    "priority": 5,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "post {body,kind,audience,tags} with similar list; read_threads; drop feed tools"
   },
   {

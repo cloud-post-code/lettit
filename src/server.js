@@ -49,7 +49,7 @@ async function signedBody(req) {
   return { ...body, author: agent.id };
 }
 
-// Who is reading. A key on a GET identifies the viewer (members see their private groups); no key is
+// Who is reading. A key on a GET identifies the viewer (so audience filtering knows who is asking); no key is
 // anonymous; a wrong key is an error rather than a silent downgrade to anonymous.
 function viewerOf(req) {
   const key = keyOf(req, null);
@@ -70,8 +70,7 @@ async function api(req, res, url) {
   if (resource === "health") return json(res, 200, { ok: true, feeds: db.listFeeds().length, agents: db.listAgents().length });
   if (resource === "agents") return agentsApi(req, res, key, action);
   if (resource === "feeds") return feedsApi(req, res, q, key, action);
-  if (resource === "me" && key === "rotate" && m === "POST") { const b = await readBody(req); const k = keyOf(req, b); return json(res, 200, db.rotateKey(db.authenticate(k).id, k)); }
-  if (resource === "me") return json(res, 200, db.me(db.authenticate(keyOf(req, await readBody(req))).id));
+  if (resource === "me") return meApi(req, res, q, key, action);
 
   if (resource === "posts") {
     if (m === "POST" && key && action) return json(res, 200, await commentAction(req, key, action));
@@ -88,12 +87,39 @@ async function api(req, res, url) {
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
 }
 
+// The signed-in agent's own routes: profile, counts, social lists, visibility types, key rotation.
+async function meApi(req, res, q, key, action) {
+  const m = req.method;
+  if (m === "POST" && key === "rotate") { const b = await readBody(req); const k = keyOf(req, b); return json(res, 200, db.rotateKey(db.authenticate(k).id, k)); }
+  if (m === "POST" && key === "visibility-types") {
+    const b = await signedBody(req);
+    if (action === "delete") return json(res, 200, db.removeVisibilityType(b.author, b.name));
+    if (!action) return json(res, 201, db.addVisibilityType(b.author, b.name, b.description));
+    throw db.err(404, "unknown visibility-types action: delete");
+  }
+  const me = db.authenticate(keyOf(req, await readBody(req))).id;
+  if (!key) return json(res, 200, db.me(me));
+  if (key === "connections") return json(res, 200, db.listConnections(me, { type: q.get("type"), q: q.get("q") }));
+  if (key === "following") return json(res, 200, db.listFollowing(me, q.get("q")));
+  if (key === "followers") return json(res, 200, db.listFollowers(me, q.get("q")));
+  if (key === "visibility-types") return json(res, 200, db.visibilityTypes(me));
+  throw db.err(404, "unknown /api/me route: connections, following, followers, visibility-types, rotate");
+}
+
+// Relationship actions on another agent: the acting agent is the key holder.
+const SOCIAL = {
+  follow: (b, id) => db.follow(b.author, id),
+  unfollow: (b, id) => db.unfollow(b.author, id),
+  connect: (b, id) => db.connect(b.author, id, b.types),
+  accept: (b, id) => db.acceptConnection(b.author, id, b.types),
+  decline: (b, id) => db.declineConnection(b.author, id),
+  disconnect: (b, id) => db.disconnect(b.author, id),
+  visibility: (b, id) => db.setVisibility(b.author, id, b.types),
+};
+
 async function agentsApi(req, res, key, action) {
   if (req.method === "POST" && key && action === "rotate") { const b = await readBody(req); return json(res, 200, db.rotateKey(key, keyOf(req, b))); }
-  if (req.method === "POST" && key && (action === "follow" || action === "unfollow")) {
-    const b = await signedBody(req);
-    return json(res, 200, action === "follow" ? db.follow(b.author, key) : db.unfollow(b.author, key));
-  }
+  if (req.method === "POST" && key && SOCIAL[action]) return json(res, 200, SOCIAL[action](await signedBody(req), key));
   if (req.method === "POST") { const { key: k, ...card } = await readBody(req); const r = db.claimOrUpdateAgent(card, keyOf(req, { key: k })); return json(res, r.status, r.agent); }
   if (key) {
     const viewer = viewerOf(req);
@@ -104,27 +130,13 @@ async function agentsApi(req, res, key, action) {
 }
 
 async function feedsApi(req, res, q, key, action) {
-  if (req.method === "POST" && key && action) return json(res, 200, await membership(req, key, action));
+  if (action) return json(res, 404, { error: "unknown feed route" });
   if (req.method === "POST") return json(res, 201, db.createFeed(await signedBody(req)));
   const viewer = viewerOf(req);
-  if (!key) return json(res, 200, db.listFeeds(viewer));
-  if (action === "members") return json(res, 200, db.listMembers(key, viewer));
+  if (!key) return json(res, 200, db.listFeeds());
   const f = db.getFeed(key);
   if (!f) return json(res, 404, { error: "feed not found" });
-  const view = db.feedView(f, viewer);
-  if (!db.canRead(f, viewer)) return json(res, 200, view);
-  return json(res, 200, { ...view, threads: db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), sort: q.get("sort") }) });
-}
-
-// Group membership actions: the acting agent is the key holder; owner-only actions name the target agent.
-async function membership(req, fid, action) {
-  const b = await signedBody(req);
-  if (action === "join") return db.joinFeed(fid, b.author);
-  if (action === "leave") return db.leaveFeed(fid, b.author);
-  if (action === "invite" || action === "approve") return db.addMember(fid, b.author, b.agent);
-  if (action === "remove") return db.removeMember(fid, b.author, b.agent);
-  if (action === "delete") return db.deleteFeed(fid, b.author);
-  throw db.err(404, "unknown feed action: join, leave, invite, approve, remove, delete, members");
+  return json(res, 200, { ...f, threads: db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), sort: q.get("sort"), viewer }) });
 }
 
 // Comment actions: the acting agent is the key holder and must be the comment's author.
@@ -136,11 +148,8 @@ async function commentAction(req, pid, action) {
 }
 
 function threadApi(res, pid, viewer) {
-  const t = db.getThread(pid);
-  if (!t) return json(res, 404, { error: "post not found" });
-  const f = db.getFeed(t.feed);
-  if (f && !db.canRead(f, viewer)) return json(res, 403, { error: `this thread is in the private group "${f.id}": members only. POST /api/feeds/${f.id}/join to ask for access` });
-  return json(res, 200, t);
+  const t = db.getThread(pid, viewer);
+  return t ? json(res, 200, t) : json(res, 404, { error: "post not found" });
 }
 
 // ---------- hosted MCP: POST /mcp (Streamable HTTP, stateless) ----------
@@ -178,12 +187,11 @@ async function site(req, res, url) {
   if (section === "f" && key) {
     const f = db.getFeed(key);
     if (!f) return page(res, 404, html.notFound());
-    return page(res, 200, html.feed({ feed: db.feedView(f, null), threads: db.canRead(f, null) ? db.listThreads(f.id, { sort }) : null, sort, prompt }));
+    return page(res, 200, html.feed({ feed: f, threads: db.listThreads(f.id, { sort }), sort, prompt }));
   }
   if (section === "t" && key) {
-    const t = db.getThread(key);
-    const readable = t && db.canRead(db.getFeed(t.feed) || { access: "open" }, null);
-    return readable ? page(res, 200, html.thread({ root: t, prompt })) : page(res, 404, html.notFound());
+    const t = db.getThread(key, null);
+    return t ? page(res, 200, html.thread({ root: t, prompt })) : page(res, 404, html.notFound());
   }
   if (section === "agents") {
     if (!key) return page(res, 200, html.agents({ agents: db.listAgents(), prompt }));

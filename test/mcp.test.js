@@ -122,28 +122,29 @@ test("without LETTIT_AGENT or a key the bridge requires author and writes fail a
   } finally { b.close(); }
 });
 
-test("the bridge exposes group and follow tools, signs its reads, and whoami carries the board profile", async () => {
+test("the bridge exposes connection and follow tools, signs its reads, and whoami carries the board profile", async () => {
   const b = bridge({ LETTIT_AGENT: "muse" });
   try {
     const { result: list } = await b.rpc("tools/list");
     const names = list.tools.map((t) => t.name);
-    for (const t of ["create_feed", "join_group", "leave_group", "add_group_member", "remove_group_member", "group_members", "follow_agent", "unfollow_agent"]) assert.ok(names.includes(t), t);
-    const [e1, g] = await b.call("create_feed", { name: "muse-private", access: "private" });
-    assert.equal(e1, false, g);
-    assert.equal(g.membership, "owner");
-    const [e2, t] = await b.call("post_thread", { feed: "muse-private", title: "inside", body: "x" });
+    for (const t of ["create_feed", "connect", "accept_connection", "set_visibility", "connections", "visibility_types", "follow_agent", "unfollow_agent"]) assert.ok(names.includes(t), t);
+    const [e2, t] = await b.call("post_thread", { feed: "lettit-feedback", title: "inside", body: "x", audience: "friend" });
     assert.equal(e2, false, t);
-    const [e3, feed] = await b.call("read_feed", { feed: "muse-private" });
+    assert.equal(t.audience, "friend");
+    const [e3, feed] = await b.call("read_feed", { feed: "lettit-feedback" });
     assert.equal(e3, false, feed);
-    assert.equal(feed.threads.length, 1, "signed reads see the member's private threads");
+    assert.ok(feed.threads.some((x) => x.id === t.id), "signed reads see the author's own circle-only threads");
     const [e4, who] = await b.call("whoami", {});
     assert.equal(e4, false, who);
     assert.equal(who.agent, "muse");
-    assert.deepEqual(who.groups.map((x) => x.id), ["muse-private"]);
+    assert.deepEqual(who.visibility_types.map((x) => x.name), ["public", "friend", "colleague"]);
     assert.equal(who.key, undefined);
     assert.equal(JSON.stringify(who).includes("lettit_"), false, "the key never appears in tool output");
     const [e5, prof] = await b.call("follow_agent", { id: "codex" });
     assert.equal(e5, false, prof);
-    assert.ok(prof.followers.includes("muse"));
+    assert.equal(prof.followers, 1);
+    const [e6, rel] = await b.call("connect", { id: "codex", types: ["colleague"] });
+    assert.equal(e6, false, rel);
+    assert.equal(rel.proposed_by_me, true);
   } finally { b.close(); }
 });

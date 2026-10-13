@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "agentboard-follows-"));
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-follows-"));
 const { server } = await import("../src/server.js");
 
 let base;
@@ -21,10 +21,13 @@ test("follow and unfollow update both profiles; self and unknown targets are rej
   await claim("Ben");
   const [s, ben] = await post("/api/agents/t-ben/follow", {}, ann);
   assert.equal(s, 200);
-  assert.deepEqual(ben.followers, ["t-ann"]);
+  assert.equal(ben.followers, 1);
+  assert.equal(ben.relationship.i_follow, true);
   const [, annCard] = await get("/api/agents/t-ann");
-  assert.deepEqual(annCard.following, ["t-ben"]);
-  assert.deepEqual(annCard.followers, []);
+  assert.equal(annCard.following, 1);
+  assert.equal(annCard.followers, 0);
+  const [, list] = await get("/api/me/following", ann);
+  assert.deepEqual(list.map((a) => a.id), ["t-ben"]);
   const [self, e1] = await post("/api/agents/t-ann/follow", {}, ann);
   assert.equal(self, 400);
   assert.match(e1.error, /yourself/);
@@ -33,60 +36,32 @@ test("follow and unfollow update both profiles; self and unknown targets are rej
   const [noKey] = await post("/api/agents/t-ben/follow", {});
   assert.equal(noKey, 401);
   const [, after] = await post("/api/agents/t-ben/unfollow", {}, ann);
-  assert.deepEqual(after.followers, []);
+  assert.equal(after.followers, 0);
+  assert.equal(after.relationship.i_follow, false);
 });
 
-test("private group memberships show on a profile only to followers; following does not change recall", async () => {
+test("following opens the author's followers-only posts and nothing else; /api/me needs a key", async () => {
   const host = await claim("Host");
   const fan = await claim("Fan");
-  await post("/api/feeds", { name: "Open Mic", access: "public" }, host);
-  await post("/api/feeds", { name: "Back Room", access: "private" }, host);
-  await post("/api/posts", { feed: "back-room", title: "whisper", body: "quiet" }, host);
-  await post("/api/posts", { feed: "open-mic", title: "shout", body: "loud" }, host);
-
-  const groups = (card) => card.groups.map((g) => g.id).sort();
-  const [, anon] = await get("/api/agents/t-host");
-  assert.deepEqual(groups(anon), ["open-mic"]);
-  const [, stranger] = await get("/api/agents/t-host", fan);
-  assert.deepEqual(groups(stranger), ["open-mic"]);
-  const [, self] = await get("/api/agents/t-host", host);
-  assert.deepEqual(groups(self), ["back-room", "open-mic"]);
-  assert.equal(self.groups.find((g) => g.id === "back-room").role, "owner");
-
-  const before = {
-    search: (await get("/api/search?q=", fan))[1],
-    byAuthor: (await get("/api/search?q=&author=t-host", fan))[1],
-    recent: (await get("/api/recent", fan))[1],
-    feed: (await get("/api/feeds/back-room", fan))[1],
-  };
-  assert.ok(!before.search.some((p) => p.title === "whisper"));
-
+  const [, whisper] = await post("/api/posts", { feed: "lettit-feedback", title: "whisper", body: "quiet", audience: "followers" }, host);
+  const [, friendsOnly] = await post("/api/posts", { feed: "lettit-feedback", title: "inner", body: "circle", audience: "friend" }, host);
+  await post("/api/posts", { feed: "lettit-feedback", title: "shout", body: "loud" }, host);
+  const titles = async (key) => (await get("/api/search?q=&author=t-host", key))[1].map((p) => p.title).sort();
+  assert.deepEqual(await titles(fan), ["shout"]);
+  assert.deepEqual(await titles(), ["shout"]);
   await post("/api/agents/t-host/follow", {}, fan);
-  const [, follower] = await get("/api/agents/t-host", fan);
-  assert.deepEqual(groups(follower), ["back-room", "open-mic"]);
-  assert.equal(follower.groups.find((g) => g.id === "back-room").access, "private");
-
-  const after = {
-    search: (await get("/api/search?q=", fan))[1],
-    byAuthor: (await get("/api/search?q=&author=t-host", fan))[1],
-    recent: (await get("/api/recent", fan))[1],
-    feed: (await get("/api/feeds/back-room", fan))[1],
-  };
-  assert.deepEqual(after, before, "following must not change what the follower can recall");
-  assert.equal(after.feed.threads, undefined);
-
-  // discovery path: the follower now knows the group exists and asks to join; the owner sees it in /api/me
-  const [, asked] = await post("/api/feeds/back-room/join", {}, fan);
-  assert.equal(asked.membership, "requested");
+  assert.deepEqual(await titles(fan), ["shout", "whisper"], "following reveals followers-only posts");
+  assert.equal((await get(`/api/posts/${whisper.id}`, fan))[0], 200);
+  assert.equal((await get(`/api/posts/${friendsOnly.id}`, fan))[0], 404, "following is not a connection");
   const [meStatus, me] = await get("/api/me", host);
   assert.equal(meStatus, 200);
   assert.equal(me.id, "t-host");
-  assert.deepEqual(me.requests_to_review, [{ feed: "back-room", agent: "t-fan", requested: me.requests_to_review[0].requested }]);
+  assert.equal(me.followers, 1);
   assert.equal(me.key, undefined);
   const [noKey] = await get("/api/me");
   assert.equal(noKey, 401);
-
   const agentPage = await fetch(base + "/agents/t-host").then((r) => r.text());
-  assert.match(agentPage, /open-mic/);
-  assert.ok(!agentPage.includes("back-room"));
+  assert.match(agentPage, /shout/);
+  assert.ok(!agentPage.includes("whisper"));
+  assert.ok(!agentPage.includes("inner"));
 });
