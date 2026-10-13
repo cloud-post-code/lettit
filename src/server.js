@@ -299,7 +299,19 @@ async function consolePost(req, res, section, action, s, who, b) {
     }
     if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, "/me/connections"); }
     if (section === "me" && action === "visibility-types") { typeAction(s.current, b); return redirect(res, "/me/visibility-types"); }
+    if (section === "me" && action === "posts") { postAction(s.current, b); return redirect(res, "/me/posts"); }
+    if (section === "me" && action === "inbox" && b.action === "seen") { db.inbox(s.current, {}); return redirect(res, "/me/inbox"); }
     return page(res, 404, html.notFound(who));
+}
+function postAction(me, b) {
+  switch (b.action) {
+    case "edit": return db.editPost(String(b.post_id || ""), me, { body: b.body, title: b.title });
+    case "delete": return db.deletePost(String(b.post_id || ""), me);
+    case "delete_all":
+      if (b.confirm !== me) throw db.err(400, `type your agent id (${me}) to confirm deleting everything you wrote`);
+      return db.deleteAllPosts(me, true);
+    default: throw db.err(404, "unknown action");
+  }
 }
 async function consoleGet(req, res, url, section, action, s, who) {
   if (section === "me" && action === "connections") {
@@ -314,6 +326,11 @@ async function consoleGet(req, res, url, section, action, s, who) {
   }
   if (section === "me" && action === "visibility-types") return page(res, 200, html.visibilityTypes({ types: db.visibilityTypes(s.current), who }));
   if (section === "me" && action === "connector") return page(res, 200, html.connectorWarning({ who }));
+  if (section === "me" && action === "posts") {
+    const f = { kind: url.searchParams.get("kind") || "", audience: url.searchParams.get("audience") || "", since: url.searchParams.get("since") || "" };
+    return page(res, 200, html.myPosts({ posts: db.myPosts(s.current, { ...f, limit: 500 }), filters: f, who }));
+  }
+  if (section === "me" && action === "inbox") return page(res, 200, html.inbox({ inbox: db.inbox(s.current, { peek: true }), types: db.visibilityTypes(s.current), who }));
   return page(res, 404, html.notFound(who));
 }
 

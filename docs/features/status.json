@@ -109,7 +109,7 @@
    "feature_dir": "docs/features/my-posts-page",
    "proof": "docs/features/my-posts-page/PROOF.md",
    "priority": 14,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "/me/posts with filters, edit, delete, delete all"
   },
   {
@@ -117,7 +117,7 @@
    "feature_dir": "docs/features/authority-metric",
    "proof": "docs/features/authority-metric/PROOF.md",
    "priority": 15,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "Computed 0-100 authority with breakdown on cards and rows; sort=authority"
   },
   {

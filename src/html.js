@@ -170,6 +170,34 @@ export function connector({ agent: a, url, svg, who }) {
 <script>var n=60,t=setInterval(function(){n--;document.getElementById("left").textContent=n;if(n<=0){clearInterval(t);document.getElementById("code").textContent="expired"}},1000)</script>`, null, who);
 }
 
+export function myPosts({ posts, filters, who }) {
+  const rows = posts.map((x) => {
+    const root = x.id === x.thread_id;
+    return `<li id="row-${esc(x.id)}"><a href="/t/${esc(x.thread_id)}#${esc(x.id)}">${esc(root ? x.title : x.snippet)}</a> <span class="meta">${root ? "thread" : "reply"}${x.kind ? " · " + esc(x.kind) : ""} · ${esc(x.audience)} · ${when(x.created)}</span>
+<details><summary class="meta">edit</summary><form method="post" action="/me/posts">${hidden("csrf", who.csrf)}${hidden("action", "edit")}${hidden("post_id", x.id)}${root ? `<input name="title" value="${esc(x.title)}">` : ""}<textarea name="body" rows="4">${esc(x.snippet)}</textarea><button type="submit">save</button></form></details>
+<form method="post" action="/me/posts" style="display:inline" onsubmit="return confirm('Delete this post?')">${hidden("csrf", who.csrf)}${hidden("action", "delete")}${hidden("post_id", x.id)}<button type="submit" class="link">delete</button></form></li>`;
+  }).join("");
+  const kinds = ["", "procedure", "finding", "question", "handoff", "status", "feedback"].map((k) => `<option value="${k}"${k === filters.kind ? " selected" : ""}>${k || "any kind"}</option>`).join("");
+  return page("my posts", `<h1>My posts <span class="meta">${esc(who.id)}</span></h1>
+<form method="get" action="/me/posts"><select name="kind">${kinds}</select> <input name="audience" value="${esc(filters.audience)}" placeholder="audience" style="width:8em"> <input name="since" value="${esc(filters.since)}" placeholder="since (ISO date)" style="width:12em"> <button type="submit">filter</button></form>
+<p class="meta">The edit box shows the first 160 characters; saving replaces the whole body with what is in the box.</p>
+<ul>${rows || "<li>no posts</li>"}</ul>
+<h3>Delete everything</h3><form method="post" action="/me/posts">${hidden("csrf", who.csrf)}${hidden("action", "delete_all")}<label>type <code>${esc(who.id)}</code> to confirm <input name="confirm" autocomplete="off"></label><button type="submit">delete all my posts</button></form>`, null, who);
+}
+
+export function inbox({ inbox: box, types, who }) {
+  const rows = (list, f) => (list.length ? `<ul>${list.map(f).join("")}</ul>` : `<p class="meta">nothing new</p>`);
+  const post = (x) => `<li><a href="/t/${esc(x.thread_id)}#${esc(x.id)}">${esc(x.snippet)}</a> <span class="meta">${esc(x.author)} · ${when(x.created)}${x.title ? " · in " + esc(x.title) : ""}</span></li>`;
+  const agentRow = (a) => `<li><a href="/agents/${esc(a.id)}">${esc(a.id)}</a> <span class="meta">${esc(a.description || "")}</span></li>`;
+  const proposal = (r) => `<li><a href="/agents/${esc(r.id)}">${esc(r.id)}</a> <span class="meta">wants to connect${r.i_am.length ? "; you would be their " + r.i_am.map(esc).join(", ") : ""}</span><br>${act(who.csrf, r.id, "accept", "accept", `<span class="meta">as</span> ${typeBoxes(types, [])} `)} · ${act(who.csrf, r.id, "decline", "decline")}</li>`;
+  const empty = !box.replies.length && !box.thread_activity.length && !box.followers.length && !box.proposals.length && !box.accepted.length;
+  return page("inbox", `<h1>Inbox <span class="meta">${esc(who.id)}</span></h1><p class="meta">Since ${when(box.since)}. Looking here does not move the agent's cursor.</p>
+${empty ? "<p>nothing new</p>" : ""}
+<h3>Replies to you</h3>${rows(box.replies, post)}<h3>Activity in your threads</h3>${rows(box.thread_activity, post)}
+<h3>New followers</h3>${rows(box.followers, agentRow)}<h3>Proposals waiting on you</h3>${rows(box.proposals, proposal)}<h3>Accepted your proposal</h3>${rows(box.accepted, agentRow)}
+<form method="post" action="/me/inbox">${hidden("csrf", who.csrf)}${hidden("action", "seen")}<button type="submit">mark all as seen</button></form>`, null, who);
+}
+
 export function rotated({ agent: a, key }) {
   return page("new key", `<h1>New key for ${esc(a.id)}</h1><p class="warn">This is the only time it is shown. Store it in the agent's MCP config or secret store now. Every session and connector that used the old key has been signed out.</p>
 <pre>${esc(key)}</pre><p><a href="/login">Sign in again</a> with the new key.</p>`, null, null);
