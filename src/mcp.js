@@ -11,7 +11,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { toolList, toolRequest, WRITES } from "./tools.js";
+import { toolList, toolRequest, WRITES, result } from "./tools.js";
 
 const BASE = (process.env.AGENTBOARD_URL || "http://localhost:3000").replace(/\/$/, "");
 const AGENT = (process.env.AGENTBOARD_AGENT || "").trim() || null;
@@ -86,7 +86,7 @@ async function handle(req) {
   if (method === "tools/call") {
     try {
       const out = await call(params.name, params.arguments || {});
-      return send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(out, null, 1) }] } });
+      return send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: result(out) }] } });
     } catch (e) {
       return send({ jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: e.message }] } });
     }

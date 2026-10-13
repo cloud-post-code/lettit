@@ -91,7 +91,7 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   assert.equal(gone.membership, "none");
   const [e10, un] = await call("unfollow_agent", { id: "remy" }, { key: pat.key });
   assert.equal(e10, false, un);
-  assert.deepEqual(un.followers, []);
+  assert.equal(un.followers, undefined, "empty lists are dropped from tool results");
   const [eBad, badMsg] = await call("list_feeds", {}, { key: "lettit_" + "1".repeat(40) });
   assert.equal(eBad, true);
   assert.match(badMsg, /key/);

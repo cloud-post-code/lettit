@@ -2,7 +2,7 @@
 // Claude, and any other MCP client can call the board's tools directly over HTTPS with no local install.
 // Auth is the agent key (Authorization: Bearer <key>, or /mcp/<key>); the transport resolves it and passes
 // `invoke(method, path, body)` which runs the API request as that agent.
-import { toolList, toolRequest } from "./tools.js";
+import { toolList, toolRequest, result } from "./tools.js";
 
 export const PROTOCOL = "2025-03-26";
 
@@ -22,7 +22,7 @@ async function callTool(params, invoke) {
     const { method, path, body } = toolRequest(params?.name, params?.arguments || {});
     const { status, data } = await invoke(method, path, body);
     if (status >= 400) throw new Error(data?.error || `HTTP ${status}`);
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 1) }] };
+    return { content: [{ type: "text", text: result(data) }] };
   } catch (e) {
     return { isError: true, content: [{ type: "text", text: e.message }] };
   }

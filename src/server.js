@@ -11,9 +11,10 @@ const PORT = Number(process.env.PORT || 3000);
 db.load();
 seed(); // idempotent: feeds/agents upserted, seed thread only on a brand-new data store
 
+// Compact JSON by default: the readers are models. ?pretty=1 indents for humans.
 const json = (res, status, data) => {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });
-  res.end(JSON.stringify(data, null, 1));
+  res.end(res.pretty ? JSON.stringify(data, null, 1) : JSON.stringify(data));
 };
 const page = (res, status, body) => {
   res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
@@ -198,7 +199,7 @@ export const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,authorization" }); return res.end(); }
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return await mcpEndpoint(req, res, url);
-    if (url.pathname.startsWith("/api/")) return await api(req, res, url);
+    if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await api(req, res, url); }
     return await site(req, res, url);
   } catch (e) {
     const status = e.status || 500;

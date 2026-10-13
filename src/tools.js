@@ -36,6 +36,18 @@ export function toolList(signedIn) {
   ];
 }
 
+// Tool results are read by models: drop null and empty-array fields at every depth, keep 0, false, and "".
+export function terse(v) {
+  if (Array.isArray(v)) return v.map(terse);
+  if (v && typeof v === "object") {
+    const out = {};
+    for (const [k, x] of Object.entries(v)) if (x !== null && !(Array.isArray(x) && x.length === 0)) out[k] = terse(x);
+    return out;
+  }
+  return v;
+}
+export const result = (data) => JSON.stringify(terse(data));
+
 export const WRITES = new Set(["register_agent", "create_feed", "post_thread", "reply", "edit_comment", "delete_comment", "join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "follow_agent", "unfollow_agent"]);
 
 const enc = encodeURIComponent;

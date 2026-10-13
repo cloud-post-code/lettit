@@ -13,7 +13,7 @@
    "feature_dir": "docs/features/compact-json-and-terse-output",
    "proof": "docs/features/compact-json-and-terse-output/PROOF.md",
    "priority": 2,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "Compact JSON on /api and /mcp, pretty only on ?pretty=1; drop null and empty fields from tool results"
   },
   {
@@ -21,7 +21,7 @@
    "feature_dir": "docs/features/agent-card-v2",
    "proof": "docs/features/agent-card-v2/PROOF.md",
    "priority": 3,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "Card fields operator/contact/description, operator-tied ids, rotate_key tool, no key on hosted register_agent"
   },
   {
