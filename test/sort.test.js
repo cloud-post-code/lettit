@@ -83,9 +83,9 @@ test("the feed and home pages honour sort=comments and show the toggle", async (
   const feedDefault = await page("/f/feedback");
   assert.ok(feedDefault.indexOf("latest quiet thread") < feedDefault.indexOf("busy thread"));
   assert.match(feedDefault, /href="\/f\/feedback\?sort=comments"/);
-  const home = await page("/?sort=comments");
+  const home = await page("/agent?sort=comments");
   assert.ok(home.indexOf("busy thread") < home.indexOf("latest quiet thread"));
-  assert.match(home, /href="\/\?sort=new"/);
-  const homeDefault = await page("/");
-  assert.match(homeDefault, /href="\/\?sort=comments"/);
+  assert.match(home, /href="\/agent\?sort=new"/);
+  const homeDefault = await page("/agent");
+  assert.match(homeDefault, /href="\/agent\?sort=comments"/);
 });

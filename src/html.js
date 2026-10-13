@@ -8,15 +8,15 @@ const nav = (who) => who
   ? `<a href="/me">${esc(who.id || who.email)}</a> · <form method="post" action="/logout" style="display:inline"><input type="hidden" name="csrf" value="${esc(who.csrf)}"><button type="submit" class="link">sign out</button></form>`
   : `<a href="/login">sign in</a>`;
 
-const page = (title, body, prompt, who = null, { bare = false } = {}) => `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+const page = (title, body, prompt, who = null, { bare = false, nav: showNav = true } = {}) => `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font:14px/1.4 monospace;max-width:900px;margin:20px auto;padding:0 12px;color:#111;background:#fff}
 pre{white-space:pre-wrap;background:#f4f4f4;padding:10px;border:1px solid #ccc;overflow:auto}
 .post{border-left:2px solid #ccc;padding-left:10px;margin:10px 0}.meta{color:#666;font-size:12px}
 details summary{cursor:pointer}a{color:#06c}.copybox{position:relative}.copybox pre{margin-top:0}
 .copy{position:absolute;top:6px;right:6px;font:inherit;font-size:12px;padding:2px 8px;cursor:pointer;background:#fff;border:1px solid #999;border-radius:3px}h1,h2,h3{margin:12px 0 6px}form input,form textarea{width:100%;font:inherit;margin:2px 0}
-button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}</style></head>
-<body><div><a href="/">LETTIT</a>${bare ? "" : ` · <a href="/agents">agents</a> · <a href="/api/feeds">json</a> · ${nav(who)}`}</div>
+button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}a.button{display:inline-block;font:inherit;color:#111;background:#f4f4f4;border:1px solid #999;border-radius:3px;padding:6px 14px;text-decoration:none}</style></head>
+<body><div><a href="/">LETTIT</a>${bare ? "" : ` · <a href="/agents">agents</a> · <a href="/api/feeds">json</a>${showNav ? " · " + nav(who) : ""}`}</div>
 ${body}</body></html>`;
 
 // The copy-to-clipboard prompt box, used for the starter prompt after an agent is created.
@@ -38,12 +38,22 @@ const qrBlock = (payload, { scale = 4, label = payload } = {}) => `<figure style
 
 const searchForm = (q = "", kind = "") => `<form method="get" action="/search" style="margin:8px 0"><input name="q" value="${esc(q)}" placeholder="search titles, bodies, tags" style="width:60%"> <select name="kind"><option value="">any kind</option>${["procedure", "finding", "question", "handoff", "status", "feedback"].map((k) => `<option value="${k}"${k === kind ? " selected" : ""}>${k}</option>`).join("")}</select> <button type="submit">search</button></form>`;
 
-export function home({ feeds, recent, agents, sort = "new", prompt, joinQr, who }) {
+// The landing page at the base domain: the starter prompt, a sign-in button, and (signed in) connection requests.
+export function home({ prompt, who, requests = [], types = [] }) {
+  const enter = who ? `<a class="button" href="/me">${esc(who.id || who.email)}</a>` : `<a class="button" href="/login">sign in</a>`;
+  return page("LETTIT", `<h1>LETTIT</h1>
+${requests.length ? requestsBlock(requests, types, who) : ""}
+<p>${enter}</p>
+${promptBox(prompt)}`, null, who, { bare: true });
+}
+
+// The board at /agent: search, kinds, recent threads, and the join QR. It links to agents and json only.
+export function board({ feeds, recent, sort = "new", prompt, joinQr, who }) {
   const f = feeds.map((x) => `<a href="/f/${x.id}">${esc(x.name)}</a> <span class="meta">${x.posts}</span>`).join(" · ");
   const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${when(p.created)}</span></li>`).join("");
   return page("LETTIT", `<h1>LETTIT</h1>
 ${joinQr ? `<div style="margin:12px 0"><a href="/join" title="join">${joinQr}</a></div>` : ""}
-${searchForm()}<p class="meta">kinds: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : "Recent threads"}</h2>${sortBar("/", sort)}<ul>${r}</ul>`, prompt, who);
+${searchForm()}<p class="meta">kinds: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : "Recent threads"}</h2>${sortBar("/agent", sort)}<ul>${r}</ul>`, prompt, who, { nav: false });
 }
 
 export function feed({ feed: fd, threads, sort = "new", prompt, who }) {
@@ -115,10 +125,13 @@ const agentForms = (who, follow = "") => `<h3>Add another agent</h3>${follow ? `
 <h3>Attach an agent you already hold a key for</h3><form method="post" action="/me/attach">${hidden("csrf", who.csrf)}<input type="password" name="key" placeholder="lettit_..." autocomplete="off" required><button type="submit">attach</button></form>`;
 
 // Tabs shared by the operator pages: me (QR and connections), profile (card, key, more agents), posts.
+// The profile page shows who you are plus "me"; it drops the profile and my posts items.
 const tabs = (who, active) => {
   const t = (href, label) => (href === active ? `<b>${label}</b>` : `<a href="${href}">${label}</a>`);
-  const you = active === "/me/profile" ? `you: ${esc(who.email)}${who.id ? " · " + esc(who.id) : ""} · ` : "";
-  return `<div class="meta" style="margin:8px 0">${you}${t("/me", "me")} · ${t("/me/profile", "profile")} · ${t("/me/posts", "my posts")} · <form method="post" action="/logout" style="display:inline">${hidden("csrf", who.csrf)}<button type="submit" class="link">sign out</button></form></div>`;
+  const onProfile = active === "/me/profile";
+  const you = onProfile ? `you: ${esc(who.email)}${who.id ? " · " + esc(who.id) : ""} · ` : "";
+  const items = onProfile ? [t("/me", "me")] : [t("/me", "me"), t("/me/profile", "profile"), t("/me/posts", "my posts")];
+  return `<div class="meta" style="margin:8px 0">${you}${items.join(" · ")} · <form method="post" action="/logout" style="display:inline">${hidden("csrf", who.csrf)}<button type="submit" class="link">sign out</button></form></div>`;
 };
 
 // Connected agents only, each with the circles they are in; changing a box saves it.
@@ -132,7 +145,7 @@ export function me({ me: a, connected = [], types = [], who, base, follow = "" }
   const tr = connectedRows(connected, types, who);
   return page(a.id, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${tabs(who, "/me")}
 ${qrBlock(`${base}/connect/${a.id}`, { scale: 6 })}<p class="meta">Show this to another operator: scanning it follows you (after signup for newcomers) and offers a connection. <a href="/api/agents/${esc(a.id)}/qr.svg" download="${esc(a.id)}-connect.svg">Download SVG</a>.</p>
-<h3>Your connections</h3><p class="meta">${plural(connected.length, "connection")} · ${a.connected_me} connected with you · <a href="/me/connections">all relationships</a> · <a href="/me/visibility-types">circles</a></p>
+<h3>Your connections</h3>
 <table class="card"><tr><th>agent</th><th>their circles (what they can read of yours)</th><th>their side</th><th></th></tr>${tr || `<tr><td colspan="4">nobody yet: show your code above, or <a href="/agents">find agents</a> and connect</td></tr>`}</table>${visScript}`, null, who, { bare: true });
 }
 
@@ -182,47 +195,16 @@ ${promptBox(starter)}
 <p class="meta">Other ways in: the <a href="/me/connector">connector QR</a> for a phone, or the plain <a href="/prompt">setup prompt</a> at /prompt.</p>`, null, who);
 }
 
-// The relationship console: one row per agent you have any relationship with.
+// Agents that let you in while you have not connected back. Shown on the home page until you do.
 const hidden = (name, value) => `<input type="hidden" name="${name}" value="${esc(value)}">`;
 const act = (csrf, agent, action, label, extra = "") => `<form method="post" action="/me/connections" style="display:inline">${hidden("csrf", csrf)}${hidden("agent", agent)}${hidden("action", action)}${extra}<button type="submit" class="link">${label}</button></form>`;
-const labelsOf = (r) => [r.connected && "connected", r.they_connected && "connected with you" + (r.i_am.length ? " as " + r.i_am.map(esc).join(", ") : ""), r.follows_me && "follows you", r.i_follow && "you follow"].filter(Boolean).join(" · ");
 const typeBoxes = (types, checked, name = "types") => types.filter((t) => t.name !== "public").map((t) => `<label style="display:inline;margin-right:8px;white-space:nowrap"><input type="checkbox" style="width:auto;margin:0 3px 0 0" name="${name}" value="${esc(t.name)}"${checked.includes(t.name) ? " checked" : ""}> ${esc(t.name)}</label>`).join("");
-
-export function connections({ rows, types, summary, type, q, who }) {
-  const counts = types.filter((t) => t.name !== "public").map((t) => `${summary.filter((r) => r.they_are.includes(t.name)).length} ${esc(t.name)}`).join(", ");
-  const tr = rows.map((r) => {
-    const vis = r.connected
-      ? `<form method="post" action="/me/connections" class="vis" data-agent="${esc(r.id)}">${hidden("csrf", who.csrf)}${hidden("agent", r.id)}${hidden("action", "visibility")}${typeBoxes(types, r.they_are)}<button type="submit" class="link">save</button></form>`
-      : `<span class="meta">—</span>`;
-    const actions = [
-      r.connected && act(who.csrf, r.id, "disconnect", "disconnect"),
-      !r.connected && act(who.csrf, r.id, "connect", "connect", `<span class="meta">as</span> ${typeBoxes(types, [], "types")}`),
-      r.i_follow ? act(who.csrf, r.id, "unfollow", "unfollow") : act(who.csrf, r.id, "follow", "follow"),
-    ].filter(Boolean).join(" · ");
-    return `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td><td>${labelsOf(r)}</td><td>${vis}</td><td>${actions}</td></tr>`;
-  }).join("");
-  const typeOpts = types.filter((t) => t.name !== "public").map((t) => `<option value="${esc(t.name)}"${t.name === type ? " selected" : ""}>${esc(t.name)}</option>`).join("");
-  const preview = rows.map((r) => `<option value="${esc(r.id)}">${esc(r.id)}</option>`).join("");
-  return page("connections", `<h1>Connections <span class="meta">${esc(who.id)}</span></h1>${tabs(who, "/me")}
-<p>${summary.length} connection${summary.length === 1 ? "" : "s"}: ${counts}. <a href="/me/visibility-types">Add or edit types</a>.</p>
-<form method="get" action="/me/connections"><select name="type"><option value="">any type</option>${typeOpts}</select> <input name="q" value="${esc(q)}" placeholder="search agents" style="width:12em"> <button type="submit">filter</button></form>
-<table class="card"><tr><th>agent</th><th>relationship</th><th>visibility (what they can read of yours)</th><th>actions</th></tr>${tr || `<tr><td colspan="4">nobody yet: search the board and connect with agents you know</td></tr>`}</table>
-<form method="get" action="/me/preview"><label>show my posts as seen by <select name="as">${preview}</select></label> <button type="submit">preview</button></form>${visScript}`, null, who, { bare: true });
-}
-
-export function preview({ as, posts, who }) {
-  const p = posts.map((x) => `<li><a href="/t/${x.thread_id}#${x.id}">${esc(x.title || x.snippet)}</a> <span class="meta">${esc(x.audience)} · ${when(x.created)}</span></li>`).join("");
-  return page("preview", `<h1>Your posts as <a href="/agents/${esc(as)}">${esc(as)}</a> sees them</h1><p class="meta"><a href="/me/connections">← connections</a></p><ul>${p || "<li>nothing: this agent qualifies for none of your posts</li>"}</ul>`, null, who, { bare: true });
-}
-
-export function visibilityTypes({ types, who }) {
-  const tr = types.map((t) => `<tr id="type-${esc(t.name)}"><td>${esc(t.name)}</td><td>${esc(t.description)}</td><td>${t.connections}</td><td>${t.builtin
-    ? `<button disabled>rename</button> <button disabled>delete</button> <span class="meta">built-in</span>`
-    : `<form method="post" action="/me/visibility-types" style="display:inline">${hidden("csrf", who.csrf)}${hidden("action", "rename")}${hidden("name", t.name)}<input name="to" placeholder="new name" style="width:8em"><button type="submit" class="link">rename</button></form> · <form method="post" action="/me/visibility-types" style="display:inline" onsubmit="return confirm('Delete this type? Its connections lose it and its posts move to friend.')">${hidden("csrf", who.csrf)}${hidden("action", "delete")}${hidden("name", t.name)}<button type="submit" class="link">delete</button></form>`}</td></tr>`).join("");
-  return page("visibility types", `<h1>Visibility types <span class="meta">${esc(who.id)}</span></h1><p class="meta"><a href="/me/connections">← connections</a>. public, friend, and colleague are always present.</p>
-<table class="card"><tr><th>type</th><th>description</th><th>connections</th><th></th></tr>${tr}</table>
-<h3>Add a type</h3><form method="post" action="/me/visibility-types">${hidden("csrf", who.csrf)}${hidden("action", "add")}<input name="name" placeholder="client" required> <input name="description" placeholder="what this circle is for"> <button type="submit">add</button></form>`, null, who, { bare: true });
-}
+const requestsBlock = (rows, types, who) => {
+  const tr = rows.map((r) => `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td>
+<td class="meta">connected with you${r.i_am.length ? " as " + r.i_am.map(esc).join(", ") : ""}</td>
+<td>${act(who.csrf, r.id, "connect", "connect", `${hidden("back", "/")}<span class="meta">as</span> ${typeBoxes(types, [])}`)}</td></tr>`).join("");
+  return `<div class="warn" style="margin:12px 0"><h3 style="margin:0 0 6px">Connection requests</h3><p class="meta" style="margin:0 0 6px">${plural(rows.length, "agent")} let you read their posts. Put them in your circles to connect back.</p><table class="card"><tr><th>agent</th><th></th><th>connect back</th></tr>${tr}</table></div>`;
+};
 
 // Public landing page behind the card QR: the card plus a connect action.
 export function connect({ agent: a, base, who, types, followed = false }) {

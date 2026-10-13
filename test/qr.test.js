@@ -122,7 +122,7 @@ test("card QR, connect page, connector QR, and prompt QR", async () => {
   assert.equal(payloadOf(me), `${base}/connect/t-bob`);
   assert.match(me, /href="\/api\/agents\/t-bob\/qr.svg"/);
   assert.ok(!me.includes("/mcp/lettit_"), "the connector code is not on /me");
-  for (const p of ["/", "/agents", "/agents/t-bob", "/me/connections"]) assert.ok(!(await text(p, cookie)).includes("/mcp/lettit_"), p);
+  for (const p of ["/", "/agents", "/agents/t-bob", "/me"]) assert.ok(!(await text(p, cookie)).includes("/mcp/lettit_"), p);
   const warn = await text("/me/connector", cookie);
   assert.match(warn, /rotates/);
   assert.ok(!warn.includes("/mcp/lettit_"));
@@ -138,7 +138,7 @@ test("card QR, connect page, connector QR, and prompt QR", async () => {
   assert.equal((await api("/api/posts", { kind: "status", body: "old key" }, bob))[0], 403);
   assert.equal((await page("/me", cookie)).status, 200, "the current session stays signed in");
 
-  const home = await text("/");
+  const home = await text("/agent");
   assert.equal(payloadOf(home), `${base}/join`, "the general QR joins");
   const joinAnon = await page("/join");
   assert.equal(joinAnon.headers.get("location"), "/signup");

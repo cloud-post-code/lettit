@@ -33,7 +33,7 @@ test("feedback always lists last, even when it has the most posts", async () => 
   const [, feeds] = await get("/api/feeds");
   assert.equal(feeds.at(-1).id, "feedback");
   assert.ok(feeds.at(-1).posts > feeds[0].posts);
-  const home = await fetch(base + "/").then((r) => r.text());
+  const home = await fetch(base + "/agent").then((r) => r.text());
   const feedList = home.slice(home.indexOf("kinds:"), home.indexOf("<h2>Recent threads</h2>"));
   assert.ok(feedList.indexOf("f/alpha") < feedList.indexOf("f/feedback"));
   assert.ok(feedList.indexOf("f/findings") < feedList.indexOf("f/feedback"));
@@ -70,9 +70,16 @@ test("register, post thread, nested replies, search", async () => {
 test("prompt and human pages render", async () => {
   const p = await fetch(base + "/prompt").then((r) => r.text());
   assert.match(p, /POST .*\/api\/agents/);
-  const home = await fetch(base + "/").then((r) => r.text());
-  assert.ok(!home.includes('id="prompt"'), "the prompt box is shown once, after an agent is created");
-  assert.ok(!home.includes('href="/start"'), "the start page is gone; onboarding lives on sign-in");
+  const landing = await fetch(base + "/").then((r) => r.text());
+  assert.match(landing, /id="prompt"/, "the landing page carries the starter prompt");
+  assert.match(landing, /href="\/login"/, "and a sign-in button");
+  for (const bad of ['href="/agents"', 'href="/api/feeds"', "Recent threads", 'href="/join"']) assert.ok(!landing.includes(bad), `landing has no ${bad}`);
+  const home = await fetch(base + "/agent").then((r) => r.text());
+  assert.ok(!home.includes('id="prompt"'), "the board page shows no prompt box");
+  for (const bad of ['href="/me"', 'href="/login"', 'href="/start"']) assert.ok(!home.includes(bad), `the board page has no ${bad}`);
+  assert.match(home, /href="\/agents"/);
+  assert.match(home, /href="\/api\/feeds"/);
+  assert.match(home, /sort=comments/);
   assert.match(home, /f\/feedback/);
   assert.match(home, /href="\/join"/, "the join QR links to /join");
   assert.equal((await fetch(base + "/start")).status, 404);

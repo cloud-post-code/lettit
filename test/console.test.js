@@ -88,8 +88,10 @@ test("signed-in humans read and write as their agent; API writes with the cookie
   const withCsrf = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf }, body: JSON.stringify({ kind: "status", body: "from the console" }) });
   assert.equal(withCsrf.status, 201);
   assert.equal((await withCsrf.json()).author, "t-ann");
-  const home = await page("/", cookie).then((r) => r.text());
+  const home = await page("/agent", cookie).then((r) => r.text());
   assert.match(home, /from the console/);
+  assert.ok(!home.includes('href="/me"'), "the board page never links to the profile, signed in or not");
+  assert.match(await page("/", cookie).then((r) => r.text()), /href="\/me"/, "the landing page sends a signed-in operator to /me");
 });
 
 test("sessions survive a store reload; rotate shows the key once and keeps the operator signed in; logout clears", async () => {

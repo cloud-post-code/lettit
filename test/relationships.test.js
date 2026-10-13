@@ -36,25 +36,27 @@ before(async () => {
   csrf = (await text("/me", cookie)).match(/name="csrf" value="([^"]+)"/)[1];
 });
 
-test("the console lists every relationship with labels, summary, and filters", async () => {
-  assert.equal((await page("/me/connections")).status, 302);
-  const html = await text("/me/connections", cookie);
-  assert.match(row(html, "t-bob"), /connected/);
+test("the relationships, preview, and circles pages are gone; /me keeps the connected table only", async () => {
+  for (const p of ["/me/connections", "/me/preview?as=t-bob", "/me/visibility-types"]) assert.equal((await page(p, cookie)).status, 404, p);
+  const html = await text("/me", cookie);
   assert.match(row(html, "t-bob"), /name="types" value="colleague" checked/);
-  assert.match(row(html, "t-bob"), /name="types" value="friend"(?! checked)/);
-  assert.match(row(html, "t-cat"), /follows you/);
-  assert.match(row(html, "t-dan"), /you follow/);
-  assert.match(row(html, "t-bob"), /connected with you as friend/);
+  assert.ok(!/all relationships|href="\/me\/visibility-types"|connected with you/.test(html), "the summary line is gone");
+});
+
+test("connection requests pop up on the home page until you connect back", async () => {
+  const anon = await text("/");
+  assert.ok(!anon.includes("Connection requests"));
+  let html = await text("/", cookie);
+  assert.match(html, /Connection requests/);
+  assert.ok(row(html, "t-eve"), "eve connected with me and I have not connected back");
   assert.match(row(html, "t-eve"), /connected with you as friend/);
   assert.match(row(html, "t-eve"), /value="connect"/);
-  assert.match(row(html, "t-fay"), /connected/);
-  assert.match(html, /2 connections: 0 friend, 1 colleague/);
-  assert.match(html, /show my posts as seen by/);
-  const byType = await text("/me/connections?type=friend", cookie);
-  assert.equal(row(byType, "t-bob"), null);
-  const byQ = await text("/me/connections?q=ca", cookie);
-  assert.ok(row(byQ, "t-cat"));
-  assert.equal(row(byQ, "t-bob"), null);
+  assert.equal(row(html, "t-bob"), null, "bob is already mutual");
+  assert.equal((await form("/me/connections", { csrf, action: "connect", agent: "t-eve", types: "colleague", back: "/" }, cookie)).status, 302);
+  html = await text("/", cookie);
+  assert.equal(row(html, "t-eve"), null);
+  assert.ok(!html.includes("Connection requests"));
+  await form("/me/connections", { csrf, action: "disconnect", agent: "t-eve" }, cookie);
 });
 
 test("a visibility change through the form is reflected for the target on its next read", async () => {
@@ -64,12 +66,12 @@ test("a visibility change through the form is reflected for the target on its ne
   assert.equal(noCsrf.status, 403);
   const r = await form("/me/connections", { csrf, action: "visibility", agent: "t-bob", types: ["friend", "colleague"] }, cookie);
   assert.equal(r.status, 302);
+  assert.equal(r.headers.get("location"), "/me");
   assert.equal((await get(`/api/posts/${t.id}`, bob))[0], 200, "bob is a friend now");
   const [, rel] = await get("/api/agents/t-bob", me);
   assert.deepEqual(rel.relationship.they_are, ["friend", "colleague"]);
-  const html = await text("/me/connections", cookie);
+  const html = await text("/me", cookie);
   assert.match(row(html, "t-bob"), /value="friend" checked/);
-  assert.match(html, /2 connections: 1 friend, 1 colleague/);
 });
 
 test("connect, disconnect, follow, and unfollow work from the console", async () => {
@@ -91,38 +93,12 @@ test("connect, disconnect, follow, and unfollow work from the console", async ()
   assert.equal(bad.status, 404);
 });
 
-test("the preview shows my posts as a given agent sees them", async () => {
-  await api("/api/posts", { kind: "status", body: "public note" }, me);
-  await api("/api/posts", { kind: "status", body: "colleague note", audience: "colleague" }, me);
-  const asBob = await text("/me/preview?as=t-bob", cookie);
-  assert.match(asBob, /public note/);
-  assert.match(asBob, /for my friends/);
-  assert.match(asBob, /colleague note/);
-  const asCat = await text("/me/preview?as=t-cat", cookie);
-  assert.match(asCat, /public note/);
-  assert.ok(!asCat.includes("for my friends"));
-  assert.ok(!asCat.includes("colleague note"));
-  assert.equal((await page("/me/preview?as=nobody", cookie)).status, 404);
-});
-
-test("visibility types: built-ins are locked; custom types are added, renamed, and removed", async () => {
-  let html = await text("/me/visibility-types", cookie);
-  assert.match(html, /<tr id="type-friend"[^>]*>[\s\S]*?disabled/);
-  assert.equal((await form("/me/visibility-types", { csrf, action: "add", name: "Client", description: "paying" }, cookie)).status, 302);
-  html = await text("/me/visibility-types", cookie);
-  assert.match(html, /type-client/);
+test("the circles form route is gone; the API still manages types", async () => {
+  assert.equal((await form("/me/visibility-types", { csrf, action: "add", name: "Client" }, cookie)).status, 404);
+  const [st] = await api("/api/me/visibility-types", { name: "Client", description: "paying" }, me);
+  assert.equal(st, 201);
   await form("/me/connections", { csrf, action: "visibility", agent: "t-bob", types: ["client"] }, cookie);
-  const [, t] = await api("/api/posts", { kind: "status", body: "client note", audience: "client" }, me);
-  assert.equal((await form("/me/visibility-types", { csrf, action: "rename", name: "client", to: "Customer" }, cookie)).status, 302);
   const [, rel] = await get("/api/agents/t-bob", me);
-  assert.deepEqual(rel.relationship.they_are, ["customer"]);
-  assert.equal((await get(`/api/posts/${t.id}`, me))[1].audience, "customer");
-  assert.equal((await get(`/api/posts/${t.id}`, bob))[0], 200);
-  const locked = await form("/me/visibility-types", { csrf, action: "delete", name: "friend" }, cookie);
-  assert.equal(locked.status, 400);
-  assert.match(await locked.text(), /built-in/);
-  assert.equal((await form("/me/visibility-types", { csrf, action: "delete", name: "customer" }, cookie)).status, 302);
-  assert.equal((await get(`/api/posts/${t.id}`, me))[1].audience, "friend");
-  html = await text("/me/visibility-types", cookie);
-  assert.ok(!html.includes("type-customer"));
+  assert.deepEqual(rel.relationship.they_are, ["client"]);
+  assert.equal((await api("/api/me/visibility-types/delete", { name: "client" }, me))[0], 200);
 });

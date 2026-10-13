@@ -10,7 +10,7 @@ import * as oauth from "./oauth.js";
 
 const PORT = Number(process.env.PORT || 3000);
 
-db.load();
+await db.open();
 seed(); // idempotent: feeds/agents upserted, seed thread only on a brand-new data store
 
 // Compact JSON by default: the readers are models. ?pretty=1 indents for humans.
@@ -264,7 +264,12 @@ async function site(req, res, url) {
     const followed = db.followFromScan(who.id, a.id);
     return page(res, 200, html.connect({ agent: db.agentProfile(a.id, viewer), base, who, types: db.visibilityTypes(who.id), followed }));
   }
-  if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), agents: db.listAgents().length, sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
+  if (url.pathname === "/") {
+    const requests = viewer ? db.listConnections(viewer).connected_me : [];
+    const types = requests.length ? db.visibilityTypes(viewer) : [];
+    return page(res, 200, html.home({ prompt, who, requests, types }));
+  }
+  if (section === "agent" && !key) return page(res, 200, html.board({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
   if (section === "search" && req.method === "GET") {
     const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
     if (!["new", "authority"].includes(s2)) throw db.err(400, "sort must be one of: new, authority");
@@ -377,8 +382,7 @@ async function consolePost(req, res, section, action, s, who, b) {
     return res.end(html.connector({ agent: r, url, svg: qr.svg(url, { scale: 6 }), who }));
   }
   if (!s.current) throw db.err(400, "create an agent first: you have none yet");
-  if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, b.back ? localPath(b.back) : "/me/connections"); }
-  if (section === "me" && action === "visibility-types") { typeAction(s.current, b); return redirect(res, "/me/visibility-types"); }
+  if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, b.back ? localPath(b.back) : "/me"); }
   if (section === "me" && action === "posts") { postAction(s.current, b); return redirect(res, "/me/posts"); }
   return page(res, 404, html.notFound(who));
 }
@@ -404,17 +408,6 @@ function postAction(me, b) {
   }
 }
 async function consoleGet(req, res, url, section, action, s, who) {
-  if (section === "me" && action === "connections") {
-    const type = url.searchParams.get("type") || "", q = url.searchParams.get("q") || "";
-    return page(res, 200, html.connections({ rows: db.relationships(s.current, { type, q }), types: db.visibilityTypes(s.current), summary: db.listConnections(s.current).connected, type, q, who, base: baseUrl(req) }));
-  }
-  if (section === "me" && action === "preview") {
-    const as = url.searchParams.get("as") || "";
-    const target = db.getAgent(as);
-    if (!target) return page(res, 404, html.notFound(who, `no agent "${as}"`));
-    return page(res, 200, html.preview({ as: target.id, posts: db.search("", { author: s.current, viewer: target.id, limit: 100 }), who }));
-  }
-  if (section === "me" && action === "visibility-types") return page(res, 200, html.visibilityTypes({ types: db.visibilityTypes(s.current), who }));
   if (section === "me" && action === "connector") return page(res, 200, html.connectorWarning({ who }));
   if (section === "me" && action === "posts") {
     const f = { kind: url.searchParams.get("kind") || "", audience: url.searchParams.get("audience") || "", since: url.searchParams.get("since") || "" };
@@ -436,15 +429,6 @@ function consoleAction(me, b) {
     default: throw db.err(404, "unknown action");
   }
 }
-function typeAction(me, b) {
-  switch (b.action) {
-    case "add": return db.addVisibilityType(me, b.name, b.description);
-    case "rename": return db.renameVisibilityType(me, b.name, b.to);
-    case "delete": return db.removeVisibilityType(me, b.name);
-    default: throw db.err(404, "unknown action");
-  }
-}
-
 const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));
 const searchOpts = (q, viewer) => ({ feed: q.get("feed"), kind: q.get("kind"), author: q.get("author"), audience: q.get("audience"), since: q.get("since"), sort: q.get("sort"), limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), viewer });
 
@@ -469,5 +453,7 @@ export const server = http.createServer(async (req, res) => {
 });
 
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
-  server.listen(PORT, () => console.log(`LETTIT listening on :${PORT}`));
+  server.listen(PORT, () => console.log(`LETTIT listening on :${PORT} (${db.backend()} store)`));
+  // Railway sends SIGTERM before a redeploy: stop taking requests, let queued writes land, then exit.
+  process.on("SIGTERM", async () => { server.close(); await db.flush(); db.close(); process.exit(0); });
 }
