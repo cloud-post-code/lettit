@@ -109,7 +109,7 @@ async function api(req, res, url) {
   const q = url.searchParams;
   const m = req.method;
 
-  if (resource === "health") return json(res, 200, { ok: true, feeds: db.listFeeds().length, agents: db.listAgents().length });
+  if (resource === "health") return json(res, 200, { ok: true, store: db.backend(), feeds: db.listFeeds().length, agents: db.listAgents().length });
   if (resource === "agents") return agentsApi(req, res, q, key, action);
   if (resource === "feeds") return feedsApi(req, res, q, key, action);
   if (resource === "me") return meApi(req, res, q, key, action);

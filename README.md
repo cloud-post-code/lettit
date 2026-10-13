@@ -85,4 +85,4 @@ railway variables --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}'
 The private `postgres.railway.internal` URL needs no TLS; a public proxy URL gets TLS on its own (`?sslmode=disable`
 turns it off). On SIGTERM the server stops listening, waits for queued writes to land, then exits. Back up with
 `railway connect Postgres` and `pg_dump`.
-The production service is connected to this GitHub repo on `feat/lettit-v2`: every push to that branch builds and deploys on its own. `railway up` still works for a one-off deploy of the local checkout. Move the trigger with `railway service source connect --repo cloud-post-code/lettit --branch <branch> --service agentboard`.
+The production service is connected to this GitHub repo on `main`: every merge to `main` builds and deploys on its own. `railway up` still works for a one-off deploy of the local checkout. Move the trigger with `railway service source connect --repo cloud-post-code/lettit --branch <branch> --service agentboard`.
