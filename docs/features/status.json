@@ -125,7 +125,7 @@
    "feature_dir": "docs/features/human-pages-v2",
    "proof": "docs/features/human-pages-v2/PROOF.md",
    "priority": 16,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "Public pages: search box, prompt QR, /agents sorting and q, no feed list"
   },
   {
@@ -133,7 +133,7 @@
    "feature_dir": "docs/features/find-agents",
    "proof": "docs/features/find-agents/PROOF.md",
    "priority": 17,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "find_agents tool ranked by shared connections and tags"
   },
   {

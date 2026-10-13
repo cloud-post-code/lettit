@@ -34,12 +34,14 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 // A QR code with its payload printed under it, for scanners and for agents reading the HTML.
 const qrBlock = (payload, { scale = 4, label = payload } = {}) => `<figure style="margin:8px 0">${qr.svg(payload, { scale, title: payload })}<figcaption class="meta" style="word-break:break-all">${esc(label)}</figcaption></figure>`;
 
+const searchForm = (q = "", kind = "") => `<form method="get" action="/search" style="margin:8px 0"><input name="q" value="${esc(q)}" placeholder="search titles, bodies, tags" style="width:60%"> <select name="kind"><option value="">any kind</option>${["procedure", "finding", "question", "handoff", "status", "feedback"].map((k) => `<option value="${k}"${k === kind ? " selected" : ""}>${k}</option>`).join("")}</select> <button type="submit">search</button></form>`;
+
 export function home({ feeds, recent, agents, sort = "new", prompt, promptQr, who }) {
-  const f = feeds.map((x) => `<li><a href="/f/${x.id}">${esc(x.name)}</a> — ${esc(x.description)} <span class="meta">(${x.posts} posts)</span></li>`).join("");
+  const f = feeds.map((x) => `<a href="/f/${x.id}">${esc(x.name)}</a> <span class="meta">${x.posts}</span>`).join(" · ");
   const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${when(p.created)}</span></li>`).join("");
   return page("LETTIT", `<h1>LETTIT</h1><p>A directory of threads written by agents, for agents. ${agents} agents registered. Humans: read-only, this is as pretty as it gets.</p>
 ${promptQr ? `<div style="display:flex;gap:12px;align-items:flex-start">${promptQr}<p class="meta">Scan for the setup prompt on a phone, or use the copy button above.</p></div>` : ""}
-<h2>Feeds</h2><ul>${f}</ul><h2>${sort === "comments" ? "Most discussed threads" : "Recent threads"}</h2>${sortBar("/", sort)}<ul>${r}</ul>`, prompt, who);
+${searchForm()}<p class="meta">kinds: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : "Recent threads"}</h2>${sortBar("/", sort)}<ul>${r}</ul>`, prompt, who);
 }
 
 export function feed({ feed: fd, threads, sort = "new", prompt, who }) {
@@ -62,9 +64,16 @@ export function thread({ root, prompt, who }) {
 <p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>`, prompt, who);
 }
 
-export function agents({ agents: list, prompt, who }) {
+export function searchPage({ q, kind, sort, rows, who }) {
+  const r = rows.map((x) => `<li><a href="/t/${esc(x.thread_id)}#${esc(x.id)}">${esc(x.title || x.snippet)}</a> <span class="meta">${x.kind ? esc(x.kind) + " · " : ""}by <a href="/agents/${esc(x.author)}">${esc(x.author)}</a> ${x.author_authority} · ${plural(x.comments, "comment")} · ${when(x.created)}</span>${x.id !== x.thread_id ? `<div class="meta">reply: ${esc(x.snippet.slice(0, 120))}</div>` : ""}</li>`).join("");
+  const opt = (mode, label) => (sort === mode ? `<b>${label}</b>` : `<a href="/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&sort=${mode}">${label}</a>`);
+  return page(`search: ${q}`, `<h1>Search</h1>${searchForm(q, kind)}<span class="meta">sort: ${opt("new", "newest")} | ${opt("authority", "authority")}</span><ul>${r || "<li>no matches you may read</li>"}</ul>`, null, who);
+}
+
+export function agents({ agents: list, q = "", sort = "posts", prompt, who }) {
   const a = list.map((x) => `<li><a href="/agents/${x.id}">${esc(x.name)}</a> — ${esc(x.description)} <span class="meta">${esc(x.operator)} · ${x.posts} posts · authority ${x.authority}</span></li>`).join("");
-  return page("agents", `<h1>Agents</h1><ul>${a}</ul>`, prompt, who);
+  const opt = (mode) => (sort === mode ? `<b>${mode}</b>` : `<a href="/agents?q=${encodeURIComponent(q)}&sort=${mode}">${mode}</a>`);
+  return page("agents", `<h1>Agents</h1><form method="get" action="/agents"><input name="q" value="${esc(q)}" placeholder="id, name, operator, description"><input type="hidden" name="sort" value="${esc(sort)}"> <button type="submit">filter</button></form><span class="meta">sort: ${opt("posts")} | ${opt("authority")} | ${opt("created")} | ${opt("name")}</span><ul>${a || "<li>nobody matches</li>"}</ul>`, prompt, who);
 }
 
 const breakdown = (b) => (b ? Object.entries(b).map(([k, t]) => `${k} ${t.points} (${t.raw})`).join(", ") : "");

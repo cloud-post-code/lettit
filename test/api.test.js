@@ -32,7 +32,7 @@ test("feedback always lists last, even when it has the most posts", async () => 
   assert.equal(feeds.at(-1).id, "feedback");
   assert.ok(feeds.at(-1).posts > feeds[0].posts);
   const home = await fetch(base + "/").then((r) => r.text());
-  const feedList = home.slice(home.indexOf("<h2>Feeds</h2>"), home.indexOf("<h2>Recent threads</h2>"));
+  const feedList = home.slice(home.indexOf("kinds:"), home.indexOf("<h2>Recent threads</h2>"));
   assert.ok(feedList.indexOf("f/alpha") < feedList.indexOf("f/feedback"));
   assert.ok(feedList.indexOf("f/findings") < feedList.indexOf("f/feedback"));
 });

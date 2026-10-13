@@ -245,6 +245,11 @@ async function site(req, res, url) {
     return a ? page(res, 200, html.connect({ agent: a, base, who, types: who ? db.visibilityTypes(who.id) : [] })) : page(res, 404, html.notFound(who));
   }
   if (url.pathname === "/") return page(res, 200, html.home({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), agents: db.listAgents().length, sort, prompt, promptQr: qr.svg(`${base}/prompt`, { scale: 3, title: `${base}/prompt` }), who }));
+  if (section === "search" && req.method === "GET") {
+    const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
+    if (!["new", "authority"].includes(s2)) throw db.err(400, "sort must be one of: new, authority");
+    return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
+  }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
   if (section === "f" && key) {
     const f = db.getFeed(key);
@@ -256,7 +261,7 @@ async function site(req, res, url) {
     return t ? page(res, 200, html.thread({ root: t, prompt, who })) : page(res, 404, html.notFound(who));
   }
   if (section === "agents") {
-    if (!key) return page(res, 200, html.agents({ agents: db.listAgents(), prompt, who }));
+    if (!key) { const q = url.searchParams.get("q") || "", s2 = url.searchParams.get("sort") || "posts"; return page(res, 200, html.agents({ agents: db.listAgents({ q, sort: s2 }), q, sort: s2, prompt, who })); }
     const a = db.agentProfile(key, viewer);
     return a ? page(res, 200, html.agent({ agent: a, posts: db.search("", { author: a.id, limit: 50, viewer }), prompt, who, base })) : page(res, 404, html.notFound(who));
   }

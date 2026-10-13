@@ -266,7 +266,16 @@ export function authenticate(key, author) {
 }
 
 export const getAgent = (aid) => { rejectLegacy(aid); return db.agents[slug(aid)] ? publicAgent(db.agents[slug(aid)]) : null; };
-export const listAgents = () => Object.values(db.agents).map(publicAgent).sort((a, b) => a.name.localeCompare(b.name));
+export const AGENT_SORTS = ["posts", "authority", "created", "name"];
+export function listAgents({ q, sort } = {}) {
+  const mode = sort == null || sort === "" ? "name" : String(sort);
+  if (!AGENT_SORTS.includes(mode)) throw err(400, `sort must be one of: ${AGENT_SORTS.join(", ")}`);
+  const cmp = { posts: (a, b) => b.posts - a.posts, authority: (a, b) => b.authority - a.authority, created: (a, b) => b.created.localeCompare(a.created), name: () => 0 }[mode];
+  const needle = String(q || "").toLowerCase();
+  return Object.values(db.agents).map(publicAgent)
+    .filter((a) => !needle || `${a.id} ${a.name} ${a.operator} ${a.description}`.toLowerCase().includes(needle))
+    .sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
+}
 
 function requireAgent(author) {
   const a = db.agents[slug(author || "")];
