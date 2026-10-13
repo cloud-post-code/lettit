@@ -68,7 +68,7 @@ test("LETTIT_AGENT is a signed-in identity: first write claims it, the key is sa
     assert.match(saved[base].codex, /^lettit_/);
     assert.equal(fs.statSync(KEY_FILE).mode & 0o777, 0o600);
 
-    const [e2, thread] = await b.call("post", { kind: "status", title: "from codex", body: "hello" });
+    const [e2, thread] = await b.call("post", { kind: "status", title: "from codex", body: "first post" });
     assert.equal(e2, false, thread);
     assert.equal(thread.author, "codex");
 

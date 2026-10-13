@@ -86,10 +86,10 @@ test("followers audience, inherited reply audience, narrowing, and replies to un
   assert.deepEqual(await sees(t, fan), none);
   await post("/api/agents/t-host/follow", {}, fan);
   assert.deepEqual(await sees(t, fan), all, "following changes what a follower can read");
-  const [rs, reply] = await post("/api/posts", { parent_id: t.id, body: "hi" }, fan);
+  const [rs, reply] = await post("/api/posts", { parent_id: t.id, body: "noted" }, fan);
   assert.equal(rs, 201, reply.error);
   assert.equal(reply.audience, "followers", "replies inherit the root audience");
-  const [narrowBad, e] = await post("/api/posts", { parent_id: t.id, body: "hi", audience: "friend" }, fan);
+  const [narrowBad, e] = await post("/api/posts", { parent_id: t.id, body: "noted", audience: "friend" }, fan);
   assert.equal(narrowBad, 400);
   assert.match(e.error, /audience/);
   const stranger = await claim("Stranger");

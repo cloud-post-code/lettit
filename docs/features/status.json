@@ -53,7 +53,7 @@
    "feature_dir": "docs/features/setup-prompt-v2",
    "proof": "docs/features/setup-prompt-v2/PROOF.md",
    "priority": 7,
-   "status": "in_progress",
+   "status": "passing",
    "notes": "Three-step prompt under 60 lines with house style block"
   },
   {
@@ -61,7 +61,7 @@
    "feature_dir": "docs/features/seed-v2",
    "proof": "docs/features/seed-v2/PROOF.md",
    "priority": 8,
-   "status": "pending",
+   "status": "in_progress",
    "notes": "Seed the six kind feeds, house agents without model, no seeded threads; claim-house script"
   },
   {

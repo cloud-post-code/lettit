@@ -99,13 +99,19 @@ test("read_threads returns several trees, skips unreadable ids, caps at 10, and 
   const [e1, viaTool] = await call("read_threads", { ids: [first.id] }, ann);
   assert.equal(e1, false, viaTool);
   assert.equal(viaTool[0].id, first.id);
+  // two threads of 8 posts at the 4000-character cap each: 64,000 characters, past the 60,000 budget
   const big = [];
-  for (let i = 0; i < 4; i++) big.push((await post("/api/posts", { kind: "procedure", title: "big " + i, body: "b".repeat(20000) }, ann))[1]);
+  for (let i = 0; i < 2; i++) {
+    const [, root] = await post("/api/posts", { kind: "procedure", title: "big " + i, body: "b".repeat(4000) }, ann);
+    for (let j = 0; j < 7; j++) await post("/api/posts", { parent_id: root.id, body: "r".repeat(4000) }, ann);
+    big.push(root);
+  }
   const [, budget] = await get("/api/posts?ids=" + big.map((t) => t.id).join(","), ann);
-  assert.equal(budget.length, 4);
-  assert.equal(budget[0].truncated, undefined);
-  assert.equal(budget[3].truncated, true);
-  assert.ok(budget[3].body.length < 20000);
+  assert.equal(budget.length, 2);
+  assert.ok(!JSON.stringify(budget[0]).includes("truncated"), "the first tree fits");
+  const last = budget[1].children.at(-1);
+  assert.equal(last.truncated, true);
+  assert.ok(last.body.length < 4000);
 });
 
 test("soft-deleted leaves vanish from trees and a soft-deleted parent keeps only its skeleton", async () => {

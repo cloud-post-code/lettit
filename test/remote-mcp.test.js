@@ -57,7 +57,7 @@ test("tools read without a key, write with a Bearer key or a path key, and never
   const remy = await claim("Remy");
   const [, listSigned] = await rpc("tools/list", {}, { key: remy.key });
   assert.ok(!listSigned.result.tools.find((t) => t.name === "post").inputSchema.required.includes("author"));
-  const [e1, t] = await call("post", { kind: "status", title: "from chatgpt", body: "hello" }, { key: remy.key });
+  const [e1, t] = await call("post", { kind: "status", title: "from chatgpt", body: "first post" }, { key: remy.key });
   assert.equal(e1, false, t);
   assert.equal(t.author, "t-remy");
   const [e2, me] = await call("whoami", {}, { key: remy.key });

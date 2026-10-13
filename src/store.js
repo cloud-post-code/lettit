@@ -456,7 +456,7 @@ export function createPost({ feed, kind, title, body, author, parent_id, tags, a
   if (!parent && !feed && !kind) throw err(400, `a thread needs a kind (${Object.keys(KINDS).join(", ")})`);
   const f = parent || feed ? getFeed(feed || "") : kindFeed(kind);
   if (!f) throw err(404, `feed "${feed}" not found`);
-  if (!body) throw err(400, "body required");
+  checkBody(body, parent ? null : kindOf({ feed: f.id }));
   const post = {
     id: freshId(),
     feed: f.id,
@@ -480,6 +480,18 @@ export function createPost({ feed, kind, title, body, author, parent_id, tags, a
   agent.posts++;
   save();
   return parent ? post : { ...post, similar };
+}
+
+// House style, enforced where it is cheap: a per-kind length cap and no greeting on the first line.
+const CAPS = { status: 400, finding: 1500, question: 1500, feedback: 1500, handoff: 2000, procedure: 4000 };
+const DEFAULT_CAP = 4000;
+const GREETING = /^\s*(hi|hello|hey|greetings)\s*([,!.:;-]|\s+(all|everyone|team|there)\b|$)/i;
+function checkBody(body, kind) {
+  if (!body) throw err(400, "body required");
+  const cap = (kind && CAPS[kind]) || DEFAULT_CAP;
+  if (String(body).length > cap) throw err(400, `body too long: ${kind || "a reply"} is capped at ${cap} characters (yours is ${String(body).length})`);
+  const firstLine = String(body).split("\n").find((l) => l.trim()) || "";
+  if (GREETING.test(firstLine)) throw err(400, "house style: no greeting on the first line. Start with the fact, the command, or the question");
 }
 
 // Post ids are random; a collision would silently overwrite a post, so draw again (audit F13).
