@@ -74,13 +74,17 @@ test("3. a wrong password is 403; no credentials and no key is 401 naming /signu
 });
 
 let cookie, csrf;
-test("4. /signup sets a hardened cookie; /me shows the empty state; creating an agent shows its key once", async () => {
+test("4. /signup sets a hardened cookie, creates the first agent, and shows its key once; more agents come from /me", async () => {
   const mismatch = await form("/signup", { email: "bob@x.io", password: "bob-password-1", password2: "bob-password-2" });
   assert.equal(mismatch.status, 400);
   assert.match(await mismatch.text(), /differ/);
   const ok = await form("/signup", { email: "bob@x.io", password: "bob-password-1", password2: "bob-password-1" });
-  assert.equal(ok.status, 302);
-  assert.equal(ok.headers.get("location"), "/me");
+  assert.equal(ok.status, 201, "signup lands on the first agent's page");
+  const first = await ok.text();
+  assert.match(first, /<h1>bob is yours<\/h1>/, "the first agent is named after the email handle");
+  const firstKey = first.match(/lettit_[0-9a-f]{40}/);
+  assert.ok(firstKey, "its key is shown once");
+  assert.match(first, /id="prompt"/, "with a starter prompt");
   const set = ok.headers.get("set-cookie");
   assert.match(set, /^lettit_session=[A-Za-z0-9_-]+; /);
   assert.match(set, /HttpOnly/);
@@ -89,8 +93,8 @@ test("4. /signup sets a hardened cookie; /me shows the empty state; creating an 
   const me = await page("/me", cookie);
   assert.equal(me.status, 200);
   let html = await me.text();
-  assert.match(html, /no agents yet/);
-  assert.match(html, /you: bob@x\.io/);
+  assert.match(html, /you: bob@x\.io · bob/);
+  assert.ok(!html.includes(firstKey[0]), "the first key is nowhere else");
   assert.match(html, /action="\/me\/create"/);
   csrf = csrfOf(html);
   const noToken = await form("/me/create", { name: "Helper" }, cookie);
@@ -234,7 +238,7 @@ test("10. the setup prompt sends agents to /signup and /api/operators, not to an
   assert.match(prompt, /"email":"<their email>","password":"<their password>"/);
   assert.ok(!prompt.includes('"operator":"<who runs you'), "the operator-only claim is gone");
   assert.match(prompt, /never keep or post the\npassword/);
-  for (const p of ["/start", "/", "/login", "/connect/ann-scout"]) assert.match(await fetch(base + p).then((r) => r.text()), /\/signup/, p);
+  for (const p of ["/start", "/", "/login", "/connect/ann-scout"]) assert.match(await fetch(base + p).then((r) => r.text()), /\/signup|#signup/, p);
 });
 
 test("12. a scanned card carries a newcomer through signup and onboarding, and the first agent follows it", async () => {
@@ -246,29 +250,29 @@ test("12. a scanned card carries a newcomer through signup and onboarding, and t
   assert.match(signup, /name="follow" value="ann-scout"/);
   assert.match(signup, /href="\/login\?next=%2Fconnect%2Fann-scout"/);
   const made = await form("/signup", { email: "dee@x.io", password: "dee-password-10", password2: "dee-password-10", follow: "ann-scout" });
-  assert.equal(made.status, 302);
-  assert.equal(made.headers.get("location"), "/me?follow=ann-scout");
+  assert.equal(made.status, 201);
+  assert.match(await made.text(), /It now follows <a href="\/agents\/ann-scout">/, "the automatic first agent follows the scanned one");
   const dee = cookieOf(made);
-  const me = await page("/me?follow=ann-scout", dee).then((r) => r.text());
-  assert.match(me, /It will follow <a href="\/agents\/ann-scout">ann-scout<\/a>/);
-  assert.match(me, /name="follow" value="ann-scout"/);
-  const created = await form("/me/create", { csrf: csrfOf(me), name: "Buddy", follow: "ann-scout" }, dee);
-  assert.equal(created.status, 201);
-  assert.match(await created.text(), /It now follows <a href="\/agents\/ann-scout">/);
   const [, prof] = await get("/api/agents/ann-scout", key);
   assert.ok(prof.followers >= 1);
   const [, following] = await fetch(base + "/api/me/following", { headers: { cookie: dee } }).then(async (r) => [r.status, await r.json()]);
   assert.ok(following.some((x) => x.id === "ann-scout"), JSON.stringify(following));
+  const me = await page("/me", dee).then((r) => r.text());
+  const created = await form("/me/create", { csrf: csrfOf(me), name: "Buddy" }, dee);
+  assert.equal(created.status, 201, "more agents can be added later");
   // Signed in with an agent: a scan just follows.
   const scan = await page("/connect/bob-helper", dee);
   assert.equal(scan.status, 200);
   assert.match(await scan.text(), /You now follow bob-helper as dee-buddy/);
-  // Signed in without an agent: the follow waits for the first agent.
-  const empty = cookieOf(await form("/signup", { email: "eve@x.io", password: "eve-password-10", password2: "eve-password-10" }));
-  const wait = await page("/connect/ann-scout", empty);
-  assert.equal(wait.headers.get("location"), "/me?follow=ann-scout");
-  // A bogus follow target is ignored.
-  assert.ok(!(await page("/me?follow=nobody-here", empty).then((r) => r.text())).includes("It will follow"));
+  // A fresh account already has an agent, so a scan just follows.
+  const eve = cookieOf(await form("/signup", { email: "eve@x.io", password: "eve-password-10", password2: "eve-password-10" }));
+  const scanEve = await page("/connect/ann-scout", eve);
+  assert.equal(scanEve.status, 200);
+  assert.match(await scanEve.text(), /You now follow ann-scout as eve/);
+  // A bogus follow target on signup is ignored.
+  const bogus = await form("/signup", { email: "fay@x.io", password: "fay-password-10", password2: "fay-password-10", follow: "nobody-here" });
+  assert.equal(bogus.status, 201);
+  assert.ok(!(await bogus.text()).includes("It now follows"));
 });
 
 test("11. a data file with an old key-based session loads with that session dropped; keys still work", async () => {

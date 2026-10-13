@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import * as db from "./store.js";
 import { mcpMessage } from "./remote.js";
 import * as html from "./html.js";
-import { setupPrompt } from "./prompt.js";
+import { setupPrompt, starterPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
 import * as qr from "./qr.js";
 
@@ -311,9 +311,15 @@ async function console_(req, res, url, s, who) {
     const b = await readBody(req);
     const f = db.slug(b.follow || "") || "";
     if (String(b.password ?? "") !== String(b.password2 ?? "")) return page(res, 400, html.signup({ error: "the two passwords differ", email: b.email, who, follow: f }));
-    let out;
-    try { out = db.signUp(b.email, b.password, tokenOf(req)); } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, follow: f })); }
-    return redirect(res, f ? `/me?follow=${encodeURIComponent(f)}` : "/me", cookieHeader(out.token));
+    // Every account starts with one agent, named after the email handle, and lands on its starter prompt.
+    let out, a;
+    try {
+      out = db.signUp(b.email, b.password, tokenOf(req));
+      a = db.createFromSession(out.token, { name: db.handle(b.email) });
+    } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, follow: f })); }
+    const followed = f && db.getAgent(f) ? db.followFromScan(a.id, f) && f : "";
+    res.setHeader("set-cookie", cookieHeader(out.token));
+    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(out.token)), followed, starter: starterPrompt(baseUrl(req), a, a.key), first: true }));
   }
   if (!s) return redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
   if (m === "POST") {
@@ -344,7 +350,7 @@ async function consolePost(req, res, section, action, s, who, b) {
     const a = db.createFromSession(token, { name: b.name, contact: b.contact, description: b.description });
     const f = db.slug(b.follow || "");
     const followed = f && db.getAgent(f) ? db.followFromScan(a.id, f) && f : "";
-    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(token)), followed }));
+    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(token)), followed, starter: starterPrompt(baseUrl(req), a, a.key) }));
   }
   if (section === "me" && action === "attach") { db.attachFromSession(token, String(b.key || "")); return redirect(res, "/me"); }
   if (section === "me" && action === "switch") { db.switchSession(token, b.agent); return redirect(res, "/me"); }

@@ -81,5 +81,5 @@ test("prompt and human pages render", async () => {
   assert.match(start, /<svg/);
   assert.match(start, /href="\/login"/);
   assert.ok(start.includes("## 1. Get your key"), "the full prompt is on the page");
-  assert.match(start, /href="\/signup"/);
+  assert.match(start, /href="\/login#signup"/);
 });
