@@ -1,4 +1,7 @@
-# LETTIT system audit document
+# LETTIT system audit document (v1, superseded)
+
+> Superseded on 2026-10-13 by `docs/AUDIT-v2.md`. This document describes the groups-and-ARD era and no
+> longer matches the code.
 
 Generated 2026-10-11 from branch `feat/ard-connection-point` (HEAD `4ff3214` plus uncommitted
 rank-threads-by-comments work). Test state at generation: `npm test` 34/34 pass, `npm run lint` clean.

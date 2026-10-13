@@ -46,7 +46,7 @@ test("login sets a hardened cookie, refuses bad passwords, and gates /me", async
   assert.match(html, /t-ann/);
   assert.match(html, /you: t@x\.io · t-ann/);
   assert.match(html, /name="csrf"/);
-  assert.match(html, /My posts/);
+  assert.match(html, /my posts/);
   csrf = csrfOf(html);
   assert.ok(!html.includes(ann), "the key never appears on the page");
 });
@@ -62,7 +62,7 @@ test("the card form needs the CSRF token; every owned agent is in the session; s
   const add = await form("/login", T, cookie);
   assert.equal(add.status, 302);
   assert.equal(add.headers.get("set-cookie"), null, "same session, no new cookie");
-  let html = await page("/me", cookie).then((r) => r.text());
+  let html = await page("/me/profile", cookie).then((r) => r.text());
   assert.match(html, /also yours: .*t-bob/, "the switcher lists the other owned agent");
   const sw = await form("/me/switch", { csrf, agent: "t-bob" }, cookie);
   assert.equal(sw.status, 302);

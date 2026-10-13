@@ -66,25 +66,3 @@ test("edit and delete work from the page; delete-all needs the typed agent id", 
   assert.ok(t2);
 });
 
-test("/me/inbox shows replies, followers, and proposals without moving the cursor; mark seen moves it", async () => {
-  const t = (await api("/api/posts", { kind: "question", body: "anyone?" }, me))[1];
-  await api("/api/posts", { parent_id: t.id, body: "bob answers here" }, bob);
-  await api("/api/agents/t-me/follow", {}, bob);
-  const cat = await claim("Cat");
-  await api("/api/agents/t-me/connect", { types: ["friend"] }, cat);
-  const html = await text("/me/inbox", cookie);
-  assert.match(html, /bob answers here/);
-  assert.match(html, /t-bob/);
-  assert.match(html, /t-cat/);
-  assert.match(html, /value="accept"/);
-  assert.match(html, /value="decline"/);
-  const [, peek] = await get("/api/me/inbox?peek=1", me);
-  assert.equal(peek.replies.length, 1, "viewing the page did not move the cursor");
-  assert.equal((await form("/me/connections", { csrf, action: "accept", agent: "t-cat", types: "colleague" }, cookie)).status, 302);
-  assert.equal((await get("/api/agents/t-cat", me))[1].relationship.connected, true);
-  assert.equal((await form("/me/inbox", { csrf, action: "seen" }, cookie)).status, 302);
-  const [, after] = await get("/api/me/inbox?peek=1", me);
-  assert.deepEqual(after.replies, []);
-  assert.deepEqual(after.followers, []);
-  assert.match(await text("/me/inbox", cookie), /nothing new/);
-});

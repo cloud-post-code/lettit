@@ -263,7 +263,6 @@ async function site(req, res, url) {
     return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
   }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
-  if (url.pathname === "/start") return page(res, 200, html.start({ prompt, base, joinQr: qr.svg(`${base}/join`, { scale: 4, title: `${base}/join` }), agents: db.listAgents().length, who }));
   if (section === "f" && key) {
     const f = db.getFeed(key);
     if (!f) return page(res, 404, html.notFound(who));
@@ -328,7 +327,12 @@ async function console_(req, res, url, s, who) {
     try { return await consolePost(req, res, section, action, s, who, b); } catch (e) { if (!e.status || e.status >= 500) throw e; return page(res, e.status, html.error(e.message, who)); }
   }
   if (section === "me" && !action && follow && s.current) return redirect(res, `/connect/${encodeURIComponent(follow)}`);
-  if (section === "me" && !action) return page(res, 200, html.me({ me: s.current ? db.me(s.current) : null, who, base: baseUrl(req), follow: follow && db.getAgent(follow) ? follow : "" }));
+  const followOk = follow && db.getAgent(follow) ? follow : "";
+  if (section === "me" && !action) {
+    const connected = s.current ? db.relationships(s.current, {}).filter((r) => r.connected) : [];
+    return page(res, 200, html.me({ me: s.current ? db.me(s.current) : null, connected, types: s.current ? db.visibilityTypes(s.current) : [], who, base: baseUrl(req), follow: followOk }));
+  }
+  if (section === "me" && action === "profile") return page(res, 200, html.profile({ me: s.current ? db.me(s.current) : null, who, follow: followOk }));
   if (section === "me" && action === "account") return page(res, 200, html.account({ who }));
   if (!s.current) return page(res, 400, html.error("create an agent first: you have none yet", who));
   return consoleGet(req, res, url, section, action, s, who);
@@ -355,7 +359,7 @@ async function consolePost(req, res, section, action, s, who, b) {
   if (section === "me" && action === "attach") { db.attachFromSession(token, String(b.key || "")); return redirect(res, "/me"); }
   if (section === "me" && action === "switch") { db.switchSession(token, b.agent); return redirect(res, "/me"); }
   if (section === "me" && action === "account") return accountPost(req, res, b, who);
-  if (section === "me" && !action) { db.updateFromSession(token, { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me"); }
+  if (section === "me" && !action) { db.updateFromSession(token, { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me/profile"); }
   if (section === "me" && action === "rotate") { const r = db.rotateFromSession(token); return page(res, 200, html.rotated({ agent: r, key: r.key, who })); }
   if (section === "me" && action === "connector") {
     const r = db.rotateFromSession(token);
@@ -364,10 +368,9 @@ async function consolePost(req, res, section, action, s, who, b) {
     return res.end(html.connector({ agent: r, url, svg: qr.svg(url, { scale: 6 }), who }));
   }
   if (!s.current) throw db.err(400, "create an agent first: you have none yet");
-  if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, "/me/connections"); }
+  if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, b.back ? localPath(b.back) : "/me/connections"); }
   if (section === "me" && action === "visibility-types") { typeAction(s.current, b); return redirect(res, "/me/visibility-types"); }
   if (section === "me" && action === "posts") { postAction(s.current, b); return redirect(res, "/me/posts"); }
-  if (section === "me" && action === "inbox" && b.action === "seen") { db.inbox(s.current, {}); return redirect(res, "/me/inbox"); }
   return page(res, 404, html.notFound(who));
 }
 function accountPost(req, res, b, who) {
@@ -407,7 +410,6 @@ async function consoleGet(req, res, url, section, action, s, who) {
     const f = { kind: url.searchParams.get("kind") || "", audience: url.searchParams.get("audience") || "", since: url.searchParams.get("since") || "" };
     return page(res, 200, html.myPosts({ posts: db.myPosts(s.current, { ...f, limit: 500 }), filters: f, who }));
   }
-  if (section === "me" && action === "inbox") return page(res, 200, html.inbox({ inbox: db.inbox(s.current, { peek: true }), types: db.visibilityTypes(s.current), who }));
   return page(res, 404, html.notFound(who));
 }
 

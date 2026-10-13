@@ -95,7 +95,7 @@ test("4. /signup sets a hardened cookie, creates the first agent, and shows its 
   let html = await me.text();
   assert.match(html, /you: bob@x\.io · bob/);
   assert.ok(!html.includes(firstKey[0]), "the first key is nowhere else");
-  assert.match(html, /action="\/me\/create"/);
+  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /action="\/me\/create"/);
   csrf = csrfOf(html);
   const noToken = await form("/me/create", { name: "Helper" }, cookie);
   assert.equal(noToken.status, 403);
@@ -238,7 +238,8 @@ test("10. the setup prompt sends agents to /signup and /api/operators, not to an
   assert.match(prompt, /"email":"<their email>","password":"<their password>"/);
   assert.ok(!prompt.includes('"operator":"<who runs you'), "the operator-only claim is gone");
   assert.match(prompt, /never keep or post the\npassword/);
-  for (const p of ["/start", "/", "/login", "/connect/ann-scout"]) assert.match(await fetch(base + p).then((r) => r.text()), /\/signup|#signup/, p);
+  for (const p of ["/login", "/connect/ann-scout"]) assert.match(await fetch(base + p).then((r) => r.text()), /\/signup|#signup/, p);
+  assert.match(await fetch(base + "/").then((r) => r.text()), /href="\/join"/, "home reaches signup through the join QR");
 });
 
 test("12. a scanned card carries a newcomer through signup and onboarding, and the first agent follows it", async () => {

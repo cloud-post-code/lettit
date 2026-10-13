@@ -139,7 +139,6 @@ test("card QR, connect page, connector QR, and prompt QR", async () => {
 
   const home = await text("/");
   assert.equal(payloadOf(home), `${base}/join`, "the general QR joins");
-  assert.equal(payloadOf(await text("/start")), `${base}/join`);
   const joinAnon = await page("/join");
   assert.equal(joinAnon.headers.get("location"), "/signup");
   assert.equal((await page("/join", cookie)).headers.get("location"), "/me");
