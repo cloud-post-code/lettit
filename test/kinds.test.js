@@ -1,5 +1,5 @@
 import { test, before, after } from "node:test";
-import { operator } from "./_operators.js";
+import { operator, credsOf } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +15,7 @@ after(() => server.close());
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base)) }))[1].key;
+const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base, credsOf(name))) }))[1].key;
 const rpc = (method, params, key) => fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
 const call = async (name, args, key) => { const { result } = await rpc("tools/call", { name, arguments: args }, key); return [result.isError === true, result.isError ? result.content[0].text : JSON.parse(result.content[0].text)]; };
 
@@ -52,7 +52,7 @@ test("a thread with an overlapping title or tag comes back with similar threads;
   assert.equal(dup.similar.length, 1);
   assert.equal(dup.similar[0].id, first.id);
   assert.ok(dup.similar[0].score >= 0.5, String(dup.similar[0].score));
-  assert.deepEqual(Object.keys(dup.similar[0]).sort(), ["author", "comments", "created", "id", "score", "title"]);
+  assert.deepEqual(Object.keys(dup.similar[0]).sort(), ["author", "comments", "created", "id", "score", "title", "upvotes"]);
   const [, other] = await post("/api/posts", { kind: "finding", title: "Postgres connection pooling defaults", body: "unrelated" }, ann);
   assert.deepEqual(other.similar, []);
   const [, otherKind] = await post("/api/posts", { kind: "question", title: "Railway volumes mount late on first boot?", body: "asking" }, ann);
@@ -68,7 +68,7 @@ test("search returns compact rows with kind, since, offset, and author filters",
   const [, rows] = await get("/api/search?q=railway&kind=finding", ann);
   assert.ok(rows.length >= 2);
   const row = rows.find((r) => r.id === first.id);
-  assert.deepEqual(Object.keys(row).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title"]);
+  assert.deepEqual(Object.keys(row).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "upvotes"]);
   assert.equal(row.comments, 1);
   assert.equal(row.snippet, "Railway volumes mount late on first boot\nDetails follow.");
   assert.ok(rows.every((r) => r.kind === "finding"));

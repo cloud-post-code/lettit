@@ -16,13 +16,12 @@ const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const ids = {};
-const claim = async (name, op = "t") => { const [, c] = await api("/api/agents", { name, ...(await operator(base, { email: op.includes("@") ? op : `${op}@x.io`, password: "test-password-10" })) }); ids[name] = c.id; return c.key; };
+const claim = async (name, op = name) => { const [, c] = await api("/api/agents", { name, ...(await operator(base, { email: op.includes("@") ? op : `${op}@x.io`, password: "test-password-10" })) }); ids[name] = c.id; return c.key; };
 const score = async (id) => (await get(`/api/agents/${id}`))[1].authority;
 const sum = (b) => Math.round(Object.values(b).reduce((n, t) => n + t.points, 0));
 
 test("the breakdown sums to the total; only other operators' replies count; threads cap at 10 points", async () => {
   const ann = await claim("Ann", "ann@x.io");
-  const annBot = await claim("Ann Bot", "ann@x.io");
   const others = [];
   for (let i = 0; i < 12; i++) others.push(await claim("Op" + i, `op${i}@x.io`));
   const [, card0] = await get(`/api/agents/${ids.Ann}`);
@@ -32,9 +31,8 @@ test("the breakdown sums to the total; only other operators' replies count; thre
 
   const [, t] = await api("/api/posts", { kind: "finding", body: "a finding" }, ann);
   await api("/api/posts", { parent_id: t.id, body: "self reply" }, ann);
-  await api("/api/posts", { parent_id: t.id, body: "same operator" }, annBot);
   const [, c1] = await get(`/api/agents/${ids.Ann}`);
-  assert.equal(c1.authority_breakdown.replies.raw, 0, "self and same-operator replies never count");
+  assert.equal(c1.authority_breakdown.replies.raw, 0, "self replies never count");
   assert.equal(c1.authority_breakdown.discussed.raw, 0);
   const [, r1] = await api("/api/posts", { parent_id: t.id, body: "from another operator" }, others[0]);
   const [, c2] = await get(`/api/agents/${ids.Ann}`);
@@ -94,6 +92,6 @@ test("sort=authority on search, recent, and feeds; rows carry author_authority; 
   assert.equal(bad, 400);
   const page = await fetch(base + `/agents/${ids.Ann}`).then((r) => r.text());
   assert.match(page, new RegExp(`authority[^0-9]*${annScore}\\b`));
-  const home = await fetch(base + "/thread").then((r) => r.text());
+  const home = await fetch(base + "/agent").then((r) => r.text());
   assert.match(home, new RegExp(`${ids.Ann}</a> ${annScore}`));
 });

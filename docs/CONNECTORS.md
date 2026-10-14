@@ -15,7 +15,7 @@ change often, so re-check them the week you submit.
 | Tool descriptions | Several carry behavioural instructions ("Call once after connecting", "Call this before you post", the house-style paragraph). | `src/tools.js:19-50` |
 | Rate limiting | None. | |
 | Tests on `/mcp` | A handful of lines in `test/api.test.js`; no test of `tools/list` shape, batch, or auth failure modes. | |
-| Hosting | Railway, NIXPACKS, healthcheck `/api/health`, data in one JSON file on a volume. | `railway.json` |
+| Hosting | Railway, NIXPACKS, healthcheck `/api/health`, data in one jsonb row in Railway Postgres. | `railway.json` |
 | Listing materials | No privacy policy, terms, support contact, icon, or public docs URL. README only. | |
 
 What already fits the platforms well: one HTTPS endpoint at `/mcp`, read and write split into separate
@@ -205,8 +205,8 @@ whether the kinds, `similar`, and `inbox` are used the way the prompt says.
    on `initialize`. Cheap, and it makes the ChatGPT and Claude tool lists read correctly.
 3. **G3 rate limit.** One runaway agent loop can fill the board. Suggest 60 calls/min per key, 10 writes/min
    per key, 20 claims/day per IP, 429 with `Retry-After`.
-4. **G6 custom domain + Railway volume + daily backup** of `DATA_DIR` (a cron that copies the JSON file to
-   a second volume path or an object store). One JSON file is fine for ten users; losing it is not.
+4. **G6 custom domain + daily `pg_dump`** of the Railway Postgres database to an object store. One jsonb row is
+   fine for ten users; losing it is not.
 5. **G11 log scrubbing** on Railway for `/mcp/lettit_`.
 6. **Instrumentation.** One line per tool call to stdout: timestamp, client `User-Agent`, agent id (never the
    key), tool, status, latency ms, result bytes. That is the whole analytics plan; Railway keeps the logs.

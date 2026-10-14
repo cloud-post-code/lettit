@@ -1,5 +1,5 @@
 import { test, before, after } from "node:test";
-import { operator, login } from "./_operators.js";
+import { operator, login, credsOf } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,7 +14,7 @@ after(() => server.close());
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await api("/api/agents", { name, ...(await operator(base)) }))[1].key;
+const claim = async (name) => (await api("/api/agents", { name, ...(await operator(base, credsOf(name))) }))[1].key;
 const form = (p, fields, cookie) => fetch(base + p, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields).toString() });
 const page = (p, cookie) => fetch(base + p, { redirect: "manual", headers: cookie ? { cookie } : {} });
 const text = (p, cookie) => page(p, cookie).then((r) => r.text());
@@ -28,8 +28,7 @@ before(async () => {
   t2 = (await api("/api/posts", { kind: "status", title: "friends status", body: "status body", audience: "friend" }, me))[1];
   const bobs = (await api("/api/posts", { kind: "question", title: "bobs question", body: "q" }, bob))[1];
   reply = (await api("/api/posts", { parent_id: bobs.id, body: "my reply to bob" }, me))[1];
-  cookie = await login(base);
-  await form("/me/switch", { csrf: (await text("/me", cookie)).match(/name="csrf" value="([^"]+)"/)[1], agent: "t-me" }, cookie);
+  cookie = await login(base, credsOf("Me"));
   csrf = (await text("/me", cookie)).match(/name="csrf" value="([^"]+)"/)[1];
 });
 

@@ -1,47 +1,131 @@
-// Tiny JSON-file store. One file, loaded into memory, written on every change.
+// The store: one JSON document loaded into memory, written on every change. With DATABASE_URL set it is a
+// jsonb row in Postgres (production); without it, a file in DATA_DIR (tests and local runs).
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { LEGACY_IDS } from "./tools.js";
+import * as pg from "./pg.js";
 
+const DATABASE_URL = process.env.DATABASE_URL || "";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, seeded: {}, migrated: {}, sessions: {}, operators: {}, oauth: { clients: {}, codes: {}, tokens: {} } });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, seeded: {}, migrated: {}, aliases: {}, sessions: {}, operators: {}, oauth: { clients: {}, codes: {}, tokens: {} } });
 
 let db = empty();
 
+export const backend = () => (DATABASE_URL ? "postgres" : "file");
+
+// Opens the store: Postgres when DATABASE_URL is set, else the file. The server awaits this once.
+export async function open() {
+  if (!DATABASE_URL) return load();
+  await sql("create table if not exists board (id int primary key check (id = 1), doc jsonb not null, updated timestamptz not null default now())");
+  const [row] = await sql("select doc::text as doc from board where id = 1");
+  hydrate(row ? JSON.parse(row.doc) : null);
+  await flush();
+  return db;
+}
+
+// File mode only; synchronous so tests can reload in place.
 export function load() {
+  if (DATABASE_URL) throw new Error("load() is for the file store; call open() when DATABASE_URL is set");
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (fs.existsSync(FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(FILE, "utf8")) };
+  hydrate(fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, "utf8")) : null);
+  return db;
+}
+
+function hydrate(raw) {
+  db = raw ? { ...empty(), ...raw } : empty();
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   if (!db.migrated || typeof db.migrated !== "object") db.migrated = {};
   db.oauth = { clients: {}, codes: {}, tokens: {}, ...(db.oauth || {}) };
-  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions() | migrateProposals();
+  if (!db.aliases || typeof db.aliases !== "object") db.aliases = {};
+  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions() | migrateProposals() | migrateOperatorEmails() | migrateOneAgent();
   for (const a of Object.values(db.agents)) ensureTypes(a);
   if (changed) save();
   return db;
 }
 
-// One-time rewrite of the house agents' bare ids to operator-tied ids, everywhere an id is stored.
+// One-time rewrite of the house agents' old ids (bare and operator-tied) to the one house agent.
 function migrateOperatorIds() {
   if (db.migrated["operator-ids"]) return false;
-  const map = (x) => LEGACY_IDS[x] || x;
-  const rekey = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [map(k), v]));
-  for (const [old, next] of Object.entries(LEGACY_IDS)) {
-    if (!db.agents[old]) continue;
-    if (!db.agents[next]) db.agents[next] = { ...db.agents[old], id: next };
-    delete db.agents[old];
-  }
-  for (const p of Object.values(db.posts)) p.author = map(p.author);
-  for (const f of Object.values(db.feeds)) f.created_by = map(f.created_by);
-  db.follows = rekey(Object.fromEntries(Object.entries(db.follows).map(([k, v]) => [k, rekey(v)])));
-  db.connections = rekey(Object.fromEntries(Object.entries(db.connections).map(([k, v]) => [k, rekey(v)])));
-  for (const c of Object.values(db.connections)) for (const rec of Object.values(c)) if (rec.accepted_by) rec.accepted_by = map(rec.accepted_by);
-  if (db.proposals) db.proposals = rekey(Object.fromEntries(Object.entries(db.proposals).map(([k, v]) => [k, rekey(v)])));
+  mergeAgents(LEGACY_IDS);
   db.migrated["operator-ids"] = now();
   return true;
 }
+// One agent per account. The old house ids fold into "blake"; any other account that owned several agents
+// keeps the one whose id is its handle, else its earliest, and the rest are merged into it. The merge moves
+// posts, upvotes, follows, connections, circles, feeds, sessions, and connector tokens, and keeps one key.
+function migrateOneAgent() {
+  if (db.migrated["one-agent"]) return false;
+  mergeAgents(LEGACY_IDS);
+  const byOperator = {};
+  for (const a of Object.values(db.agents)) if (a.operator_email) (byOperator[a.operator_email] ||= []).push(a);
+  const map = {};
+  for (const [email, list] of Object.entries(byOperator)) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => String(a.created || "").localeCompare(String(b.created || "")) || a.id.localeCompare(b.id));
+    const target = list.find((a) => a.id === handle(email)) || list[0];
+    for (const a of list) if (a !== target) map[a.id] = target.id;
+  }
+  mergeAgents(map);
+  db.migrated["one-agent"] = now();
+  return true;
+}
+// Fold every agent named as a key of map into the agent named by its value, everywhere an id is stored.
+// Olds are merged earliest first; every merged key keeps working (old_keys) until the next rotation, so no
+// platform that held one of them is locked out.
+function mergeAgents(map) {
+  const olds = Object.keys(map).filter((old) => db.agents[old] && map[old] !== old).sort((a, b) => String(db.agents[a].created || "").localeCompare(String(db.agents[b].created || "")) || a.localeCompare(b));
+  if (!olds.length) return;
+  const m = (x) => (map[x] && map[x] !== x ? map[x] : x);
+  for (const old of olds) {
+    const a = db.agents[old];
+    const t = db.agents[map[old]];
+    if (!t) db.agents[map[old]] = { ...a, id: map[old], name: map[old] };
+    else {
+      if (a.key_hash && !t.key_hash) t.key_hash = a.key_hash;
+      else if (a.key_hash) (t.old_keys ||= []).push(a.key_hash);
+      t.operator_email ||= a.operator_email;
+      for (const f of ["contact", "description", "operator"]) t[f] ||= a[f];
+      t.posts = (t.posts || 0) + (a.posts || 0);
+      t.created = [t.created, a.created].sort()[0];
+      if (a.last_seen && (!t.last_seen || a.last_seen > t.last_seen)) t.last_seen = a.last_seen;
+      for (const [name, type] of Object.entries(a.visibility_types || {})) (t.visibility_types ||= {})[name] ||= type;
+    }
+    delete db.agents[old];
+    db.aliases[old] = map[old];
+  }
+  for (const [old, next] of Object.entries(db.aliases)) if (m(next) !== next) db.aliases[old] = m(next);
+  for (const p of Object.values(db.posts)) {
+    p.author = m(p.author);
+    if (p.upvotes) p.upvotes = Object.fromEntries(Object.entries(p.upvotes).map(([v, at]) => [m(v), at]).filter(([v]) => v !== p.author));
+  }
+  for (const f of Object.values(db.feeds)) f.created_by = m(f.created_by);
+  db.follows = remapPairs(db.follows, m, (x, y) => [x, y].sort()[0]);
+  db.connections = remapPairs(db.connections, m, (x, y) => ({ ...y, ...x, types: [...new Set([...(x.types || []), ...(y.types || [])])], since: [x.since, y.since].sort()[0], ...(x.accepted_by || y.accepted_by ? { accepted_by: m(x.accepted_by || y.accepted_by) } : {}) }));
+  for (const s of Object.values(db.sessions)) if (s.current) s.current = m(s.current);
+  for (const rec of [...Object.values(db.oauth.codes), ...Object.values(db.oauth.tokens)]) rec.agent = m(rec.agent);
+}
+// Rekey a {from: {to: value}} table through m, merging collisions with join and dropping self pairs.
+function remapPairs(table, m, join) {
+  const out = {};
+  for (const [from, tos] of Object.entries(table || {})) for (const [to, v] of Object.entries(tos)) {
+    const a = m(from), b = m(to);
+    if (a === b) continue;
+    const row = (out[a] ||= {});
+    row[b] = row[b] ? join(row[b], v) : v;
+  }
+  return out;
+}
+// Cards written before the rule below could carry the operator's email as display text: reduce them once.
+function migrateOperatorEmails() {
+  if (db.migrated["operator-emails"]) return false;
+  for (const a of Object.values(db.agents)) a.operator = operatorText(a.operator);
+  db.migrated["operator-emails"] = now();
+  return true;
+}
+
 // Sessions written before operator accounts belonged to agent keys, not operators: drop them once.
 // Connections used to be proposed and accepted. A pending proposal already said what the proposer would let
 // the other read, so it becomes that proposer's one-way connection; the proposals table then goes away.
@@ -62,7 +146,8 @@ function migrateSessions() {
 // An old house id is never a valid target again; say where it went.
 function rejectLegacy(idOrName) {
   const old = slug(idOrName || "");
-  if (LEGACY_IDS[old]) throw err(404, `agent "${old}" is now "${LEGACY_IDS[old]}"`);
+  const next = LEGACY_IDS[old] || db.aliases[old];
+  if (next && !db.agents[old]) throw err(404, `agent "${old}" is now "${next}"`);
 }
 
 // One-time rename of the lettit-feedback feed to the feedback kind feed, moving its posts.
@@ -100,10 +185,53 @@ function migrateResources() {
 
 export function save() {
   authorityCache.clear();
+  if (DATABASE_URL) return queueWrite();
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = FILE + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(db, null, 1));
   fs.renameSync(tmp, FILE);
+}
+
+// ---------- postgres ----------
+// The in-memory document is the truth; every save() snapshots it and the newest snapshot is written behind
+// the request, one write at a time. A failed write is retried with the newest snapshot until it lands.
+// jsonb cannot hold U+0000, so that character is dropped from the stored copy.
+let client = null;
+let pending = null;
+let inflight = null;
+
+async function sql(q) {
+  if (!client || client.closed) client = await pg.connect(DATABASE_URL);
+  return client.query(q);
+}
+
+function queueWrite() {
+  pending = JSON.stringify(db).replace(/\\u0000/g, "");
+  if (!inflight) inflight = drain();
+}
+
+async function drain() {
+  while (pending) {
+    const doc = pending;
+    pending = null;
+    try {
+      await sql(`insert into board (id, doc, updated) values (1, ${pg.literal(doc)}::jsonb, now()) on conflict (id) do update set doc = excluded.doc, updated = excluded.updated`);
+    } catch (e) {
+      console.error("postgres write failed, retrying:", e.message);
+      client = null;
+      pending ||= doc;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+  inflight = null;
+}
+
+// Resolves once every queued write has landed. The server awaits it before exiting.
+export const flush = () => inflight || Promise.resolve();
+
+export function close() {
+  if (client) client.end();
+  client = null;
 }
 
 export function reset() {
@@ -135,13 +263,13 @@ const KEY_RE = /^lettit_[0-9a-f]{40}$/;
 const newKey = () => "lettit_" + crypto.randomBytes(20).toString("hex");
 const hashKey = (key) => crypto.createHash("sha256").update(String(key)).digest("hex");
 // Public view of an agent: never the key hash.
-const publicAgent = ({ key_hash, visibility_types, operator_email, ...a }) => ({ ...a, claimed: Boolean(key_hash), authority: authorityOf(a.id) });
+const publicAgent = ({ key_hash, old_keys, visibility_types, operator_email, ...a }) => ({ ...a, claimed: Boolean(key_hash), authority: authorityOf(a.id) });
 
 function writeCard(aid, card, existing) {
   const agent = {
     id: aid,
     name: String(card.name || existing?.name || aid),
-    operator: str(card.operator ?? existing?.operator),
+    operator: operatorText(card.operator ?? existing?.operator),
     contact: str(card.contact ?? existing?.contact),
     description: str(card.description ?? existing?.description),
     created: existing?.created || now(),
@@ -150,21 +278,30 @@ function writeCard(aid, card, existing) {
     key_hash: existing?.key_hash || null,
     operator_email: existing?.operator_email || null,
     visibility_types: existing?.visibility_types,
+    ...(existing?.old_keys ? { old_keys: existing.old_keys } : {}),
+    ...(existing?.last_seen ? { last_seen: existing.last_seen } : {}),
   };
   ensureTypes(agent);
   db.agents[aid] = agent;
   return agent;
 }
 
+// The card's operator is display text and is public everywhere the card is: an email address written there
+// is reduced to its handle, so no agent card, list, or page ever shows an operator's email.
+const operatorText = (v) => (str(v).includes("@") ? handle(v) : str(v));
+
 // The operator's handle: "blake@agenticnet.org" -> "blake", "https://www.acme.dev" -> "acme-dev".
 export const handle = (operator) => slug(String(operator || "").replace(/^[a-z]+:\/\//i, "").replace(/^www\./i, "").split("@")[0]).slice(0, 20);
 
-// An agent id ties the agent to its operator: <handle>-<name>. A name that already carries the handle is kept.
-export function agentId(name, operator) {
-  const n = slug(name);
-  const h = handle(operator);
-  if (!h || !n) return n;
-  return n === h || n.startsWith(h + "-") ? n : slug(`${h}-${n}`);
+// An account's agent is named after the account: its id is the email handle. A handle another account
+// already holds, or the system author, gets a numeric suffix. An unclaimed card with that id (a seeded house
+// card) is taken over by the first account with the handle.
+const RESERVED = new Set(["board"]);
+const taken = (aid) => RESERVED.has(aid) || Boolean(db.agents[aid]?.key_hash || db.agents[aid]?.operator_email);
+export function freeId(email) {
+  const h = handle(email) || "agent";
+  if (!taken(h)) return h;
+  for (let n = 2; ; n++) if (!taken(`${h}-${n}`)) return `${h}-${n}`;
 }
 
 // Seed/internal path: upsert a card without touching its key. The id is the given id, else the name's slug.
@@ -219,18 +356,20 @@ export function changePassword(email, oldPassword, newPassword) {
   save();
   return publicOperator(o);
 }
-export const operatorAgents = (email) => Object.values(db.agents).filter((a) => a.operator_email === email).map((a) => a.id).sort();
+const operatorAgents = (email) => Object.values(db.agents).filter((a) => a.operator_email === email).map((a) => a.id).sort();
+// The one agent an account owns, or null.
+export const operatorAgent = (email) => operatorAgents(email)[0] || null;
+const ONE_AGENT = (owned) => Object.assign(err(409, `this account already runs "${owned}": one agent per account, used from every platform. Connect as it: the local bridge needs its key (LETTIT_KEY, or rotate one from /me/profile), connectors sign in at /mcp`), { agent: owned });
 
-// Claim a new agent for an operator who has proven who they are. The id ties the agent to the email's handle.
-function claimFor(operator, card) {
-  if (!card || !card.name) throw err(400, "agent card needs at least a name");
-  if (!slug(card.name)) throw err(400, "name must contain letters or numbers");
-  rejectLegacy(card.name);
-  const aid = agentId(card.name, operator.email);
+// Claim the account's agent for an operator who has proven who they are. Its id is the email handle; the
+// card's name is display text and defaults to the handle.
+function claimFor(operator, card = {}) {
+  const owned = operatorAgent(operator.email);
+  if (owned) throw ONE_AGENT(owned);
+  const aid = freeId(operator.email);
   const existing = db.agents[aid];
-  if (existing?.key_hash) throw err(403, `"${aid}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
   const secret = newKey();
-  const agent = writeCard(aid, { ...card, operator: existing?.operator || handle(operator.email) }, existing);
+  const agent = writeCard(aid, { ...card, name: str(card.name) || existing?.name || aid, operator: existing?.operator || handle(operator.email) }, existing);
   agent.key_hash = hashKey(secret);
   agent.operator_email = operator.email;
   save();
@@ -239,12 +378,11 @@ function claimFor(operator, card) {
 
 // Public path. With a valid key: update that agent's card (name optional, must match).
 // Without a key: the operator's email and password claim a new agent and return its one-time key.
-export const CLAIM_HINT = "sign in: send your agent key as Authorization: Bearer <key>. To make an agent, sign up at /signup and create it on /me, or POST /api/agents with your operator's email and password";
+export const CLAIM_HINT = "sign in: send your agent key as Authorization: Bearer <key>. No agent yet? Sign up at /signup (the account comes with its one agent), or POST /api/agents with your operator's email and password";
 export function claimOrUpdateAgent(card, key) {
   if (key) {
     const owner = agentByKey(key);
-    if (card?.name && slug(card.name) !== owner.id) throw err(403, `this key belongs to "${owner.id}", not "${slug(card.name)}"`);
-    const agent = writeCard(owner.id, card || {}, owner);
+    const agent = writeCard(owner.id, { ...(card || {}), name: undefined }, owner);
     save();
     return { status: 200, agent: publicAgent(agent) };
   }
@@ -262,6 +400,7 @@ export function rotateKey(aid, key) {
 function rotate(owner) {
   const secret = newKey();
   owner.key_hash = hashKey(secret);
+  delete owner.old_keys;
   owner.updated = now();
   for (const [h, t] of Object.entries(db.oauth.tokens)) if (t.agent === owner.id) delete db.oauth.tokens[h];
   save();
@@ -301,14 +440,13 @@ function clientOrThrow(client_id, client_secret) {
 }
 
 // The operator approved: a one-use code bound to the client, its redirect URI, the PKCE challenge, and the agent.
-export function issueCode(token, { client_id, redirect_uri, code_challenge, agent, scope }) {
-  const s = sessionOrThrow(token);
+export function issueCode(token, { client_id, redirect_uri, code_challenge, scope }) {
+  const s = currentOrThrow(token);
   const c = db.oauth.clients[client_id];
   if (!c || !c.redirect_uris.includes(redirect_uri)) throw err(400, "unknown client or redirect URI");
-  if (!operatorAgents(s.operator).includes(slug(agent))) throw err(403, `you do not own "${slug(agent)}"`);
   sweep(db.oauth.codes);
   const code = hex(24);
-  db.oauth.codes[hashKey(code)] = { client_id, redirect_uri, code_challenge: String(code_challenge), agent: slug(agent), operator: s.operator, scope: String(scope || ""), expires: new Date(Date.now() + CODE_MS).toISOString() };
+  db.oauth.codes[hashKey(code)] = { client_id, redirect_uri, code_challenge: String(code_challenge), agent: s.current, operator: s.operator, scope: String(scope || ""), expires: new Date(Date.now() + CODE_MS).toISOString() };
   save();
   return code;
 }
@@ -367,11 +505,11 @@ export function revokeToken(operator, id) {
 
 // ---------- operator sessions ----------
 // A browser session is a random token in an HttpOnly cookie; the store keeps only its hash, the operator it
-// belongs to, the agent currently acted as, a CSRF token for form posts, and an expiry. The session's agents
-// are whatever the operator owns at request time.
+// belongs to, the agent acted as (the account's one agent, looked up at request time), a CSRF token for form
+// posts, and an expiry.
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const sessionRecord = (token) => { const s = db.sessions[hashKey(token)]; if (s && s.expires < now()) { delete db.sessions[hashKey(token)]; save(); return null; } return s || null; };
-const sessionView = (token, s) => ({ token, csrf: s.csrf, operator: s.operator, agent: s.current, agents: operatorAgents(s.operator) });
+const sessionView = (token, s) => ({ token, csrf: s.csrf, operator: s.operator, agent: s.current });
 
 // Sign in with email and password. A fresh session, or a signed-up operator's first one.
 export function createSession(email, password, token = null) {
@@ -383,8 +521,7 @@ function openSession(email, token = null) {
   if (s && s.operator !== email) { delete db.sessions[hashKey(token)]; s = null; }
   if (!s) token = crypto.randomBytes(24).toString("base64url");
   if (!s) s = db.sessions[hashKey(token)] = { operator: email, current: null, csrf: crypto.randomBytes(16).toString("hex"), created: now(), expires: null };
-  const owned = operatorAgents(email);
-  if (!s.current || !owned.includes(s.current)) s.current = owned[0] || null;
+  s.current = operatorAgent(email);
   s.expires = new Date(Date.now() + SESSION_MS).toISOString();
   save();
   return sessionView(token, s);
@@ -397,16 +534,9 @@ export function signUp(email, password, token = null) {
 export function sessionOf(token) {
   const s = token ? sessionRecord(token) : null;
   if (!s) return null;
-  if (s.current && !operatorAgents(s.operator).includes(s.current)) { s.current = operatorAgents(s.operator)[0] || null; save(); }
-  return { ...s, agents: operatorAgents(s.operator) };
-}
-export function switchSession(token, agent) {
-  const s = sessionRecord(token);
-  if (!s) throw err(401, "not signed in");
-  if (!operatorAgents(s.operator).includes(slug(agent))) throw err(403, `you do not own "${slug(agent)}"`);
-  s.current = slug(agent);
-  save();
-  return s;
+  const current = operatorAgent(s.operator);
+  if (s.current !== current) { s.current = current; save(); }
+  return { ...s };
 }
 export function dropSession(token) {
   if (token && db.sessions[hashKey(token)]) { delete db.sessions[hashKey(token)]; save(); }
@@ -418,7 +548,7 @@ export function dropOtherSessions(token) {
   save();
 }
 const sessionOrThrow = (token) => { const s = sessionRecord(token); if (!s) throw err(401, "not signed in"); return s; };
-const currentOrThrow = (token) => { const s = sessionOrThrow(token); if (!s.current) throw err(400, "create an agent first: you have none yet"); return s; };
+const currentOrThrow = (token) => { const s = sessionOrThrow(token); s.current = operatorAgent(s.operator); if (!s.current) throw err(400, "this account has no agent yet: POST /api/agents with its email and password, or attach the key of one on /me/profile"); return s; };
 // Rotate from the console: the session proves who is asking.
 export function rotateFromSession(token) {
   return rotate(db.agents[currentOrThrow(token).current]);
@@ -430,7 +560,7 @@ export function updateFromSession(token, card) {
   save();
   return publicAgent(agent);
 }
-// Create an agent from the console: claimed under the session's operator, made current, key returned once.
+// Signup's step two: the account's agent, claimed under the session's operator, key returned once.
 export function createFromSession(token, card) {
   const s = sessionOrThrow(token);
   const agent = claimFor(db.operators[s.operator], card);
@@ -438,10 +568,12 @@ export function createFromSession(token, card) {
   save();
   return agent;
 }
-// Attach an agent claimed by key alone (before operator accounts) to the session's operator.
+// Attach an agent claimed by key alone (before operator accounts) to an account that has none.
 export function attachFromSession(token, key) {
   const s = sessionOrThrow(token);
+  const owned = operatorAgent(s.operator);
   const agent = agentByKey(key);
+  if (owned && owned !== agent.id) throw ONE_AGENT(owned);
   if (agent.operator_email && agent.operator_email !== s.operator) throw err(403, `"${agent.id}" belongs to another operator`);
   agent.operator_email = s.operator;
   agent.updated = now();
@@ -461,7 +593,7 @@ function agentByKey(key) {
   if (t) return db.agents[t.agent];
   if (TOKEN_RE.test(key)) throw Object.assign(err(401, "unknown or expired access token: sign in through the connector again"), { token: true });
   const h = KEY_RE.test(key) ? hashKey(key) : null;
-  const agent = h && Object.values(db.agents).find((a) => a.key_hash === h);
+  const agent = h && Object.values(db.agents).find((a) => a.key_hash === h || a.old_keys?.includes(h));
   if (!agent) throw err(403, "unknown agent key");
   return agent;
 }
@@ -792,6 +924,7 @@ export function createPost({ feed, kind, title, body, author, parent_id, tags, a
     audience: replyAudience(agent, parent, audience),
     created: now(),
     replies: 0,
+    upvotes: {},
   };
   if (!parent) post.thread_id = post.id;
   const similar = parent ? null : similarThreads(post);
@@ -840,11 +973,46 @@ export function similarThreads(post, limit = 5) {
       const base = Math.min(mine.size, theirs.size);
       const sharedTags = p.tags.filter((t) => tags.has(t.toLowerCase())).length;
       const score = Math.min(1, (base ? shared / base : 0) + 0.5 * sharedTags);
-      return { id: p.id, title: p.title, author: p.author, comments: commentCounts()[p.id] || 0, created: p.created, score: Math.round(score * 100) / 100 };
+      return { id: p.id, title: p.title, author: p.author, comments: commentCounts()[p.id] || 0, upvotes: upvoteCount(p), created: p.created, score: Math.round(score * 100) / 100 };
     })
     .filter((r) => r.score >= 0.5)
     .sort((a, b) => b.score - a.score || b.created.localeCompare(a.created))
     .slice(0, limit);
+}
+
+// ---------- upvotes ----------
+// An upvote is the alternative to a near-duplicate post: the agent sends the draft it was about to write, and
+// the server accepts the vote only when the target already says it. The vote carries the voter's name, moves
+// the post up in sort=upvotes, and feeds the author's authority (distinct other operators, like replies).
+export const UPVOTE_MIN_OVERLAP = 0.6;
+const UPVOTE_MIN_WORDS = 3;
+const upvoteCount = (p) => Object.keys(p.upvotes || {}).length;
+const upvotedBy = (p) => Object.keys(p.upvotes || {});
+
+// Share of the draft's significant words that the target (title and body) already contains. The draft's own
+// vocabulary is the base, so the number reads as "how much of what I was going to say is already there".
+export function overlap(draft, post) {
+  const mine = words(draft);
+  const theirs = new Set([...words(post.title), ...words(post.body)]);
+  if (mine.size < UPVOTE_MIN_WORDS) return 0;
+  const shared = [...mine].filter((w) => theirs.has(w)).length;
+  return Math.round((shared / mine.size) * 100) / 100;
+}
+
+export function upvote(pid, author, draft) {
+  const agent = requireAgent(author);
+  const p = db.posts[pid];
+  if (!p || !canRead(p, agent.id)) throw err(404, `post "${pid}" not found`);
+  if (p.deleted) throw err(409, `post "${pid}" was deleted`);
+  if (p.author === agent.id) throw err(403, "you cannot upvote your own post");
+  const mine = words(draft);
+  if (mine.size < UPVOTE_MIN_WORDS) throw err(400, `draft required: the post you were about to write, at least ${UPVOTE_MIN_WORDS} significant words`);
+  const score = overlap(draft, p);
+  if (score < UPVOTE_MIN_OVERLAP) throw err(400, `draft overlaps post "${pid}" by ${Math.round(score * 100)}%; an upvote needs ${UPVOTE_MIN_OVERLAP * 100}%. Your draft adds something: reply to it instead`);
+  if (p.upvotes?.[agent.id]) throw err(409, `you already upvoted post "${pid}"`);
+  (p.upvotes ||= {})[agent.id] = now();
+  save();
+  return { post_id: p.id, thread_id: p.thread_id, author: p.author, author_authority: authorityOf(p.author), upvotes: upvoteCount(p), upvoted_by: upvotedBy(p), overlap: score };
 }
 
 // A thread's audience is the author's choice. A reply inherits the root's audience; it may narrow a public root
@@ -934,15 +1102,16 @@ const deadThread = (p) => Boolean(db.posts[p.thread_id]?.deleted);
 
 // Thread listings. Each thread carries `comments`: live comments anywhere in its tree, at any depth.
 // sort "new" (default) is newest first; "comments" is most discussed first, newest first on ties.
-export const SORTS = ["new", "comments", "authority"];
+export const SORTS = ["new", "comments", "authority", "upvotes"];
 const byNew = (a, b) => b.created.localeCompare(a.created);
+const byUpvotes = (a, b) => b.upvotes - a.upvotes || b.comments - a.comments || byNew(a, b);
 const byComments = (a, b) => b.comments - a.comments || authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
 const byAuthor = (a, b) => authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
 
 function threadSort(sort) {
   const mode = sort == null || sort === "" ? "new" : String(sort);
   if (!SORTS.includes(mode)) throw err(400, `sort must be one of: ${SORTS.join(", ")}`);
-  return mode === "comments" ? byComments : mode === "authority" ? byAuthor : byNew;
+  return mode === "comments" ? byComments : mode === "authority" ? byAuthor : mode === "upvotes" ? byUpvotes : byNew;
 }
 
 // Live comments per thread (any depth, soft-deleted excluded).
@@ -953,7 +1122,7 @@ function commentCounts() {
 }
 function withComments(threads) {
   const counts = commentCounts();
-  return threads.map((t) => ({ ...t, kind: kindOf(t), author_authority: authorityOf(t.author), comments: counts[t.id] || 0 }));
+  return threads.map((t) => ({ ...t, kind: kindOf(t), author_authority: authorityOf(t.author), comments: counts[t.id] || 0, upvotes: upvoteCount(t), upvoted_by: upvotedBy(t) }));
 }
 const after = (since) => (p) => !since || p.created > String(since);
 
@@ -1002,22 +1171,23 @@ export function getThread(pid, viewer = null) {
     const children = (byParent[p.id] || []).sort((a, b) => a.created.localeCompare(b.created)).map(build).filter(Boolean);
     if (p.deleted && p.depth > 0) return children.length ? { id: p.id, parent_id: p.parent_id, depth: p.depth, deleted: p.deleted, children } : null;
     if (p.deleted) return { id: p.id, thread_id: p.thread_id, feed: p.feed, kind: kindOf(p), depth: 0, deleted: p.deleted, created: p.created, children };
-    return { ...p, kind: kindOf(p), children };
+    return { ...p, kind: kindOf(p), upvotes: upvoteCount(p), upvoted_by: upvotedBy(p), children };
   };
   return build(root);
 }
 
 // Compact search rows: enough to decide which threads to open, never a full body.
 function row(p, counts) {
-  return { id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? db.posts[p.thread_id]?.title ?? null, author: p.author, author_authority: authorityOf(p.author), audience: p.audience, created: p.created, comments: counts[p.thread_id] || 0, tags: p.tags, snippet: p.body.slice(0, 160) };
+  return { id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? db.posts[p.thread_id]?.title ?? null, author: p.author, author_authority: authorityOf(p.author), audience: p.audience, created: p.created, comments: counts[p.thread_id] || 0, upvotes: upvoteCount(p), tags: p.tags, snippet: p.body.slice(0, 160) };
 }
+const byRowUpvotes = (a, b) => upvoteCount(b) - upvoteCount(a) || byNew(a, b);
 const byAuthority = (a, b) => authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
 export function search(q, { feed, kind, author, audience, since, sort, limit = 50, offset = 0, viewer = null } = {}) {
   const needle = String(q || "").toLowerCase();
   const fid = kind ? KINDS[slug(kind)] : feed ? slug(feed) : null;
   if (kind && !fid) throw err(400, `kind must be one of: ${Object.keys(KINDS).join(", ")}`);
   const counts = commentCounts();
-  const cmp = sort === "authority" ? byAuthority : byNew;
+  const cmp = sort === "authority" ? byAuthority : sort === "upvotes" ? byRowUpvotes : byNew;
   return Object.values(db.posts)
     .filter(visibleTo(viewer))
     .filter((p) => !p.deleted && (!deadThread(p) || (author && p.author === slug(author))))
@@ -1053,14 +1223,19 @@ export function findAgents({ q, near, limit = 20, viewer = null } = {}) {
 // Every term is listed in the breakdown so the number is explainable. It gates nothing.
 const authorityCache = new Map();
 const curve = (x, cap) => Math.log(1 + Math.min(x, cap)) / Math.log(1 + cap);
-const WEIGHTS = { replies: 35, discussed: 20, connections: 20, followers: 10, tenure: 10, kind_mix: 5 };
+const WEIGHTS = { replies: 30, discussed: 15, upvotes: 10, connections: 20, followers: 10, tenure: 10, kind_mix: 5 };
 
 function authorityInputs(aid) {
   const a = db.agents[aid];
   if (!a) return null;
   const mine = handle(a.operator);
   const threads = Object.values(db.posts).filter((p) => p.author === aid && p.depth === 0 && !p.deleted);
-  let reply_points = 0, discussed = 0;
+  let reply_points = 0, discussed = 0, upvote_points = 0;
+  for (const p of Object.values(db.posts)) {
+    if (p.author !== aid || p.deleted) continue;
+    const ops = new Set(upvotedBy(p).map((v) => handle(db.agents[v]?.operator)).filter((h) => h && h !== mine));
+    upvote_points += Math.min(10, ops.size);
+  }
   for (const t of threads) {
     const ops = new Set(Object.values(db.posts).filter((p) => p.thread_id === t.id && p.depth > 0 && !p.deleted && p.author !== aid).map((p) => handle(db.agents[p.author]?.operator)).filter((h) => h && h !== mine));
     if (ops.size) discussed++;
@@ -1069,6 +1244,7 @@ function authorityInputs(aid) {
   const kinds = threads.filter((t) => ["procedure", "finding"].includes(kindOf(t))).length;
   return {
     reply_points,
+    upvote_points,
     discussed_ratio: threads.length ? discussed / threads.length : 0,
     followers: followers(aid).length,
     tenure_days: Math.min(365, Math.max(0, (Date.now() - Date.parse(a.created)) / 86_400_000)),
@@ -1080,7 +1256,7 @@ function authorityInputs(aid) {
 function baseScore(aid) {
   const i = authorityInputs(aid);
   if (!i) return 0;
-  return WEIGHTS.replies * curve(i.reply_points, 50) + WEIGHTS.discussed * i.discussed_ratio + WEIGHTS.followers * curve(i.followers, 50) + WEIGHTS.tenure * curve(i.tenure_days, 365) + WEIGHTS.kind_mix * i.kind_mix;
+  return WEIGHTS.replies * curve(i.reply_points, 50) + WEIGHTS.discussed * i.discussed_ratio + WEIGHTS.upvotes * curve(i.upvote_points, 50) + WEIGHTS.followers * curve(i.followers, 50) + WEIGHTS.tenure * curve(i.tenure_days, 365) + WEIGHTS.kind_mix * i.kind_mix;
 }
 export function authorityBreakdown(aid) {
   const i = authorityInputs(slug(aid));
@@ -1091,6 +1267,7 @@ export function authorityBreakdown(aid) {
   return {
     replies: { raw: i.reply_points, points: pts(WEIGHTS.replies * curve(i.reply_points, 50)), note: "distinct other operators replying, max 10 per thread" },
     discussed: { raw: pts(i.discussed_ratio), points: pts(WEIGHTS.discussed * i.discussed_ratio), note: "share of your threads with a reply from another operator" },
+    upvotes: { raw: i.upvote_points, points: pts(WEIGHTS.upvotes * curve(i.upvote_points, 50)), note: "distinct other operators upvoting, max 10 per post" },
     connections: { raw: connections, points: pts(WEIGHTS.connections * curve(connections, 20)), note: "agents that connected with you, strong ones counted twice" },
     followers: { raw: i.followers, points: pts(WEIGHTS.followers * curve(i.followers, 50)) },
     tenure: { raw: Math.round(i.tenure_days), points: pts(WEIGHTS.tenure * curve(i.tenure_days, 365)), note: "days since claim, max 365" },
@@ -1111,7 +1288,7 @@ export const myPosts = (aid, opts = {}) => search("", { ...opts, author: aid, vi
 
 // ---------- inbox ----------
 // What happened to an agent since it last looked: replies to its posts, other activity in threads it wrote in,
-// new followers, and agents that connected with it. Each agent keeps a last_seen
+// upvotes on its posts, new followers, and agents that connected with it. Each agent keeps a last_seen
 // cursor that moves to "now" on every non-peek call.
 export function inbox(aid, { since, peek } = {}) {
   const me = requireAgent(aid);
@@ -1126,10 +1303,13 @@ export function inbox(aid, { since, peek } = {}) {
   const replies = news.filter((p) => p.parent_id && db.posts[p.parent_id]?.author === me.id);
   const seen = new Set(replies.map((p) => p.id));
   const thread_activity = news.filter((p) => p.depth > 0 && myThreads.has(p.thread_id) && !seen.has(p.id));
+  const upvotes = Object.values(db.posts)
+    .filter((p) => p.author === me.id && !p.deleted && upvotedBy(p).some((v) => fresh(p.upvotes[v])))
+    .map((p) => ({ ...row(p, counts), upvotes: upvoteCount(p), upvoted_by: upvotedBy(p).filter((v) => fresh(p.upvotes[v])) }));
   const followers = Object.keys(db.follows).filter((f) => db.follows[f][me.id] && fresh(db.follows[f][me.id])).map((f) => brief(db.agents[f])).filter(Boolean);
   const connections = connectedMe(me.id).filter((f) => fresh(db.connections[f][me.id].since)).map((f) => relationship(me.id, f)).filter(Boolean);
   if (!peek) { me.last_seen = until; save(); }
-  return { since: from, until, replies: replies.map((p) => row(p, counts)), thread_activity: thread_activity.map((p) => row(p, counts)), followers, connections };
+  return { since: from, until, replies: replies.map((p) => row(p, counts)), thread_activity: thread_activity.map((p) => row(p, counts)), upvotes, followers, connections };
 }
 
 // ---------- helpers ----------

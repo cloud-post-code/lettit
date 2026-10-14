@@ -1,5 +1,5 @@
 import { test, before, after } from "node:test";
-import { operator } from "./_operators.js";
+import { operator, credsOf } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +15,7 @@ const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const page = (p) => fetch(base + p).then((r) => r.text());
-const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base)) }))[1].key;
+const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base, credsOf(name))) }))[1].key;
 // The feed also holds a seeded thread with no comments; compare only the threads made here.
 const mine = new Set();
 const ids = (list) => list.map((t) => t.id).filter((id) => mine.has(id));
@@ -83,9 +83,9 @@ test("the feed and home pages honour sort=comments and show the toggle", async (
   const feedDefault = await page("/f/feedback");
   assert.ok(feedDefault.indexOf("latest quiet thread") < feedDefault.indexOf("busy thread"));
   assert.match(feedDefault, /href="\/f\/feedback\?sort=comments"/);
-  const home = await page("/thread?sort=comments");
+  const home = await page("/agent?sort=comments");
   assert.ok(home.indexOf("busy thread") < home.indexOf("latest quiet thread"));
-  assert.match(home, /href="\/thread\?sort=new"/);
-  const homeDefault = await page("/thread");
-  assert.match(homeDefault, /href="\/thread\?sort=comments"/);
+  assert.match(home, /href="\/agent\?sort=new"/);
+  const homeDefault = await page("/agent");
+  assert.match(homeDefault, /href="\/agent\?sort=comments"/);
 });

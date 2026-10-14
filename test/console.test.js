@@ -1,5 +1,5 @@
 import { test, before, after } from "node:test";
-import { operator, login, T } from "./_operators.js";
+import { operator, login, credsOf } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +15,7 @@ after(() => server.close());
 
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await api("/api/agents", { name, ...(await operator(base)) }))[1].key;
+const claim = async (name) => (await api("/api/agents", { name, ...(await operator(base, credsOf(name))) }))[1].key;
 const form = (p, fields, cookie) => fetch(base + p, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields).toString() });
 const page = (p, cookie) => fetch(base + p, { redirect: "manual", headers: cookie ? { cookie } : {} });
 const csrfOf = (html) => html.match(/name="csrf" value="([^"]+)"/)[1];
@@ -24,14 +24,14 @@ let ann, bob, cookie, csrf;
 test("login sets a hardened cookie, refuses bad passwords, and gates /me", async () => {
   ann = await claim("Ann");
   bob = await claim("Bob");
-  const bad = await form("/login", { email: T.email, password: "not-the-password" });
+  const bad = await form("/login", { email: credsOf("Ann").email, password: "not-the-password" });
   assert.equal(bad.status, 403);
   assert.equal(bad.headers.get("set-cookie"), null);
   assert.match(await bad.text(), /wrong email or password/);
   const gated = await page("/me");
   assert.equal(gated.status, 302);
   assert.equal(gated.headers.get("location"), "/login?next=%2Fme");
-  const ok = await form("/login", T);
+  const ok = await form("/login", credsOf("Ann"));
   assert.equal(ok.status, 302);
   assert.equal(ok.headers.get("location"), "/me");
   const set = ok.headers.get("set-cookie");
@@ -44,33 +44,28 @@ test("login sets a hardened cookie, refuses bad passwords, and gates /me", async
   assert.equal(me.status, 200);
   const html = await me.text();
   assert.match(html, /t-ann/);
-  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /you: t@x\.io · t-ann/);
+  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /you: t-ann@x\.io · t-ann/);
   assert.match(html, /name="csrf"/);
   assert.match(html, /my posts/);
   csrf = csrfOf(html);
   assert.ok(!html.includes(ann), "the key never appears on the page");
 });
 
-test("the card form needs the CSRF token; every owned agent is in the session; switch changes the viewer", async () => {
+test("the card form needs the CSRF token; a second sign-in reuses the session; there is nothing to switch to", async () => {
   const noToken = await form("/me", { description: "sneaky" }, cookie);
   assert.equal(noToken.status, 403);
   const ok = await form("/me", { csrf, operator: "ann@x.io", contact: "https://ann.x", description: "updated from the console" }, cookie);
   assert.equal(ok.status, 302);
   const card = await fetch(base + "/api/agents/t-ann").then((r) => r.json());
   assert.equal(card.description, "updated from the console");
-  assert.equal(card.operator, "ann@x.io");
-  const add = await form("/login", T, cookie);
+  assert.equal(card.operator, "ann", "an email typed into the console operator field is reduced to its handle");
+  const add = await form("/login", credsOf("Ann"), cookie);
   assert.equal(add.status, 302);
   assert.equal(add.headers.get("set-cookie"), null, "same session, no new cookie");
-  let html = await page("/me/profile", cookie).then((r) => r.text());
-  assert.match(html, /also yours: .*t-bob/, "the switcher lists the other owned agent");
-  const sw = await form("/me/switch", { csrf, agent: "t-bob" }, cookie);
-  assert.equal(sw.status, 302);
-  html = await page("/me/profile", cookie).then((r) => r.text());
-  assert.match(html, /you: t@x\.io · t-bob/);
-  const [, stranger] = await (await import("./_operators.js")).claimCard(base, { name: "Zed" }, { email: "zed@x.io", password: "zed-password-10" });
-  assert.equal((await form("/me/switch", { csrf, agent: stranger.id }, cookie)).status, 403, "only owned agents");
-  await form("/me/switch", { csrf, agent: "t-ann" }, cookie);
+  const html = await page("/me/profile", cookie).then((r) => r.text());
+  assert.doesNotMatch(html, /also yours|\/me\/switch|\/me\/create/, "one agent per account: no switcher, no add form");
+  assert.equal((await form("/me/switch", { csrf, agent: "t-bob" }, cookie)).status, 404);
+  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /you: t-ann@x\.io · t-ann/);
 });
 
 test("signed-in humans read and write as their agent; API writes with the cookie need the CSRF header", async () => {
@@ -88,11 +83,12 @@ test("signed-in humans read and write as their agent; API writes with the cookie
   const withCsrf = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf }, body: JSON.stringify({ kind: "status", body: "from the console" }) });
   assert.equal(withCsrf.status, 201);
   assert.equal((await withCsrf.json()).author, "t-ann");
-  const home = await page("/thread", cookie).then((r) => r.text());
+  const home = await page("/agent", cookie).then((r) => r.text());
   assert.match(home, /from the console/);
+  assert.ok(!home.includes('href="/me"'), "the board page never links to the profile, signed in or not");
   const landing = await page("/", cookie).then((r) => r.text());
-  assert.match(landing, /class="button" href="\/me">t-ann · profile/, "a signed-in operator gets a profile button");
-  assert.ok(!landing.includes('href="/login"'), "and no sign-in link");
+  assert.match(landing, /<div class="corner"><a href="\/me">t-ann<\/a> · <a href="\/me\/profile">profile<\/a><\/div>/, "the landing page names the agent in the top right, with a profile link");
+  assert.ok(!landing.includes('class="button" href="/me"'), "and no entry button below");
 });
 
 test("sessions survive a store reload; rotate shows the key once and keeps the operator signed in; logout clears", async () => {
@@ -107,7 +103,7 @@ test("sessions survive a store reload; rotate shows the key once and keeps the o
   assert.equal((await api("/api/posts", { kind: "status", body: "old key" }, ann))[0], 403);
   assert.equal((await api("/api/posts", { kind: "status", body: "new key" }, fresh))[0], 201);
   assert.equal((await page("/me", cookie)).status, 200, "the operator's session is untouched by a key rotation");
-  const c2 = await login(base);
+  const c2 = await login(base, credsOf("Ann"));
   const out = await form("/logout", { csrf: csrfOf(await page("/me", c2).then((r) => r.text())) }, c2);
   assert.equal(out.status, 302);
   assert.match(out.headers.get("set-cookie"), /Max-Age=0/);

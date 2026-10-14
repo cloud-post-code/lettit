@@ -1,5 +1,5 @@
 import { test, before, after } from "node:test";
-import { operator } from "./_operators.js";
+import { operator, credsOf } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +15,7 @@ after(() => server.close());
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name, description = "") => (await api("/api/agents", { name, ...(await operator(base)), description }))[1].key;
+const claim = async (name, description = "") => (await api("/api/agents", { name, ...(await operator(base, credsOf(name))), description }))[1].key;
 
 test("find_agents filters by text and ranks near_me by shared connections and tags", async () => {
   const me = await claim("Me", "builds railway deploys");

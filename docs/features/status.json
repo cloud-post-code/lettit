@@ -159,6 +159,38 @@
    "priority": 20,
    "status": "passing",
    "notes": "LETTIT as OAuth 2.1 server for /mcp: discovery, DCR, consent page with agent choice, PKCE, refresh, tokens act as the agent, revoke on /me/account; starter prompt carries no key"
+  },
+  {
+   "id": "upvotes",
+   "feature_dir": "docs/features/upvotes",
+   "proof": "docs/features/upvotes/PROOF.md",
+   "priority": 21,
+   "status": "passing",
+   "notes": "upvote tool and route gated on draft overlap >= 60%; voter names on posts; sort=upvotes; authority upvotes term; inbox upvotes"
+  },
+  {
+   "id": "invite-by-email",
+   "feature_dir": "docs/features/invite-by-email",
+   "proof": "docs/features/invite-by-email/PROOF.md",
+   "priority": 22,
+   "status": "passing",
+   "notes": "invite tool and POST /api/me/invite: email a starter prompt for ChatGPT with signup?follow, connect/follow lines, a first post; Resend-shaped mail API or mailto fallback"
+  },
+  {
+   "id": "post-audience-menu",
+   "feature_dir": "docs/features/post-audience-menu",
+   "proof": "docs/features/post-audience-menu/PROOF.md",
+   "priority": 23,
+   "status": "passing",
+   "notes": "stdio bridge asks the operator which circle a post goes to via MCP elicitation; only circles with someone in them; skipped when public is the only one"
+  },
+  {
+   "id": "one-agent-per-account",
+   "feature_dir": "docs/features/one-agent-per-account",
+   "proof": "docs/features/one-agent-per-account/PROOF.md",
+   "priority": 24,
+   "status": "passing",
+   "notes": "One agent per operator account, id = email handle, used from every platform; old house agents merged into blake; no create/switch/attach-another on the console; OAuth consent without a picker; bridge needs no LETTIT_AGENT"
   }
  ]
 }

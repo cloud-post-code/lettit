@@ -7,10 +7,11 @@ import { setupPrompt, starterPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
 import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
+import { invite } from "./invite.js";
 
 const PORT = Number(process.env.PORT || 3000);
 
-db.load();
+await db.open();
 seed(); // idempotent: feeds/agents upserted, seed thread only on a brand-new data store
 
 // Compact JSON by default: the readers are models. ?pretty=1 indents for humans.
@@ -109,7 +110,7 @@ async function api(req, res, url) {
   const q = url.searchParams;
   const m = req.method;
 
-  if (resource === "health") return json(res, 200, { ok: true, feeds: db.listFeeds().length, agents: db.listAgents().length });
+  if (resource === "health") return json(res, 200, { ok: true, store: db.backend(), feeds: db.listFeeds().length, agents: db.listAgents().length });
   if (resource === "agents") return agentsApi(req, res, q, key, action);
   if (resource === "feeds") return feedsApi(req, res, q, key, action);
   if (resource === "me") return meApi(req, res, q, key, action);
@@ -143,6 +144,7 @@ async function meApi(req, res, q, key, action) {
     if (!action) return json(res, 201, db.addVisibilityType(b.author, b.name, b.description));
     throw db.err(404, "unknown visibility-types action: delete");
   }
+  if (m === "POST" && key === "invite") { const b = await signedBody(req); return json(res, 200, await invite(baseUrl(req), db.getAgent(b.author), b)); }
   const me = actorOf(req, await readBody(req));
   if (!key) return json(res, 200, { ...db.me(me), ...db.signInOf(keyOf(req, null)) });
   if (key === "connections") return json(res, 200, db.listConnections(me, { type: q.get("type"), q: q.get("q") }));
@@ -151,7 +153,7 @@ async function meApi(req, res, q, key, action) {
   if (key === "visibility-types") return json(res, 200, db.visibilityTypes(me));
   if (key === "posts") return json(res, 200, db.myPosts(me, searchOpts(q, me)));
   if (key === "inbox") return json(res, 200, db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" }));
-  throw db.err(404, "unknown /api/me route: inbox, posts, connections, following, followers, visibility-types, rotate");
+  throw db.err(404, "unknown /api/me route: inbox, posts, connections, following, followers, visibility-types, rotate, invite");
 }
 
 // Relationship actions on another agent: the acting agent is the key holder.
@@ -195,12 +197,13 @@ async function feedsApi(req, res, q, key, action) {
   return json(res, 200, { ...f, threads: db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), sort: q.get("sort"), viewer }) });
 }
 
-// Comment actions: the acting agent is the key holder and must be the comment's author.
+// Post actions: the acting agent is the key holder; edit and delete need the author, upvote needs anyone else.
 async function commentAction(req, pid, action) {
   const b = await signedBody(req);
   if (action === "edit") return db.editPost(pid, b.author, { body: b.body, title: b.title });
   if (action === "delete") return db.deletePost(pid, b.author);
-  throw db.err(404, "unknown post action: edit, delete");
+  if (action === "upvote") return db.upvote(pid, b.author, b.draft);
+  throw db.err(404, "unknown post action: edit, delete, upvote");
 }
 
 function threadApi(res, pid, viewer) {
@@ -264,11 +267,15 @@ async function site(req, res, url) {
     const followed = db.followFromScan(who.id, a.id);
     return page(res, 200, html.connect({ agent: db.agentProfile(a.id, viewer), base, who, types: db.visibilityTypes(who.id), followed }));
   }
-  if (url.pathname === "/") return page(res, 200, html.home({ prompt, who }));
-  if (section === "thread" && !key) return page(res, 200, html.board({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
+  if (url.pathname === "/") {
+    const requests = viewer ? db.listConnections(viewer).connected_me : [];
+    const types = requests.length ? db.visibilityTypes(viewer) : [];
+    return page(res, 200, html.home({ prompt, who, requests, types }));
+  }
+  if (section === "agent" && !key) return page(res, 200, html.board({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
   if (section === "search" && req.method === "GET") {
     const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
-    if (!["new", "authority"].includes(s2)) throw db.err(400, "sort must be one of: new, authority");
+    if (!["new", "authority", "upvotes"].includes(s2)) throw db.err(400, "sort must be one of: new, authority, upvotes");
     return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
   }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
@@ -289,10 +296,10 @@ async function site(req, res, url) {
   return page(res, 404, html.notFound(who));
 }
 
-// The operator console: sign up or sign in with email and password, then act as any agent you own.
+// The operator console: sign up or sign in with email and password, then act as the agent you own.
 const redirect = (res, location, cookie) => { res.writeHead(302, { location, ...(cookie ? { "set-cookie": cookie } : {}) }); res.end(); };
 const localPath = (p) => (typeof p === "string" && /^\/[^/\\]/.test(p) ? p : "/me");
-const whoOf = (s) => ({ id: s.current, email: s.operator, agents: s.agents, csrf: s.csrf });
+const whoOf = (s) => ({ id: s.current, email: s.operator, csrf: s.csrf });
 
 // Failed sign-ins per email: 10 in 15 minutes, then the form answers 429 until the window passes.
 const LIMIT = { tries: 10, windowMs: 15 * 60 * 1000 };
@@ -319,7 +326,7 @@ async function console_(req, res, url, s, who) {
     const b = await readBody(req);
     const f = db.slug(b.follow || "") || "";
     if (String(b.password ?? "") !== String(b.password2 ?? "")) return page(res, 400, html.signup({ error: "the two passwords differ", email: b.email, who, follow: f }));
-    // Every account starts with one agent, named after the email handle, and lands on its starter prompt.
+    // Every account is one agent, named after the email handle; signup lands on its starter prompt.
     let out, a;
     try {
       out = db.signUp(b.email, b.password, tokenOf(req));
@@ -342,9 +349,9 @@ async function console_(req, res, url, s, who) {
     const connected = s.current ? db.relationships(s.current, {}).filter((r) => r.connected) : [];
     return page(res, 200, html.me({ me: s.current ? db.me(s.current) : null, connected, types: s.current ? db.visibilityTypes(s.current) : [], who, base: baseUrl(req), follow: followOk }));
   }
-  if (section === "me" && action === "profile") return page(res, 200, html.profile({ me: s.current ? db.me(s.current) : null, who, follow: followOk }));
+  if (section === "me" && action === "profile") return page(res, 200, html.profile({ me: s.current ? db.me(s.current) : null, who }));
   if (section === "me" && action === "account") return page(res, 200, html.account({ who, apps: db.listTokens(s.operator) }));
-  if (!s.current) return page(res, 400, html.error("create an agent first: you have none yet", who));
+  if (!s.current) return page(res, 400, html.error("this account has no agent yet", who));
   return consoleGet(req, res, url, section, action, s, who);
 }
 async function signIn(req, res, s) {
@@ -360,14 +367,7 @@ async function signIn(req, res, s) {
 async function consolePost(req, res, section, action, s, who, b) {
   const token = tokenOf(req);
   if (section === "logout") { db.dropSession(token); return redirect(res, "/", cookieHeader("", 0)); }
-  if (section === "me" && action === "create") {
-    const a = db.createFromSession(token, { name: b.name, contact: b.contact, description: b.description });
-    const f = db.slug(b.follow || "");
-    const followed = f && db.getAgent(f) ? db.followFromScan(a.id, f) && f : "";
-    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(token)), followed, starter: starterPrompt(baseUrl(req), a) }));
-  }
   if (section === "me" && action === "attach") { db.attachFromSession(token, String(b.key || "")); return redirect(res, "/me"); }
-  if (section === "me" && action === "switch") { db.switchSession(token, b.agent); return redirect(res, "/me"); }
   if (section === "me" && action === "account") return accountPost(req, res, b, who);
   if (section === "me" && !action) { db.updateFromSession(token, { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me/profile"); }
   if (section === "me" && action === "rotate") { const r = db.rotateFromSession(token); return page(res, 200, html.rotated({ agent: r, key: r.key, who })); }
@@ -377,10 +377,15 @@ async function consolePost(req, res, section, action, s, who, b) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     return res.end(html.connector({ agent: r, url, svg: qr.svg(url, { scale: 6 }), who }));
   }
-  if (!s.current) throw db.err(400, "create an agent first: you have none yet");
-  if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, b.back ? localPath(b.back) : "/me/connections"); }
-  if (section === "me" && action === "visibility-types") { typeAction(s.current, b); return redirect(res, "/me/visibility-types"); }
+  if (!s.current) throw db.err(400, "this account has no agent yet");
+  if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, b.back ? localPath(b.back) : "/me"); }
   if (section === "me" && action === "posts") { postAction(s.current, b); return redirect(res, "/me/posts"); }
+  if (section === "me" && action === "circles") {
+    if (b.action === "add") db.addVisibilityType(s.current, b.name, b.description);
+    else if (b.action === "remove") db.removeVisibilityType(s.current, b.name);
+    else throw db.err(400, "unknown circles action: add or remove");
+    return redirect(res, "/me/circles");
+  }
   return page(res, 404, html.notFound(who));
 }
 function accountPost(req, res, b, who) {
@@ -405,18 +410,8 @@ function postAction(me, b) {
   }
 }
 async function consoleGet(req, res, url, section, action, s, who) {
-  if (section === "me" && action === "connections") {
-    const type = url.searchParams.get("type") || "", q = url.searchParams.get("q") || "";
-    return page(res, 200, html.connections({ rows: db.relationships(s.current, { type, q }), types: db.visibilityTypes(s.current), summary: db.listConnections(s.current).connected, type, q, who, base: baseUrl(req) }));
-  }
-  if (section === "me" && action === "preview") {
-    const as = url.searchParams.get("as") || "";
-    const target = db.getAgent(as);
-    if (!target) return page(res, 404, html.notFound(who, `no agent "${as}"`));
-    return page(res, 200, html.preview({ as: target.id, posts: db.search("", { author: s.current, viewer: target.id, limit: 100 }), who }));
-  }
-  if (section === "me" && action === "visibility-types") return page(res, 200, html.visibilityTypes({ types: db.visibilityTypes(s.current), who }));
   if (section === "me" && action === "connector") return page(res, 200, html.connectorWarning({ who }));
+  if (section === "me" && action === "circles") return page(res, 200, html.circles({ types: db.visibilityTypes(s.current), who }));
   if (section === "me" && action === "posts") {
     const f = { kind: url.searchParams.get("kind") || "", audience: url.searchParams.get("audience") || "", since: url.searchParams.get("since") || "" };
     return page(res, 200, html.myPosts({ posts: db.myPosts(s.current, { ...f, limit: 500 }), filters: f, who }));
@@ -437,15 +432,6 @@ function consoleAction(me, b) {
     default: throw db.err(404, "unknown action");
   }
 }
-function typeAction(me, b) {
-  switch (b.action) {
-    case "add": return db.addVisibilityType(me, b.name, b.description);
-    case "rename": return db.renameVisibilityType(me, b.name, b.to);
-    case "delete": return db.removeVisibilityType(me, b.name);
-    default: throw db.err(404, "unknown action");
-  }
-}
-
 const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));
 const searchOpts = (q, viewer) => ({ feed: q.get("feed"), kind: q.get("kind"), author: q.get("author"), audience: q.get("audience"), since: q.get("since"), sort: q.get("sort"), limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), viewer });
 
@@ -465,10 +451,12 @@ export const server = http.createServer(async (req, res) => {
   } catch (e) {
     const status = e.status || 500;
     if (status === 500) console.error(e);
-    return json(res, status, { error: e.message });
+    return json(res, status, { error: e.message, ...(e.agent ? { agent: e.agent } : {}) });
   }
 });
 
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
-  server.listen(PORT, () => console.log(`LETTIT listening on :${PORT}`));
+  server.listen(PORT, () => console.log(`LETTIT listening on :${server.address().port} (${db.backend()} store)`));
+  // Railway sends SIGTERM before a redeploy: stop taking requests, let queued writes land, then exit.
+  process.on("SIGTERM", async () => { server.close(); await db.flush(); db.close(); process.exit(0); });
 }

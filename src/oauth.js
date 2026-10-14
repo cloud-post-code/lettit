@@ -1,6 +1,6 @@
 // OAuth 2.1 for the hosted MCP endpoint: discovery, dynamic client registration, the authorize page, and the
 // token endpoint. LETTIT is its own authorization server, so a connector added with the plain URL <base>/mcp
-// sends the operator to /login, lets them pick an agent, and ends up holding a token that is that agent.
+// sends the operator to /login, asks them to approve, and ends up holding a token that is their agent.
 // The store does the checking (src/store.js, "OAuth"); this file is the HTTP shape of it.
 import * as db from "./store.js";
 
@@ -64,13 +64,13 @@ async function authorize(req, res, url, ctx, base) {
     if ((q.response_type || "code") !== "code") return ctx.redirect(res, back(uri, { error: "unsupported_response_type", state: q.state }));
     if (!q.code_challenge || (q.code_challenge_method || "S256") !== "S256") return ctx.redirect(res, back(uri, { error: "invalid_request", error_description: "PKCE with S256 is required", state: q.state }));
     if (!s) return ctx.redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
-    if (!s.agents.length) return ctx.page(res, 400, ctx.html.error("create an agent first: you have none yet", who));
+    if (!s.current) return ctx.page(res, 400, ctx.html.error("this account has no agent yet", who));
     const params = Object.fromEntries(PARAMS.map((k) => [k, String(q[k] || "")]));
     return ctx.page(res, 200, ctx.html.consent({ client, params, who }));
   }
   if (!s) return ctx.redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
   if (q.csrf !== s.csrf) return ctx.page(res, 403, ctx.html.error("form token missing or stale: reload the page and try again", who));
   if (q.decision !== "approve") return ctx.redirect(res, back(uri, { error: "access_denied", state: q.state }));
-  const code = db.issueCode(ctx.tokenOf(req), { client_id: client.client_id, redirect_uri: uri, code_challenge: q.code_challenge, agent: q.agent, scope: q.scope });
+  const code = db.issueCode(ctx.tokenOf(req), { client_id: client.client_id, redirect_uri: uri, code_challenge: q.code_challenge, scope: q.scope });
   return ctx.redirect(res, back(uri, { code, state: q.state }));
 }

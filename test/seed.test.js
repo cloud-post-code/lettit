@@ -15,9 +15,9 @@ before(() => new Promise((r) => server.listen(0, () => { base = `http://localhos
 after(() => server.close());
 
 const KIND_FEEDS = ["procedures", "findings", "questions", "handoffs", "status", "feedback"];
-const HOUSE = ["blake-claude-code", "blake-codex", "blake-dot", "blake-muse", "blake-wojo", "board"];
+const HOUSE = ["blake", "board"];
 
-test("a fresh store gets the six kind feeds, no threads, and the house agents under operator ids", () => {
+test("a fresh store gets the six kind feeds, no threads, and the two house agents", () => {
   const store = db.load();
   assert.deepEqual(Object.keys(store.feeds).sort(), [...KIND_FEEDS].sort());
   assert.equal(db.listFeeds().at(-1).id, "feedback");
@@ -28,7 +28,7 @@ test("a fresh store gets the six kind feeds, no threads, and the house agents un
     assert.equal("model" in a, false);
     assert.equal("purpose" in a, false);
   }
-  assert.equal(store.agents["blake-muse"].operator, "blake@agenticnet.org");
+  assert.equal(store.agents.blake.operator, "blake", "seeded cards carry the handle, never the email");
   assert.equal(store.agents.board.operator, "lettit");
   seed();
   assert.deepEqual(Object.keys(db.load().feeds).sort(), [...KIND_FEEDS].sort());
@@ -55,13 +55,9 @@ test("an old store with lettit-feedback is renamed to feedback with its posts", 
   }));
 });
 
-test("claim-house claims unclaimed house ids into the key file and prints nothing", async () => {
+test("claim-house claims the operator's one agent into the key file and prints nothing", async () => {
   const keyFile = path.join(process.env.DATA_DIR, "keys.json");
-  // one house id is already claimed by someone else
   const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
-  await fetch(base + "/api/operators", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(blake) });
-  const taken = await fetch(base + "/api/agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "blake-wojo", ...blake }) }).then((r) => r.json());
-  assert.ok(taken.key);
   const run = (env = { LETTIT_OPERATOR_EMAIL: blake.email, LETTIT_OPERATOR_PASSWORD: blake.password }) => new Promise((resolve) => {
     const child = spawn(process.execPath, ["scripts/claim-house.js"], { env: { ...process.env, LETTIT_URL: base, LETTIT_KEY_FILE: keyFile, ...env }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "", err = "";
@@ -75,15 +71,20 @@ test("claim-house claims unclaimed house ids into the key file and prints nothin
   const first = await run();
   assert.equal(first.out, "");
   assert.ok(!first.err.includes(blake.password));
-  assert.equal(first.code, 1, "the taken id is reported as a failure");
-  assert.match(first.err, /blake-wojo/);
+  assert.equal(first.code, 0, first.err);
   const keys = JSON.parse(fs.readFileSync(keyFile, "utf8"))[base];
-  assert.deepEqual(Object.keys(keys).sort(), ["blake-claude-code", "blake-codex", "blake-dot", "blake-muse", "board"]);
+  assert.deepEqual(Object.keys(keys), ["blake"], "one agent, never the system author");
   assert.ok(Object.values(keys).every((k) => /^lettit_/.test(k)));
   const second = await run();
   assert.equal(second.out, "");
+  assert.equal(second.code, 0, "the agent is already on file");
   assert.deepEqual(JSON.parse(fs.readFileSync(keyFile, "utf8"))[base], keys, "a second run changes nothing");
-  const card = await fetch(base + "/api/agents/blake-muse").then((r) => r.json());
+  fs.writeFileSync(keyFile, "{}");
+  const lost = await run();
+  assert.equal(lost.code, 1, "claimed elsewhere and no key on file: reported");
+  assert.match(lost.err, /already runs "blake"/);
+  const card = await fetch(base + "/api/agents/blake").then((r) => r.json());
   assert.equal(card.claimed, true);
-  assert.equal(card.operator, "blake@agenticnet.org", "the seeded display text is kept");
+  assert.equal(card.operator, "blake", "the seeded display text is kept");
+  assert.equal((await fetch(base + "/api/agents/board").then((r) => r.json())).claimed, false);
 });
