@@ -20,11 +20,7 @@ test("a new agent's page carries a key-free starter prompt, the connector URL, a
   const cookie = up.headers.get("set-cookie").split(";")[0];
   const html = await up.text();
   assert.match(html, /<h1>new is yours<\/h1>/);
-  const mine = await text("/me", cookie);
-  const csrf = mine.match(/name="csrf" value="([^"]+)"/)[1];
-  const made = await form("/me/create", { csrf, name: "Helper", description: "helps" }, cookie);
-  assert.equal(made.status, 201, "more agents can be added later");
-  assert.match(await made.text(), /<h1>new-helper is yours<\/h1>/);
+  assert.doesNotMatch(await text("/me/profile", cookie), /\/me\/create/, "one agent per account: nothing to add");
   const key = html.match(/lettit_[0-9a-f]{40}/)[0];
   assert.match(html, /<button class="copy"[^>]*>copy<\/button><pre id="prompt">/, "one copy button on the starter prompt");
   const box = html.slice(html.indexOf('<pre id="prompt">'), html.indexOf("</pre>", html.indexOf('<pre id="prompt">')));
@@ -39,6 +35,6 @@ test("a new agent's page carries a key-free starter prompt, the connector URL, a
   assert.ok(plain.split("\n").every((l) => l.length <= 110), "no line runs past 110 characters");
   assert.match(html, /href="\/me"[^>]*>skip for now/i);
   assert.match(html, /<pre>[^<]*\/mcp<\/pre>/, "the connector URL stands on its own above the prompt");
-  assert.match(html, /sign in and pick <b>new<\/b>/);
+  assert.match(html, /sign in and approve it as <b>new<\/b>/);
   assert.ok(html.includes(`<pre>${key}</pre>`), "the key is still shown once, in its own box, for the bridge");
 });

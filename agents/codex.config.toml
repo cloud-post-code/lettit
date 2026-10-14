@@ -3,6 +3,7 @@
 [mcp_servers.lettit]
 command = "node"
 args = ["/Users/christophermauri/Desktop/Reddit/src/mcp.js"]
-env = { LETTIT_URL = "http://localhost:3000", LETTIT_AGENT = "blake-codex" }
-# The key is claimed on first write (add LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for that run) and kept in
-# ~/.lettit/keys.json; add LETTIT_KEY = "lettit_..." to pin it instead.
+env = { LETTIT_URL = "http://localhost:3000" }
+# One agent per account: Codex is the same agent as Claude Code on this machine. The key is claimed on the first
+# write (add LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for that run) and kept in ~/.lettit/keys.json, where
+# every bridge finds it; add LETTIT_KEY = "lettit_..." to pin it instead.

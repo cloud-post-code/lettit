@@ -13,7 +13,7 @@ after(() => server.close());
 
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const api = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name, op = "t") => (await api("/api/agents", { name, ...(await operator(base, { email: op.includes("@") ? op : `${op}@x.io`, password: "test-password-10" })) }))[1].key;
+const claim = async (name, op = name) => (await api("/api/agents", { name, ...(await operator(base, { email: op.includes("@") ? op : `${op}@x.io`, password: "test-password-10" })) }))[1].key;
 const form = (p, fields, cookie) => fetch(base + p, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields).toString() });
 const text = (p, cookie) => fetch(base + p, { redirect: "manual", headers: cookie ? { cookie } : {} }).then(async (r) => [r.status, await r.text()]);
 

@@ -1,5 +1,5 @@
 import { test, before, after } from "node:test";
-import { claimCard, login, T } from "./_operators.js";
+import { claimCard, login, T, credsOf } from "./_operators.js";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -25,12 +25,13 @@ const call = async (name, args, token) => {
 const s256 = (v) => crypto.createHash("sha256").update(v).digest("base64url");
 const REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect";
 
-let client, cookie, remy, pat;
+let client, cookie, remyCookie, remy, pat;
 before(async () => {
   await new Promise((r) => server.listen(0, () => { base = `http://localhost:${server.address().port}`; r(); }));
   [, remy] = await claimCard(base, { name: "Remy" });
   [, pat] = await claimCard(base, { name: "Pat" });
-  cookie = await login(base);
+  cookie = await login(base, credsOf("Pat"));
+  remyCookie = await login(base, credsOf("Remy"));
 });
 
 test("discovery documents point at LETTIT's own authorization server, and anonymous /mcp is challenged", async () => {
@@ -81,28 +82,28 @@ test("a client registers itself; authorize validates the redirect URI and sends 
 });
 
 let token, refresh;
-test("a signed-in operator picks the agent, approves, and the code exchanges for tokens that act as that agent", async () => {
+test("a signed-in operator approves, and the code exchanges for tokens that act as the account's agent", async () => {
   const verifier = crypto.randomBytes(32).toString("base64url");
   const q = new URLSearchParams({ response_type: "code", client_id: client.client_id, redirect_uri: REDIRECT, code_challenge: s256(verifier), code_challenge_method: "S256", state: "st-1", scope: "mcp" });
   const pageRes = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } });
   assert.equal(pageRes.status, 200);
   const html = await pageRes.text();
   assert.match(html, /ChatGPT/, "names the client");
-  assert.match(html, /name="agent" value="t-remy"/);
-  assert.match(html, /name="agent" value="t-pat"/);
+  assert.match(html, /act as <b>t-pat<\/b>/, "the account's one agent, no picker");
+  assert.ok(!html.includes('type="radio"'));
   const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];
   const fields = Object.fromEntries([...html.matchAll(/name="(client_id|redirect_uri|code_challenge|code_challenge_method|state|scope)" value="([^"]*)"/g)].map((m) => [m[1], m[2]]));
   assert.equal(fields.client_id, client.client_id);
 
-  const denied = await form("/oauth/authorize", { csrf, ...fields, agent: "t-pat", decision: "cancel" }, cookie);
+  const denied = await form("/oauth/authorize", { csrf, ...fields, decision: "cancel" }, cookie);
   assert.equal(denied.status, 302);
   assert.equal(denied.headers.get("location"), `${REDIRECT}?error=access_denied&state=st-1`);
 
   const foreign = await form("/oauth/authorize", { csrf, ...fields, agent: "nobody-else", decision: "approve" }, cookie);
-  assert.equal(foreign.status, 403, "only an agent the operator owns can be chosen");
+  assert.equal(foreign.status, 302, "a stray agent field changes nothing: the token is the account's agent");
 
   const approve = async () => {
-    const ok = await form("/oauth/authorize", { csrf, ...fields, agent: "t-pat", decision: "approve" }, cookie);
+    const ok = await form("/oauth/authorize", { csrf, ...fields, decision: "approve" }, cookie);
     assert.equal(ok.status, 302);
     const dest = new URL(ok.headers.get("location"));
     assert.equal(dest.origin + dest.pathname, REDIRECT);
@@ -195,10 +196,10 @@ test("a client registered with client_secret_basic sends its credentials in the 
   assert.ok(c.client_secret);
   const verifier = "b".repeat(43);
   const q = new URLSearchParams({ response_type: "code", client_id: c.client_id, redirect_uri: "http://localhost:4444/cb", code_challenge: s256(verifier), code_challenge_method: "S256", state: "s3" });
-  const html = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } }).then((r) => r.text());
+  const html = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie: remyCookie } }).then((r) => r.text());
   const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];
   const fields = Object.fromEntries([...html.matchAll(/name="(client_id|redirect_uri|code_challenge|code_challenge_method|state|scope)" value="([^"]*)"/g)].map((m) => [m[1], m[2]]));
-  const ok = await form("/oauth/authorize", { csrf, ...fields, agent: "t-remy", decision: "approve" }, cookie);
+  const ok = await form("/oauth/authorize", { csrf, ...fields, decision: "approve" }, remyCookie);
   const code = new URL(ok.headers.get("location")).searchParams.get("code");
   const basic = "Basic " + Buffer.from(`${c.client_id}:${c.client_secret}`).toString("base64");
   const [s, t] = await jsonPost("/oauth/token", { grant_type: "authorization_code", code, redirect_uri: "http://localhost:4444/cb", code_verifier: verifier }, { authorization: basic });
@@ -213,10 +214,10 @@ test("rotating the agent's key revokes its tokens; a confidential client must pr
   assert.ok(c.client_secret);
   const verifier = "v".repeat(43);
   const q = new URLSearchParams({ response_type: "code", client_id: c.client_id, redirect_uri: "http://localhost:3333/cb", code_challenge: s256(verifier), code_challenge_method: "S256", state: "s2" });
-  const html = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } }).then((r) => r.text());
+  const html = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie: remyCookie } }).then((r) => r.text());
   const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];
   const fields = Object.fromEntries([...html.matchAll(/name="(client_id|redirect_uri|code_challenge|code_challenge_method|state|scope)" value="([^"]*)"/g)].map((m) => [m[1], m[2]]));
-  const ok = await form("/oauth/authorize", { csrf, ...fields, agent: "t-remy", decision: "approve" }, cookie);
+  const ok = await form("/oauth/authorize", { csrf, ...fields, decision: "approve" }, remyCookie);
   const code = new URL(ok.headers.get("location")).searchParams.get("code");
   const [sNo, eNo] = await jsonPost("/oauth/token", { grant_type: "authorization_code", code, client_id: c.client_id, redirect_uri: "http://localhost:3333/cb", code_verifier: verifier });
   assert.equal(sNo, 401);

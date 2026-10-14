@@ -16,6 +16,7 @@ const KEY_FILE = path.join(process.env.DATA_DIR, "keys.json");
 const CODEX_KEY = "lettit_" + "c".repeat(40);
 const CLAUDE_KEY = "lettit_" + "d".repeat(40);
 const ANN_KEY = "lettit_" + "a".repeat(40);
+const BOT_KEY = "lettit_" + "b".repeat(40);
 const hash = (k) => crypto.createHash("sha256").update(k).digest("hex");
 const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
 const ann = { email: "ann@x.io", password: "ann-password-10" };
@@ -26,9 +27,10 @@ fs.writeFileSync(FILE, JSON.stringify({
     "blake-codex": agent("blake-codex", CODEX_KEY, blake.email, "2026-01-01T00:00:00.000Z", { visibility_types: { public: { builtin: true }, friend: { builtin: true }, colleague: { builtin: true }, client: { description: "paying" } } }),
     "blake-claude-code": agent("blake-claude-code", CLAUDE_KEY, blake.email, "2026-01-02T00:00:00.000Z", { contact: "https://claude.com/claude-code" }),
     ann: agent("ann", ANN_KEY, ann.email, "2026-01-01T00:00:00.000Z"),
+    "ann-bot": agent("ann-bot", BOT_KEY, ann.email, "2026-01-02T00:00:00.000Z"), // not a house id: merged by owner
   },
   feeds: { status: { id: "status", name: "status", created_by: "blake-codex", created: "2026-01-01T00:00:00.000Z", posts: 3 } },
-  posts: { p1: post("p1", "blake-codex", { upvotes: { "blake-claude-code": "2026-02-02T00:00:00.000Z", ann: "2026-02-02T00:00:00.000Z" } }), p2: post("p2", "blake-claude-code"), p3: post("p3", "ann") },
+  posts: { p1: post("p1", "blake-codex", { upvotes: { "blake-claude-code": "2026-02-02T00:00:00.000Z", ann: "2026-02-02T00:00:00.000Z" } }), p2: post("p2", "blake-claude-code"), p3: post("p3", "ann"), p4: post("p4", "ann-bot") },
   follows: { ann: { "blake-codex": "2026-01-03T00:00:00.000Z" }, "blake-claude-code": { ann: "2026-01-03T00:00:00.000Z", "blake-codex": "2026-01-03T00:00:00.000Z" } },
   connections: { "blake-codex": { ann: { types: ["colleague"], since: "2026-01-03T00:00:00.000Z" } }, "blake-claude-code": { ann: { types: ["friend"], since: "2026-01-04T00:00:00.000Z" } }, ann: { "blake-claude-code": { types: ["friend"], since: "2026-01-04T00:00:00.000Z" } } },
   oauth: { clients: {}, codes: {}, tokens: { tok1: { id: "t1", client_id: "c", agent: "blake-claude-code", operator: blake.email, scope: "", created: "2026-01-05T00:00:00.000Z", last_used: null, refresh_hash: "r", expires: "2099-01-01T00:00:00.000Z", refresh_expires: "2099-01-01T00:00:00.000Z" } } },
@@ -51,8 +53,11 @@ test("an operator's agents are merged into one named after the handle: posts, fo
   const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
   assert.ok(raw.migrated["one-agent"]);
   assert.deepEqual(Object.keys(raw.agents).sort(), ["ann", "blake", "board"]);
+  assert.deepEqual([raw.agents.ann.posts, raw.agents.ann.key_hash, raw.agents.ann.old_keys, raw.posts.p4.author], [2, hash(ANN_KEY), [hash(BOT_KEY)], "ann"], "any account with several agents keeps the one named after its handle");
+  assert.equal((await get("/api/agents/ann-bot"))[0], 404);
   const b = raw.agents.blake;
-  assert.equal(b.key_hash, hash(CODEX_KEY), "the earliest agent's key survives");
+  assert.equal(b.key_hash, hash(CODEX_KEY), "the earliest agent's key is the main one");
+  assert.deepEqual(b.old_keys, [hash(CLAUDE_KEY)]);
   assert.equal(b.operator_email, blake.email);
   assert.equal(b.posts, 2);
   assert.equal(b.contact, "https://claude.com/claude-code", "an empty field takes the other card's value");
@@ -68,7 +73,9 @@ test("an operator's agents are merged into one named after the handle: posts, fo
   const [s, t] = await api("/api/posts", { kind: "status", body: "still me" }, CODEX_KEY);
   assert.equal(s, 201, t.error);
   assert.equal(t.author, "blake");
-  assert.equal((await api("/api/posts", { kind: "status", body: "gone" }, CLAUDE_KEY))[0], 403, "the merged agent's key is dead");
+  const [s2, t2] = await api("/api/posts", { kind: "status", body: "from the other platform" }, CLAUDE_KEY);
+  assert.equal(s2, 201, "the merged agent's key keeps working until the next rotation");
+  assert.equal(t2.author, "blake");
   const [, me] = await get("/api/me", CODEX_KEY);
   assert.deepEqual([me.id, me.following, me.followers, me.connections, me.connected_me], ["blake", 1, 1, 1, 1]);
   const [s404, e] = await get("/api/agents/blake-claude-code");

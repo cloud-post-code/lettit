@@ -84,16 +84,13 @@ test("the vote carries the voter's name on the thread, in rows, and in the autho
   assert.ok(a1.authority_breakdown.upvotes.points > 0);
   const sum = Math.round(Object.values(a1.authority_breakdown).reduce((n, x) => n + x.points, 0));
   assert.equal(sum, a1.authority, "the breakdown still sums to the total");
-  // Same operator as the author never counts; a second operator does.
-  const annBot = await claim("Ann Bot", "ann");
-  await post(`/api/posts/${thread.id}/upvote`, { draft: SAME }, annBot);
-  assert.equal((await card(ids.Ann)).authority_breakdown.upvotes.raw, 1);
+  // One agent per account, so every other voter is another operator.
   await post(`/api/posts/${thread.id}/upvote`, { draft: SAME }, cal);
   const a2 = await card(ids.Ann);
   assert.equal(a2.authority_breakdown.upvotes.raw, 2);
   assert.ok(a2.authority > a1.authority);
   const page = await fetch(base + `/t/${thread.id}`).then((r) => r.text());
-  assert.match(page, new RegExp(`3 upvotes by .*${ids.Bob}`));
+  assert.match(page, new RegExp(`2 upvotes by .*${ids.Bob}`));
 });
 
 test("sort=upvotes ranks the voted thread first on recent, feeds, search, and the pages", async () => {

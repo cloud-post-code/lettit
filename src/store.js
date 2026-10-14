@@ -73,7 +73,8 @@ function migrateOneAgent() {
   return true;
 }
 // Fold every agent named as a key of map into the agent named by its value, everywhere an id is stored.
-// Olds are merged earliest first, so the earliest claimed key is the one that survives.
+// Olds are merged earliest first; every merged key keeps working (old_keys) until the next rotation, so no
+// platform that held one of them is locked out.
 function mergeAgents(map) {
   const olds = Object.keys(map).filter((old) => db.agents[old] && map[old] !== old).sort((a, b) => String(db.agents[a].created || "").localeCompare(String(db.agents[b].created || "")) || a.localeCompare(b));
   if (!olds.length) return;
@@ -83,7 +84,8 @@ function mergeAgents(map) {
     const t = db.agents[map[old]];
     if (!t) db.agents[map[old]] = { ...a, id: map[old], name: map[old] };
     else {
-      t.key_hash ||= a.key_hash;
+      if (a.key_hash && !t.key_hash) t.key_hash = a.key_hash;
+      else if (a.key_hash) (t.old_keys ||= []).push(a.key_hash);
       t.operator_email ||= a.operator_email;
       for (const f of ["contact", "description", "operator"]) t[f] ||= a[f];
       t.posts = (t.posts || 0) + (a.posts || 0);
@@ -261,7 +263,7 @@ const KEY_RE = /^lettit_[0-9a-f]{40}$/;
 const newKey = () => "lettit_" + crypto.randomBytes(20).toString("hex");
 const hashKey = (key) => crypto.createHash("sha256").update(String(key)).digest("hex");
 // Public view of an agent: never the key hash.
-const publicAgent = ({ key_hash, visibility_types, operator_email, ...a }) => ({ ...a, claimed: Boolean(key_hash), authority: authorityOf(a.id) });
+const publicAgent = ({ key_hash, old_keys, visibility_types, operator_email, ...a }) => ({ ...a, claimed: Boolean(key_hash), authority: authorityOf(a.id) });
 
 function writeCard(aid, card, existing) {
   const agent = {
@@ -276,6 +278,8 @@ function writeCard(aid, card, existing) {
     key_hash: existing?.key_hash || null,
     operator_email: existing?.operator_email || null,
     visibility_types: existing?.visibility_types,
+    ...(existing?.old_keys ? { old_keys: existing.old_keys } : {}),
+    ...(existing?.last_seen ? { last_seen: existing.last_seen } : {}),
   };
   ensureTypes(agent);
   db.agents[aid] = agent;
@@ -396,6 +400,7 @@ export function rotateKey(aid, key) {
 function rotate(owner) {
   const secret = newKey();
   owner.key_hash = hashKey(secret);
+  delete owner.old_keys;
   owner.updated = now();
   for (const [h, t] of Object.entries(db.oauth.tokens)) if (t.agent === owner.id) delete db.oauth.tokens[h];
   save();
@@ -588,7 +593,7 @@ function agentByKey(key) {
   if (t) return db.agents[t.agent];
   if (TOKEN_RE.test(key)) throw Object.assign(err(401, "unknown or expired access token: sign in through the connector again"), { token: true });
   const h = KEY_RE.test(key) ? hashKey(key) : null;
-  const agent = h && Object.values(db.agents).find((a) => a.key_hash === h);
+  const agent = h && Object.values(db.agents).find((a) => a.key_hash === h || a.old_keys?.includes(h));
   if (!agent) throw err(403, "unknown agent key");
   return agent;
 }

@@ -56,19 +56,19 @@ test("writes need the key; author comes from the key", async () => {
   assert.equal(t2.author, "t-writer");
 });
 
-test("a claimed name cannot be re-claimed; the key updates the card and can be rotated", async () => {
+test("an account's agent cannot be claimed twice; the key updates the card but not the name, and can be rotated", async () => {
   const [, card] = await claimCard(base, { name: "Rotor", description: "old" });
   const [again, e1] = await claimCard(base, { name: "Rotor", description: "hijack" });
-  assert.equal(again, 403);
-  assert.match(e1.error, /claimed/i);
+  assert.equal(again, 409);
+  assert.match(e1.error, /already runs "t-rotor"/);
   const [upd, updated] = await post("/api/agents", { description: "new" }, card.key);
   assert.equal(upd, 200);
   assert.equal(updated.id, "t-rotor");
   assert.equal(updated.description, "new");
   assert.equal(updated.key, undefined);
-  const [wrongName, e2] = await post("/api/agents", { name: "Someone Else" }, card.key);
-  assert.equal(wrongName, 403);
-  assert.match(e2.error, /t-rotor/);
+  const [renamed, same] = await post("/api/agents", { name: "Someone Else" }, card.key);
+  assert.equal(renamed, 200);
+  assert.deepEqual([same.id, same.name], ["t-rotor", "Rotor"], "the name is set once, at the claim");
   const [rot, rotated] = await post("/api/agents/t-rotor/rotate", {}, card.key);
   assert.equal(rot, 200);
   assert.match(rotated.key, /^lettit_/);
@@ -81,18 +81,19 @@ test("a claimed name cannot be re-claimed; the key updates the card and can be r
   assert.equal(noKeyRotate, 401);
 });
 
-test("seeded house agents stay unclaimed until their operator claims them once", async () => {
+test("the seeded house agent stays unclaimed until its operator claims it once, from any platform", async () => {
   const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
-  const [anon, e] = await post("/api/agents", { name: "blake-codex" });
+  const [anon, e] = await post("/api/agents", { name: "blake" });
   assert.equal(anon, 401, "no claim without the operator's credentials");
   assert.match(e.error, /\/signup/);
-  const [s1, codex] = await claimCard(base, { name: "blake-codex" }, blake);
+  const [s1, me] = await claimCard(base, {}, blake);
   assert.equal(s1, 201);
-  assert.equal(codex.id, "blake-codex", "the seeded id is kept, not doubled");
-  assert.match(codex.key, /^lettit_/);
-  assert.equal(codex.description.startsWith("Codex session"), true, "the seeded card text is kept");
-  const [s2] = await claimCard(base, { name: "blake-codex" }, blake);
-  assert.equal(s2, 403);
-  const [w] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, codex.key);
+  assert.equal(me.id, "blake", "the seeded card is the account's agent");
+  assert.match(me.key, /^lettit_/);
+  assert.equal(me.description.startsWith("Blake's agent"), true, "the seeded card text is kept");
+  const [s2, e2] = await claimCard(base, { name: "codex" }, blake);
+  assert.equal(s2, 409, "a second platform does not get a second agent");
+  assert.match(e2.error, /already runs "blake"/);
+  const [w] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, me.key);
   assert.equal(w, 201);
 });

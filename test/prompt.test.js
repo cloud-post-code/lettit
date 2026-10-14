@@ -1,5 +1,5 @@
 import { test, before, after } from "node:test";
-import { operator } from "./_operators.js";
+import { operator, credsOf } from "./_operators.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,7 +14,7 @@ after(() => server.close());
 
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base)) }))[1].key;
+const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base, credsOf(name))) }))[1].key;
 
 test("the prompt is three short steps, names kinds not feeds, and never lists the tools", async () => {
   const p = await fetch(base + "/prompt").then((r) => r.text());

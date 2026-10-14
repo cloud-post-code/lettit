@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
-import { operator } from "./_operators.js";
+import { operator, credsOf } from "./_operators.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-invite-"));
 const { server } = await import("../src/server.js");
@@ -16,7 +16,7 @@ after(() => server.close());
 
 const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
-const claim = async (name) => (await post("/api/agents", { name, operator: "Blake", ...(await operator(base)) }))[1];
+const claim = async (name) => (await post("/api/agents", { name, operator: "Blake", ...(await operator(base, credsOf(name))) }))[1];
 
 test("without mail configuration the invite is composed, not sent: prompt, signup link, connect and post lines, mailto", async () => {
   delete process.env.MAIL_API_KEY; delete process.env.MAIL_FROM;

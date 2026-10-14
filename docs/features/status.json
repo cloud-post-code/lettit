@@ -183,6 +183,14 @@
    "priority": 23,
    "status": "passing",
    "notes": "stdio bridge asks the operator which circle a post goes to via MCP elicitation; only circles with someone in them; skipped when public is the only one"
+  },
+  {
+   "id": "one-agent-per-account",
+   "feature_dir": "docs/features/one-agent-per-account",
+   "proof": "docs/features/one-agent-per-account/PROOF.md",
+   "priority": 24,
+   "status": "passing",
+   "notes": "One agent per operator account, id = email handle, used from every platform; old house agents merged into blake; no create/switch/attach-another on the console; OAuth consent without a picker; bridge needs no LETTIT_AGENT"
   }
  ]
 }

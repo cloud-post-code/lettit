@@ -41,21 +41,22 @@ test("1. POST /api/operators creates an account once and never shows the passwor
 });
 
 let key;
-test("2. a claim with the operator's email and password returns the key once; ids carry the email handle", async () => {
+test("2. a claim with the operator's email and password returns the key once; the id is the email handle", async () => {
   const [s, card] = await post("/api/agents", { name: "Scout", ...ann, contact: "https://ann.example", description: "finds things" });
   assert.equal(s, 201);
-  assert.equal(card.id, "ann-scout");
+  assert.equal(card.id, "ann");
+  assert.equal(card.name, "Scout");
   assert.equal(card.operator, "ann");
   assert.match(card.key, /^lettit_[0-9a-f]{40}$/);
   key = card.key;
   for (const k of ["operator_email", "password", "password_hash", "email"]) assert.equal(card[k], undefined, k);
-  const [, pub] = await get("/api/agents/ann-scout");
+  const [, pub] = await get("/api/agents/ann");
   assert.equal(pub.key, undefined);
   assert.equal(pub.operator_email, undefined);
   assert.equal(pub.claimed, true);
   const [w, t] = await post("/api/posts", { kind: "status", title: "hi", body: "x" }, key);
   assert.equal(w, 201);
-  assert.equal(t.author, "ann-scout");
+  assert.equal(t.author, "ann");
 });
 
 test("3. a wrong password is 403; no credentials and no key is 401 naming /signup; the old anonymous claim is gone", async () => {
@@ -74,7 +75,7 @@ test("3. a wrong password is 403; no credentials and no key is 401 naming /signu
 });
 
 let cookie, csrf;
-test("4. /signup sets a hardened cookie, creates the first agent, and shows its key once; more agents come from /me", async () => {
+test("4. /signup sets a hardened cookie, creates the account's one agent, and shows its key once", async () => {
   const mismatch = await form("/signup", { email: "bob@x.io", password: "bob-password-1", password2: "bob-password-2" });
   assert.equal(mismatch.status, 400);
   assert.match(await mismatch.text(), /differ/);
@@ -99,25 +100,16 @@ test("4. /signup sets a hardened cookie, creates the first agent, and shows its 
   assert.match(prof, /you: bob@x\.io · bob/);
   assert.ok(!/· profile ·|my posts/.test(prof), "the profile page nav has no profile or my posts items");
   assert.ok(!html.includes(firstKey[0]), "the first key is nowhere else");
-  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /action="\/me\/create"/);
+  assert.doesNotMatch(prof, /action="\/me\/create"|action="\/me\/switch"/, "one agent per account: nothing to add or switch");
   csrf = csrfOf(html);
-  const noToken = await form("/me/create", { name: "Helper" }, cookie);
-  assert.equal(noToken.status, 403);
-  const made = await form("/me/create", { csrf, name: "Helper", description: "helps" }, cookie);
-  assert.equal(made.status, 201);
-  html = await made.text();
-  const shown = html.match(/lettit_[0-9a-f]{40}/);
-  assert.ok(shown, "the key is on the page");
-  assert.ok(!(await page("/me", cookie).then((r) => r.text())).includes(shown[0]), "and nowhere else");
-  const [, card] = await get("/api/agents/bob-helper");
+  assert.equal((await form("/me/create", { csrf, name: "Helper" }, cookie)).status, 404);
+  const [, card] = await get("/api/agents/bob");
   assert.equal(card.claimed, true);
-  const now = await page("/me/profile", cookie).then((r) => r.text());
-  assert.match(now, /you: bob@x\.io · bob-helper/);
   const [w, t] = await post("/api/posts", { kind: "status", title: "by cookie", body: "x" }, null).catch(() => [0]);
   assert.notEqual(w, 201, "the cookie alone never writes through the API");
   const viaCookie = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf }, body: JSON.stringify({ kind: "status", title: "by cookie", body: "x" }) });
   assert.equal(viaCookie.status, 201);
-  assert.equal((await viaCookie.json()).author, "bob-helper");
+  assert.equal((await viaCookie.json()).author, "bob");
   void t;
 });
 
@@ -134,7 +126,7 @@ test("5. /login takes email and password; the key field is refused; 10 failures 
   const annCookie = cookieOf(ok);
   const acct = await page("/me/account", annCookie);
   assert.equal(acct.status, 200);
-  assert.match(await acct.text(), /ann-scout/);
+  assert.match(await acct.text(), /ann/);
   const victim = { email: "carl@x.io", password: "carl-password-1" };
   await post("/api/operators", victim);
   for (let i = 0; i < 10; i++) assert.equal((await form("/login", { email: victim.email, password: "wrong-wrong-1" })).status, 403);
@@ -144,7 +136,7 @@ test("5. /login takes email and password; the key field is refused; 10 failures 
   assert.equal((await form("/login", { email: ann.email, password: ann.password })).status, 302, "other emails are unaffected");
 });
 
-test("6. an agent claimed by key alone can be attached by its key; one owned by someone else cannot", async () => {
+test("6. an agent claimed by key alone can be attached by an account with no agent; not by one that has its agent", async () => {
   // A pre-account agent: written straight into the store as the old claim path left it.
   server.close();
   const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
@@ -157,14 +149,26 @@ test("6. an agent claimed by key alone can be attached by its key; one owned by 
   base = `http://localhost:${server.address().port}`;
   const html = await page("/me", cookie).then((r) => r.text());
   csrf = csrfOf(html);
-  const wrong = await form("/me/attach", { csrf, key: "lettit_" + "1".repeat(40) }, cookie);
+  const has = await form("/me/attach", { csrf, key: orphanKey }, cookie);
+  assert.equal(has.status, 409, "bob already runs bob");
+  assert.match(await has.text(), /already runs &quot;bob&quot;/);
+  // An account made over the API, with no agent yet: the attach form is offered and works.
+  const gil = { email: "gil@x.io", password: "gil-password-10" };
+  await post("/api/operators", gil);
+  const gilCookie = cookieOf(await form("/login", gil));
+  const prof = await page("/me/profile", gilCookie).then((r) => r.text());
+  assert.match(prof, /action="\/me\/attach"/);
+  const gilCsrf = csrfOf(prof);
+  const wrong = await form("/me/attach", { csrf: gilCsrf, key: "lettit_" + "1".repeat(40) }, gilCookie);
   assert.equal(wrong.status, 403);
-  const ok = await form("/me/attach", { csrf, key: orphanKey }, cookie);
+  const ok = await form("/me/attach", { csrf: gilCsrf, key: orphanKey }, gilCookie);
   assert.equal(ok.status, 302);
-  assert.match(await page("/me/profile", cookie).then((r) => r.text()), /you: bob@x\.io · old-orphan/);
-  const annCookie = cookieOf(await form("/login", { email: ann.email, password: ann.password }));
-  const annCsrf = csrfOf(await page("/me", annCookie).then((r) => r.text()));
-  const taken = await form("/me/attach", { csrf: annCsrf, key: orphanKey }, annCookie);
+  assert.match(await page("/me/profile", gilCookie).then((r) => r.text()), /you: gil@x\.io · old-orphan/);
+  const hal = { email: "hal@x.io", password: "hal-password-10" };
+  await post("/api/operators", hal);
+  const halCookie = cookieOf(await form("/login", hal));
+  const halCsrf = csrfOf(await page("/me", halCookie).then((r) => r.text()));
+  const taken = await form("/me/attach", { csrf: halCsrf, key: orphanKey }, halCookie);
   assert.equal(taken.status, 403);
   assert.match(await taken.text(), /another operator/);
 });
@@ -185,7 +189,6 @@ test("7. changing the password signs other sessions out, keeps this one, and ret
 });
 
 test("8. rotating a key from /me keeps the operator signed in", async () => {
-  await form("/me/switch", { csrf, agent: "bob-helper" }, cookie);
   const rot = await form("/me/rotate", { csrf }, cookie);
   assert.equal(rot.status, 200);
   assert.match(await rot.text(), /lettit_[0-9a-f]{40}/);
@@ -212,23 +215,25 @@ function bridge(env) {
 
 test("9. the bridge claims with the operator's credentials on first write, saves only the key, and names the variables when they are missing", async () => {
   const keyFile = path.join(process.env.DATA_DIR, "keys.json");
-  const bare = bridge({ LETTIT_AGENT: "ann-bridge", LETTIT_KEY_FILE: keyFile });
+  const ivy = { email: "ivy@x.io", password: "ivy-password-10" };
+  await post("/api/operators", ivy);
+  const bare = bridge({ LETTIT_KEY_FILE: keyFile });
   try {
     const [e, msg] = await bare.call("post", { kind: "status", title: "t", body: "b" });
     assert.equal(e, true);
     assert.match(msg, /LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD/);
   } finally { bare.close(); }
-  const b = bridge({ LETTIT_AGENT: "ann-bridge", LETTIT_KEY_FILE: keyFile, LETTIT_OPERATOR_EMAIL: ann.email, LETTIT_OPERATOR_PASSWORD: ann.password });
+  const b = bridge({ LETTIT_KEY_FILE: keyFile, LETTIT_OPERATOR_EMAIL: ivy.email, LETTIT_OPERATOR_PASSWORD: ivy.password });
   try {
     const [e, t] = await b.call("post", { kind: "status", title: "from the bridge", body: "b" });
     assert.equal(e, false, t);
-    assert.equal(t.author, "ann-bridge");
+    assert.equal(t.author, "ivy");
     const saved = fs.readFileSync(keyFile, "utf8");
-    assert.match(JSON.parse(saved)[base]["ann-bridge"], /^lettit_/);
-    assert.ok(!saved.includes(ann.password), "the password never lands in the key file");
-    assert.ok(!b.stderr().includes(ann.password));
+    assert.match(JSON.parse(saved)[base].ivy, /^lettit_/);
+    assert.ok(!saved.includes(ivy.password), "the password never lands in the key file");
+    assert.ok(!b.stderr().includes(ivy.password));
   } finally { b.close(); }
-  const again = bridge({ LETTIT_AGENT: "ann-bridge", LETTIT_KEY_FILE: keyFile });
+  const again = bridge({ LETTIT_KEY_FILE: keyFile });
   try {
     const [e, t] = await again.call("post", { kind: "status", title: "second run", body: "no credentials needed" });
     assert.equal(e, false, t);
@@ -242,38 +247,35 @@ test("10. the setup prompt sends agents to /signup and /api/operators, not to an
   assert.match(prompt, /"email":"<their email>","password":"<their password>"/);
   assert.ok(!prompt.includes('"operator":"<who runs you'), "the operator-only claim is gone");
   assert.match(prompt, /never keep or post the\npassword/);
-  for (const p of ["/login", "/connect/ann-scout"]) assert.match(await fetch(base + p).then((r) => r.text()), /\/signup|#signup/, p);
+  for (const p of ["/login", "/connect/ann"]) assert.match(await fetch(base + p).then((r) => r.text()), /\/signup|#signup/, p);
   assert.match(await fetch(base + "/agent").then((r) => r.text()), /href="\/join"/, "the board page reaches signup through the join QR");
 });
 
-test("12. a scanned card carries a newcomer through signup and onboarding, and the first agent follows it", async () => {
-  const landing = await page("/connect/ann-scout");
+test("12. a scanned card carries a newcomer through signup and onboarding, and the new agent follows it", async () => {
+  const landing = await page("/connect/ann");
   assert.equal(landing.status, 302);
-  assert.equal(landing.headers.get("location"), "/signup?follow=ann-scout");
-  const signup = await page("/signup?follow=ann-scout").then((r) => r.text());
+  assert.equal(landing.headers.get("location"), "/signup?follow=ann");
+  const signup = await page("/signup?follow=ann").then((r) => r.text());
   assert.match(signup, /will follow it/);
-  assert.match(signup, /name="follow" value="ann-scout"/);
-  assert.match(signup, /href="\/login\?next=%2Fconnect%2Fann-scout"/);
-  const made = await form("/signup", { email: "dee@x.io", password: "dee-password-10", password2: "dee-password-10", follow: "ann-scout" });
+  assert.match(signup, /name="follow" value="ann"/);
+  assert.match(signup, /href="\/login\?next=%2Fconnect%2Fann"/);
+  const made = await form("/signup", { email: "dee@x.io", password: "dee-password-10", password2: "dee-password-10", follow: "ann" });
   assert.equal(made.status, 201);
-  assert.match(await made.text(), /It now follows <a href="\/agents\/ann-scout">/, "the automatic first agent follows the scanned one");
+  assert.match(await made.text(), /It now follows <a href="\/agents\/ann">/, "the account's agent follows the scanned one");
   const dee = cookieOf(made);
-  const [, prof] = await get("/api/agents/ann-scout", key);
+  const [, prof] = await get("/api/agents/ann", key);
   assert.ok(prof.followers >= 1);
   const [, following] = await fetch(base + "/api/me/following", { headers: { cookie: dee } }).then(async (r) => [r.status, await r.json()]);
-  assert.ok(following.some((x) => x.id === "ann-scout"), JSON.stringify(following));
-  const me = await page("/me", dee).then((r) => r.text());
-  const created = await form("/me/create", { csrf: csrfOf(me), name: "Buddy" }, dee);
-  assert.equal(created.status, 201, "more agents can be added later");
-  // Signed in with an agent: a scan just follows.
-  const scan = await page("/connect/bob-helper", dee);
+  assert.ok(following.some((x) => x.id === "ann"), JSON.stringify(following));
+  // Signed in: a scan just follows.
+  const scan = await page("/connect/bob", dee);
   assert.equal(scan.status, 200);
-  assert.match(await scan.text(), /You now follow bob-helper as dee-buddy/);
+  assert.match(await scan.text(), /You now follow bob as dee/);
   // A fresh account already has an agent, so a scan just follows.
   const eve = cookieOf(await form("/signup", { email: "eve@x.io", password: "eve-password-10", password2: "eve-password-10" }));
-  const scanEve = await page("/connect/ann-scout", eve);
+  const scanEve = await page("/connect/ann", eve);
   assert.equal(scanEve.status, 200);
-  assert.match(await scanEve.text(), /You now follow ann-scout as eve/);
+  assert.match(await scanEve.text(), /You now follow ann as eve/);
   // A bogus follow target on signup is ignored.
   const bogus = await form("/signup", { email: "fay@x.io", password: "fay-password-10", password2: "fay-password-10", follow: "nobody-here" });
   assert.equal(bogus.status, 201);
@@ -283,7 +285,7 @@ test("12. a scanned card carries a newcomer through signup and onboarding, and t
 test("11. a data file with an old key-based session loads with that session dropped; keys still work", async () => {
   server.close();
   const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
-  raw.sessions.deadbeef = { agents: ["ann-scout"], current: "ann-scout", csrf: "x", created: "2026-01-01T00:00:00.000Z", expires: "2999-01-01T00:00:00.000Z" };
+  raw.sessions.deadbeef = { agents: ["ann"], current: "ann", csrf: "x", created: "2026-01-01T00:00:00.000Z", expires: "2999-01-01T00:00:00.000Z" };
   fs.writeFileSync(FILE, JSON.stringify(raw));
   const { load } = await import("../src/store.js");
   load();

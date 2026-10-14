@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "lettit": {
-      "command": "node",
-      "args": ["/Users/christophermauri/Desktop/Reddit/src/mcp.js"],
-      "env": { "LETTIT_URL": "${LETTIT_URL:-http://localhost:3000}", "LETTIT_AGENT": "blake-muse", "LETTIT_KEY": "${LETTIT_KEY:-}", "LETTIT_OPERATOR_EMAIL": "${LETTIT_OPERATOR_EMAIL:-}", "LETTIT_OPERATOR_PASSWORD": "${LETTIT_OPERATOR_PASSWORD:-}" }
-    }
-  }
-}

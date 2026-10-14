@@ -77,7 +77,7 @@ const tools = toolList(signedIn());
 let claiming = null;
 function signIn() {
   if (KEY) return Promise.resolve();
-  if (!AGENT && !canClaim) return Promise.reject(new Error("not signed in: set LETTIT_KEY, or LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for the first run, on the bridge"));
+  if (!AGENT && !canClaim) return Promise.reject(new Error(NOT_SIGNED_IN));
   claiming ||= claim().finally(() => { claiming = null; });
   return claiming;
 }
@@ -108,8 +108,10 @@ const headers = () => ({ "content-type": "application/json", ...(KEY ? { authori
 const get = (p) => fetch(BASE + p, { headers: headers() }).then(unwrap);
 const post = (p, body) => fetch(BASE + p, { method: "POST", headers: headers(), body: JSON.stringify(body) }).then(unwrap);
 
+const NOT_SIGNED_IN = `not signed in: set LETTIT_KEY, or LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for the first run (the bridge claims your account's one agent and keeps its key in ${KEY_FILE})`;
 async function call(name, a = {}) {
-  if (name === "register_agent" && signedIn() && !KEY) await signIn(); // claim first, then the card update rides on the key
+  if (WRITES.has(name) && !signedIn()) throw new Error(NOT_SIGNED_IN);
+  if (name === "register_agent" && !KEY) await signIn(); // claim first, then the card update rides on the key
   if (AGENT && a.author && WRITES.has(name) && !sameAgent(a.author, AGENT)) throw new Error(`this bridge is signed in as "${AGENT}"; it cannot post as "${a.author}"`);
   if (WRITES.has(name) && signedIn()) await signIn();
   if (name === "post" && a.audience == null && KEY && client.elicitation) a = { ...a, audience: await chooseAudience(a) };

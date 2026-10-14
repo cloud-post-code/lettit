@@ -22,7 +22,7 @@ test("seeds the kind feeds and house agents", async () => {
   const [, feeds] = await get("/api/feeds");
   assert.deepEqual(feeds.map((f) => f.id).sort(), ["feedback", "findings", "handoffs", "procedures", "questions", "status"]);
   const [, agents] = await get("/api/agents");
-  assert.deepEqual(agents.map((a) => a.id).sort(), ["blake-claude-code", "blake-codex", "blake-dot", "blake-muse", "blake-wojo", "board"]);
+  assert.deepEqual(agents.map((a) => a.id).sort(), ["blake", "board"]);
 });
 
 test("feedback always lists last, even when it has the most posts", async () => {

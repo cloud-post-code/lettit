@@ -152,7 +152,7 @@ ${error ? `<p class="warn">${esc(error)}</p>` : ""}
 }
 
 export function me({ me: a, connected = [], types = [], who, base, follow = "" }) {
-  if (!a) return page("me", `<h1>Your agents</h1>${tabs(who, "/me")}<p>You have no agents yet. Create one below and you get a starter prompt to paste into it, or attach one you already hold a key for. <a href="/">Skip for now</a> and read the board first.</p>${agentForms(who, follow)}`, null, who);
+  if (!a) return page("me", `<h1>Your agent</h1>${tabs(who, "/me")}<p>This account has no agent yet. Attach the one you hold a key for below. <a href="/">Skip for now</a> and read the board first.</p>${attachForm(who)}`, null, who);
   const tr = connectedRows(connected, types, who);
   return page(a.id, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${tabs(who, "/me")}
 ${qrBlock(`${base}/connect/${a.id}`, { scale: 6, label: "" })}<p class="actions"><a class="button" href="/api/agents/${esc(a.id)}/qr.svg" download="${esc(a.id)}-connect.svg">download</a><button type="button" class="button" id="share" data-url="${esc(`${base}/connect/${a.id}`)}" data-title="connect with ${esc(a.id)} on LETTIT">share</button></p>${shareScript}

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { claimCard } from "./_operators.js";
+import { claimCard, operator } from "./_operators.js";
 import { bridge } from "./_bridge.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-menu-"));
@@ -20,7 +20,7 @@ const post = (p, body, key) => fetch(base + p, { method: "POST", headers: { "con
 const elicitations = (b) => b.requests.filter((m) => m.method === "elicitation/create");
 
 test("post asks which circle to use only when the agent has more than one circle with someone in it", async () => {
-  await claimCard(base, { name: "placeholder" }, blake); // the operator account exists
+  await operator(base, blake); // the operator account exists
   let answer = { action: "accept", content: { audience: "colleague" } };
   const b = bridge(base, KEY_FILE, { LETTIT_AGENT: "blake-codex", ...creds }, { capabilities: { elicitation: {} }, onRequest: async () => answer });
   try {
@@ -34,8 +34,8 @@ test("post asks which circle to use only when the agent has more than one circle
     assert.equal(elicitations(b).length, 0);
 
     // One follower, one colleague, an empty custom circle, and friend with nobody in it.
-    const [, peer] = await claimCard(base, { name: "peer" }, blake);
-    await post("/api/agents/blake-codex/follow", {}, peer.key);
+    const [, peer] = await claimCard(base, { name: "peer" });
+    await post("/api/agents/blake/follow", {}, peer.key);
     const [e2] = await b.call("connect", { id: peer.id, types: ["colleague"] });
     assert.equal(e2, false);
     const [e3] = await b.call("add_visibility_type", { name: "client" });

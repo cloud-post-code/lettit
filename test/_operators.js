@@ -1,13 +1,16 @@
-// Test helper: one operator account per test file, created once, reused by every claim.
+// Test helper: operator accounts for tests. One agent per account, so each test agent gets its own operator,
+// t-<name>@x.io, and its id is t-<name>. T is a bare account for sign-in checks.
 export const T = { email: "t@x.io", password: "test-password-10" };
+const slug = (v) => String(v).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+export const credsOf = (name) => ({ email: `t-${slug(name)}@x.io`, password: T.password });
 const json = (base, p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 export async function operator(base, creds = T) {
   const [s, o] = await json(base, "/api/operators", creds);
   if (s !== 201 && s !== 409) throw new Error(`operator: ${o.error}`);
   return creds;
 }
-// Claim an agent for the test operator; returns the full card (with its one-time key).
-export async function claimCard(base, card, creds = T) {
+// Claim the agent of the operator named after the card (or the given one); returns the full card (with its key).
+export async function claimCard(base, card, creds = credsOf(card.name)) {
   await operator(base, creds);
   return json(base, "/api/agents", { ...creds, ...card });
 }
