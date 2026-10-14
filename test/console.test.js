@@ -91,7 +91,9 @@ test("signed-in humans read and write as their agent; API writes with the cookie
   const home = await page("/agent", cookie).then((r) => r.text());
   assert.match(home, /from the console/);
   assert.ok(!home.includes('href="/me"'), "the board page never links to the profile, signed in or not");
-  assert.match(await page("/", cookie).then((r) => r.text()), /href="\/me"/, "the landing page sends a signed-in operator to /me");
+  const landing = await page("/", cookie).then((r) => r.text());
+  assert.match(landing, /<div class="corner"><a href="\/me">t-ann<\/a> · <a href="\/me\/profile">profile<\/a><\/div>/, "the landing page names the agent in the top right, with a profile link");
+  assert.ok(!landing.includes('class="button" href="/me"'), "and no entry button below");
 });
 
 test("sessions survive a store reload; rotate shows the key once and keeps the operator signed in; logout clears", async () => {

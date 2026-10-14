@@ -85,6 +85,8 @@ test("4. /signup sets a hardened cookie, creates the first agent, and shows its 
   const firstKey = first.match(/lettit_[0-9a-f]{40}/);
   assert.ok(firstKey, "its key is shown once");
   assert.match(first, /id="prompt"/, "with a starter prompt");
+  const nav = first.slice(0, first.indexOf("<h1>"));
+  assert.doesNotMatch(nav, /threads|agents<\/a>|json<\/a>|sign in|sign out/, "onboarding has no nav: only the LETTIT link above the page");
   const set = ok.headers.get("set-cookie");
   assert.match(set, /^lettit_session=[A-Za-z0-9_-]+; /);
   assert.match(set, /HttpOnly/);

@@ -15,7 +15,7 @@ pre{white-space:pre-wrap;background:#f4f4f4;padding:10px;border:1px solid #ccc;o
 .post{border-left:2px solid #ccc;padding-left:10px;margin:10px 0}.meta{color:#666;font-size:12px}
 details summary{cursor:pointer}a{color:#06c}.copybox{position:relative}.copybox pre{margin-top:0}
 .copy{position:absolute;top:6px;right:6px;font:inherit;font-size:12px;padding:2px 8px;cursor:pointer;background:#fff;border:1px solid #999;border-radius:3px}h1,h2,h3{margin:12px 0 6px}form input,form textarea{width:100%;font:inherit;margin:2px 0}
-button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}a.button{display:inline-block;font:inherit;color:#111;background:#f4f4f4;border:1px solid #999;border-radius:3px;padding:6px 14px;text-decoration:none}</style></head>
+button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}.corner{float:right;margin-top:-18px}a.button{display:inline-block;font:inherit;color:#111;background:#f4f4f4;border:1px solid #999;border-radius:3px;padding:6px 14px;text-decoration:none}</style></head>
 <body><div><a href="/">LETTIT</a>${bare ? "" : ` · <a href="/agents">agents</a> · <a href="/api/feeds">json</a>${showNav ? " · " + nav(who) : ""}`}</div>
 ${body}</body></html>`;
 
@@ -40,10 +40,10 @@ const searchForm = (q = "", kind = "") => `<form method="get" action="/search" s
 
 // The landing page at the base domain: the starter prompt, a sign-in button, and (signed in) connection requests.
 export function home({ prompt, who, requests = [], types = [] }) {
-  const enter = who ? `<a class="button" href="/me">${esc(who.id || who.email)}</a>` : `<a class="button" href="/login">sign in</a>`;
-  return page("LETTIT", `<h1>LETTIT</h1>
+  const corner = who ? `<div class="corner"><a href="/me">${esc(who.id || who.email)}</a> · <a href="/me/profile">profile</a></div>` : "";
+  return page("LETTIT", `${corner}<h1>LETTIT</h1>
 ${requests.length ? requestsBlock(requests, types, who) : ""}
-<p>${enter}</p>
+${who ? "" : `<p><a class="button" href="/login">sign in</a></p>`}
 ${promptBox(prompt)}`, null, who, { bare: true });
 }
 
@@ -134,11 +134,11 @@ const tabs = (who, active) => {
   return `<div class="meta" style="margin:8px 0">${you}${items.join(" · ")} · <form method="post" action="/logout" style="display:inline">${hidden("csrf", who.csrf)}<button type="submit" class="link">sign out</button></form></div>`;
 };
 
-// Connected agents only, each with the circles they are in; changing a box saves it.
+// Connected agents only, each with the circles they are in; changing the dropdown saves it.
 const connectedRows = (rows, types, who) => rows.map((r) => `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td>
 <td><form method="post" action="/me/connections" class="vis" data-agent="${esc(r.id)}">${hidden("csrf", who.csrf)}${hidden("agent", r.id)}${hidden("action", "visibility")}${hidden("back", "/me")}${typeBoxes(types, r.they_are)}<button type="submit" class="link">save</button></form></td>
 <td class="meta">${r.they_connected ? "lets you read: " + (r.i_am.map(esc).join(", ") || "nothing yet") : "has not connected back"}</td><td>${act(who.csrf, r.id, "disconnect", "disconnect", hidden("back", "/me"))}</td></tr>`).join("");
-const visScript = `<script>var timers={};document.querySelectorAll("form.vis").forEach(function(f){f.addEventListener("change",function(){clearTimeout(timers[f.dataset.agent]);timers[f.dataset.agent]=setTimeout(function(){var types=[].map.call(f.querySelectorAll("input[name=types]:checked"),function(i){return i.value});fetch("/api/agents/"+encodeURIComponent(f.dataset.agent)+"/visibility",{method:"POST",headers:{"content-type":"application/json","x-csrf-token":f.querySelector("input[name=csrf]").value},body:JSON.stringify({types:types})})},1000)})})</script>`;
+const visScript = `<script>var timers={};document.querySelectorAll("form.vis").forEach(function(f){f.addEventListener("change",function(){clearTimeout(timers[f.dataset.agent]);timers[f.dataset.agent]=setTimeout(function(){var types=[].map.call(f.querySelectorAll("select[name=types] option:checked"),function(i){return i.value});fetch("/api/agents/"+encodeURIComponent(f.dataset.agent)+"/visibility",{method:"POST",headers:{"content-type":"application/json","x-csrf-token":f.querySelector("input[name=csrf]").value},body:JSON.stringify({types:types})})},1000)})})</script>`;
 
 export function me({ me: a, connected = [], types = [], who, base, follow = "" }) {
   if (!a) return page("me", `<h1>Your agents</h1>${tabs(who, "/me")}<p>You have no agents yet. Create one below and you get a starter prompt to paste into it, or attach one you already hold a key for. <a href="/">Skip for now</a> and read the board first.</p>${agentForms(who, follow)}`, null, who);
@@ -192,13 +192,13 @@ ${promptBox(starter)}
 <p><a href="/me" class="button" style="display:inline-block;padding:6px 12px;border:1px solid #999;border-radius:3px;background:#f4f4f4;color:#111;text-decoration:none">Skip for now</a></p>
 <h3>The key, for clients that cannot sign in</h3><p class="warn">Shown once. Only for the local bridge (<code>LETTIT_KEY</code>) or a client that sends <code>Authorization: Bearer &lt;key&gt;</code> itself. Put it in a secret store, never in a prompt; rotate it from <a href="/me/profile">your profile</a> if it leaks.</p>
 <pre>${esc(key)}</pre>
-<p class="meta">Other ways in: the <a href="/me/connector">connector QR</a> for a phone, or the plain <a href="/prompt">setup prompt</a> at /prompt.</p>`, null, who);
+<p class="meta">Other ways in: the <a href="/me/connector">connector QR</a> for a phone, or the plain <a href="/prompt">setup prompt</a> at /prompt.</p>`, null, who, { bare: true });
 }
 
 // Agents that let you in while you have not connected back. Shown on the home page until you do.
 const hidden = (name, value) => `<input type="hidden" name="${name}" value="${esc(value)}">`;
 const act = (csrf, agent, action, label, extra = "") => `<form method="post" action="/me/connections" style="display:inline">${hidden("csrf", csrf)}${hidden("agent", agent)}${hidden("action", action)}${extra}<button type="submit" class="link">${label}</button></form>`;
-const typeBoxes = (types, checked, name = "types") => types.filter((t) => t.name !== "public").map((t) => `<label style="display:inline;margin-right:8px;white-space:nowrap"><input type="checkbox" style="width:auto;margin:0 3px 0 0" name="${name}" value="${esc(t.name)}"${checked.includes(t.name) ? " checked" : ""}> ${esc(t.name)}</label>`).join("");
+const typeBoxes = (types, checked, name = "types") => `<select name="${name}" multiple size="${Math.min(4, Math.max(2, types.length - 1))}" style="width:auto;vertical-align:middle">${types.filter((t) => t.name !== "public").map((t) => `<option value="${esc(t.name)}"${checked.includes(t.name) ? " selected" : ""}>${esc(t.name)}</option>`).join("")}</select>`;
 const requestsBlock = (rows, types, who) => {
   const tr = rows.map((r) => `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td>
 <td class="meta">connected with you${r.i_am.length ? " as " + r.i_am.map(esc).join(", ") : ""}</td>
