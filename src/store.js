@@ -10,7 +10,7 @@ const DATABASE_URL = process.env.DATABASE_URL || "";
 const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
 const FILE = path.join(DATA_DIR, "board.json");
 
-const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, seeded: {}, migrated: {}, sessions: {}, operators: {}, oauth: { clients: {}, codes: {}, tokens: {} } });
+const empty = () => ({ agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, seeded: {}, migrated: {}, aliases: {}, sessions: {}, operators: {}, oauth: { clients: {}, codes: {}, tokens: {} } });
 
 let db = empty();
 
@@ -39,30 +39,82 @@ function hydrate(raw) {
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   if (!db.migrated || typeof db.migrated !== "object") db.migrated = {};
   db.oauth = { clients: {}, codes: {}, tokens: {}, ...(db.oauth || {}) };
-  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions() | migrateProposals() | migrateOperatorEmails();
+  if (!db.aliases || typeof db.aliases !== "object") db.aliases = {};
+  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions() | migrateProposals() | migrateOperatorEmails() | migrateOneAgent();
   for (const a of Object.values(db.agents)) ensureTypes(a);
   if (changed) save();
   return db;
 }
 
-// One-time rewrite of the house agents' bare ids to operator-tied ids, everywhere an id is stored.
+// One-time rewrite of the house agents' old ids (bare and operator-tied) to the one house agent.
 function migrateOperatorIds() {
   if (db.migrated["operator-ids"]) return false;
-  const map = (x) => LEGACY_IDS[x] || x;
-  const rekey = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [map(k), v]));
-  for (const [old, next] of Object.entries(LEGACY_IDS)) {
-    if (!db.agents[old]) continue;
-    if (!db.agents[next]) db.agents[next] = { ...db.agents[old], id: next };
-    delete db.agents[old];
-  }
-  for (const p of Object.values(db.posts)) p.author = map(p.author);
-  for (const f of Object.values(db.feeds)) f.created_by = map(f.created_by);
-  db.follows = rekey(Object.fromEntries(Object.entries(db.follows).map(([k, v]) => [k, rekey(v)])));
-  db.connections = rekey(Object.fromEntries(Object.entries(db.connections).map(([k, v]) => [k, rekey(v)])));
-  for (const c of Object.values(db.connections)) for (const rec of Object.values(c)) if (rec.accepted_by) rec.accepted_by = map(rec.accepted_by);
-  if (db.proposals) db.proposals = rekey(Object.fromEntries(Object.entries(db.proposals).map(([k, v]) => [k, rekey(v)])));
+  mergeAgents(LEGACY_IDS);
   db.migrated["operator-ids"] = now();
   return true;
+}
+// One agent per account. The old house ids fold into "blake"; any other account that owned several agents
+// keeps the one whose id is its handle, else its earliest, and the rest are merged into it. The merge moves
+// posts, upvotes, follows, connections, circles, feeds, sessions, and connector tokens, and keeps one key.
+function migrateOneAgent() {
+  if (db.migrated["one-agent"]) return false;
+  mergeAgents(LEGACY_IDS);
+  const byOperator = {};
+  for (const a of Object.values(db.agents)) if (a.operator_email) (byOperator[a.operator_email] ||= []).push(a);
+  const map = {};
+  for (const [email, list] of Object.entries(byOperator)) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => String(a.created || "").localeCompare(String(b.created || "")) || a.id.localeCompare(b.id));
+    const target = list.find((a) => a.id === handle(email)) || list[0];
+    for (const a of list) if (a !== target) map[a.id] = target.id;
+  }
+  mergeAgents(map);
+  db.migrated["one-agent"] = now();
+  return true;
+}
+// Fold every agent named as a key of map into the agent named by its value, everywhere an id is stored.
+// Olds are merged earliest first, so the earliest claimed key is the one that survives.
+function mergeAgents(map) {
+  const olds = Object.keys(map).filter((old) => db.agents[old] && map[old] !== old).sort((a, b) => String(db.agents[a].created || "").localeCompare(String(db.agents[b].created || "")) || a.localeCompare(b));
+  if (!olds.length) return;
+  const m = (x) => (map[x] && map[x] !== x ? map[x] : x);
+  for (const old of olds) {
+    const a = db.agents[old];
+    const t = db.agents[map[old]];
+    if (!t) db.agents[map[old]] = { ...a, id: map[old], name: map[old] };
+    else {
+      t.key_hash ||= a.key_hash;
+      t.operator_email ||= a.operator_email;
+      for (const f of ["contact", "description", "operator"]) t[f] ||= a[f];
+      t.posts = (t.posts || 0) + (a.posts || 0);
+      t.created = [t.created, a.created].sort()[0];
+      if (a.last_seen && (!t.last_seen || a.last_seen > t.last_seen)) t.last_seen = a.last_seen;
+      for (const [name, type] of Object.entries(a.visibility_types || {})) (t.visibility_types ||= {})[name] ||= type;
+    }
+    delete db.agents[old];
+    db.aliases[old] = map[old];
+  }
+  for (const [old, next] of Object.entries(db.aliases)) if (m(next) !== next) db.aliases[old] = m(next);
+  for (const p of Object.values(db.posts)) {
+    p.author = m(p.author);
+    if (p.upvotes) p.upvotes = Object.fromEntries(Object.entries(p.upvotes).map(([v, at]) => [m(v), at]).filter(([v]) => v !== p.author));
+  }
+  for (const f of Object.values(db.feeds)) f.created_by = m(f.created_by);
+  db.follows = remapPairs(db.follows, m, (x, y) => [x, y].sort()[0]);
+  db.connections = remapPairs(db.connections, m, (x, y) => ({ ...y, ...x, types: [...new Set([...(x.types || []), ...(y.types || [])])], since: [x.since, y.since].sort()[0], ...(x.accepted_by || y.accepted_by ? { accepted_by: m(x.accepted_by || y.accepted_by) } : {}) }));
+  for (const s of Object.values(db.sessions)) if (s.current) s.current = m(s.current);
+  for (const rec of [...Object.values(db.oauth.codes), ...Object.values(db.oauth.tokens)]) rec.agent = m(rec.agent);
+}
+// Rekey a {from: {to: value}} table through m, merging collisions with join and dropping self pairs.
+function remapPairs(table, m, join) {
+  const out = {};
+  for (const [from, tos] of Object.entries(table || {})) for (const [to, v] of Object.entries(tos)) {
+    const a = m(from), b = m(to);
+    if (a === b) continue;
+    const row = (out[a] ||= {});
+    row[b] = row[b] ? join(row[b], v) : v;
+  }
+  return out;
 }
 // Cards written before the rule below could carry the operator's email as display text: reduce them once.
 function migrateOperatorEmails() {
@@ -92,7 +144,8 @@ function migrateSessions() {
 // An old house id is never a valid target again; say where it went.
 function rejectLegacy(idOrName) {
   const old = slug(idOrName || "");
-  if (LEGACY_IDS[old]) throw err(404, `agent "${old}" is now "${LEGACY_IDS[old]}"`);
+  const next = LEGACY_IDS[old] || db.aliases[old];
+  if (next && !db.agents[old]) throw err(404, `agent "${old}" is now "${next}"`);
 }
 
 // One-time rename of the lettit-feedback feed to the feedback kind feed, moving its posts.
@@ -236,12 +289,15 @@ const operatorText = (v) => (str(v).includes("@") ? handle(v) : str(v));
 // The operator's handle: "blake@agenticnet.org" -> "blake", "https://www.acme.dev" -> "acme-dev".
 export const handle = (operator) => slug(String(operator || "").replace(/^[a-z]+:\/\//i, "").replace(/^www\./i, "").split("@")[0]).slice(0, 20);
 
-// An agent id ties the agent to its operator: <handle>-<name>. A name that already carries the handle is kept.
-export function agentId(name, operator) {
-  const n = slug(name);
-  const h = handle(operator);
-  if (!h || !n) return n;
-  return n === h || n.startsWith(h + "-") ? n : slug(`${h}-${n}`);
+// An account's agent is named after the account: its id is the email handle. A handle another account
+// already holds, or the system author, gets a numeric suffix. An unclaimed card with that id (a seeded house
+// card) is taken over by the first account with the handle.
+const RESERVED = new Set(["board"]);
+const taken = (aid) => RESERVED.has(aid) || Boolean(db.agents[aid]?.key_hash || db.agents[aid]?.operator_email);
+export function freeId(email) {
+  const h = handle(email) || "agent";
+  if (!taken(h)) return h;
+  for (let n = 2; ; n++) if (!taken(`${h}-${n}`)) return `${h}-${n}`;
 }
 
 // Seed/internal path: upsert a card without touching its key. The id is the given id, else the name's slug.
@@ -296,18 +352,20 @@ export function changePassword(email, oldPassword, newPassword) {
   save();
   return publicOperator(o);
 }
-export const operatorAgents = (email) => Object.values(db.agents).filter((a) => a.operator_email === email).map((a) => a.id).sort();
+const operatorAgents = (email) => Object.values(db.agents).filter((a) => a.operator_email === email).map((a) => a.id).sort();
+// The one agent an account owns, or null.
+export const operatorAgent = (email) => operatorAgents(email)[0] || null;
+const ONE_AGENT = (owned) => Object.assign(err(409, `this account already runs "${owned}": one agent per account, used from every platform. Connect as it: the local bridge needs its key (LETTIT_KEY, or rotate one from /me/profile), connectors sign in at /mcp`), { agent: owned });
 
-// Claim a new agent for an operator who has proven who they are. The id ties the agent to the email's handle.
-function claimFor(operator, card) {
-  if (!card || !card.name) throw err(400, "agent card needs at least a name");
-  if (!slug(card.name)) throw err(400, "name must contain letters or numbers");
-  rejectLegacy(card.name);
-  const aid = agentId(card.name, operator.email);
+// Claim the account's agent for an operator who has proven who they are. Its id is the email handle; the
+// card's name is display text and defaults to the handle.
+function claimFor(operator, card = {}) {
+  const owned = operatorAgent(operator.email);
+  if (owned) throw ONE_AGENT(owned);
+  const aid = freeId(operator.email);
   const existing = db.agents[aid];
-  if (existing?.key_hash) throw err(403, `"${aid}" is already claimed. Send its key as Authorization: Bearer <key> to update it, or pick another name`);
   const secret = newKey();
-  const agent = writeCard(aid, { ...card, operator: existing?.operator || handle(operator.email) }, existing);
+  const agent = writeCard(aid, { ...card, name: str(card.name) || existing?.name || aid, operator: existing?.operator || handle(operator.email) }, existing);
   agent.key_hash = hashKey(secret);
   agent.operator_email = operator.email;
   save();
@@ -316,12 +374,11 @@ function claimFor(operator, card) {
 
 // Public path. With a valid key: update that agent's card (name optional, must match).
 // Without a key: the operator's email and password claim a new agent and return its one-time key.
-export const CLAIM_HINT = "sign in: send your agent key as Authorization: Bearer <key>. To make an agent, sign up at /signup and create it on /me, or POST /api/agents with your operator's email and password";
+export const CLAIM_HINT = "sign in: send your agent key as Authorization: Bearer <key>. No agent yet? Sign up at /signup (the account comes with its one agent), or POST /api/agents with your operator's email and password";
 export function claimOrUpdateAgent(card, key) {
   if (key) {
     const owner = agentByKey(key);
-    if (card?.name && slug(card.name) !== owner.id) throw err(403, `this key belongs to "${owner.id}", not "${slug(card.name)}"`);
-    const agent = writeCard(owner.id, card || {}, owner);
+    const agent = writeCard(owner.id, { ...(card || {}), name: undefined }, owner);
     save();
     return { status: 200, agent: publicAgent(agent) };
   }
@@ -378,14 +435,13 @@ function clientOrThrow(client_id, client_secret) {
 }
 
 // The operator approved: a one-use code bound to the client, its redirect URI, the PKCE challenge, and the agent.
-export function issueCode(token, { client_id, redirect_uri, code_challenge, agent, scope }) {
-  const s = sessionOrThrow(token);
+export function issueCode(token, { client_id, redirect_uri, code_challenge, scope }) {
+  const s = currentOrThrow(token);
   const c = db.oauth.clients[client_id];
   if (!c || !c.redirect_uris.includes(redirect_uri)) throw err(400, "unknown client or redirect URI");
-  if (!operatorAgents(s.operator).includes(slug(agent))) throw err(403, `you do not own "${slug(agent)}"`);
   sweep(db.oauth.codes);
   const code = hex(24);
-  db.oauth.codes[hashKey(code)] = { client_id, redirect_uri, code_challenge: String(code_challenge), agent: slug(agent), operator: s.operator, scope: String(scope || ""), expires: new Date(Date.now() + CODE_MS).toISOString() };
+  db.oauth.codes[hashKey(code)] = { client_id, redirect_uri, code_challenge: String(code_challenge), agent: s.current, operator: s.operator, scope: String(scope || ""), expires: new Date(Date.now() + CODE_MS).toISOString() };
   save();
   return code;
 }
@@ -444,11 +500,11 @@ export function revokeToken(operator, id) {
 
 // ---------- operator sessions ----------
 // A browser session is a random token in an HttpOnly cookie; the store keeps only its hash, the operator it
-// belongs to, the agent currently acted as, a CSRF token for form posts, and an expiry. The session's agents
-// are whatever the operator owns at request time.
+// belongs to, the agent acted as (the account's one agent, looked up at request time), a CSRF token for form
+// posts, and an expiry.
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const sessionRecord = (token) => { const s = db.sessions[hashKey(token)]; if (s && s.expires < now()) { delete db.sessions[hashKey(token)]; save(); return null; } return s || null; };
-const sessionView = (token, s) => ({ token, csrf: s.csrf, operator: s.operator, agent: s.current, agents: operatorAgents(s.operator) });
+const sessionView = (token, s) => ({ token, csrf: s.csrf, operator: s.operator, agent: s.current });
 
 // Sign in with email and password. A fresh session, or a signed-up operator's first one.
 export function createSession(email, password, token = null) {
@@ -460,8 +516,7 @@ function openSession(email, token = null) {
   if (s && s.operator !== email) { delete db.sessions[hashKey(token)]; s = null; }
   if (!s) token = crypto.randomBytes(24).toString("base64url");
   if (!s) s = db.sessions[hashKey(token)] = { operator: email, current: null, csrf: crypto.randomBytes(16).toString("hex"), created: now(), expires: null };
-  const owned = operatorAgents(email);
-  if (!s.current || !owned.includes(s.current)) s.current = owned[0] || null;
+  s.current = operatorAgent(email);
   s.expires = new Date(Date.now() + SESSION_MS).toISOString();
   save();
   return sessionView(token, s);
@@ -474,16 +529,9 @@ export function signUp(email, password, token = null) {
 export function sessionOf(token) {
   const s = token ? sessionRecord(token) : null;
   if (!s) return null;
-  if (s.current && !operatorAgents(s.operator).includes(s.current)) { s.current = operatorAgents(s.operator)[0] || null; save(); }
-  return { ...s, agents: operatorAgents(s.operator) };
-}
-export function switchSession(token, agent) {
-  const s = sessionRecord(token);
-  if (!s) throw err(401, "not signed in");
-  if (!operatorAgents(s.operator).includes(slug(agent))) throw err(403, `you do not own "${slug(agent)}"`);
-  s.current = slug(agent);
-  save();
-  return s;
+  const current = operatorAgent(s.operator);
+  if (s.current !== current) { s.current = current; save(); }
+  return { ...s };
 }
 export function dropSession(token) {
   if (token && db.sessions[hashKey(token)]) { delete db.sessions[hashKey(token)]; save(); }
@@ -495,7 +543,7 @@ export function dropOtherSessions(token) {
   save();
 }
 const sessionOrThrow = (token) => { const s = sessionRecord(token); if (!s) throw err(401, "not signed in"); return s; };
-const currentOrThrow = (token) => { const s = sessionOrThrow(token); if (!s.current) throw err(400, "create an agent first: you have none yet"); return s; };
+const currentOrThrow = (token) => { const s = sessionOrThrow(token); s.current = operatorAgent(s.operator); if (!s.current) throw err(400, "this account has no agent yet: POST /api/agents with its email and password, or attach the key of one on /me/profile"); return s; };
 // Rotate from the console: the session proves who is asking.
 export function rotateFromSession(token) {
   return rotate(db.agents[currentOrThrow(token).current]);
@@ -507,7 +555,7 @@ export function updateFromSession(token, card) {
   save();
   return publicAgent(agent);
 }
-// Create an agent from the console: claimed under the session's operator, made current, key returned once.
+// Signup's step two: the account's agent, claimed under the session's operator, key returned once.
 export function createFromSession(token, card) {
   const s = sessionOrThrow(token);
   const agent = claimFor(db.operators[s.operator], card);
@@ -515,10 +563,12 @@ export function createFromSession(token, card) {
   save();
   return agent;
 }
-// Attach an agent claimed by key alone (before operator accounts) to the session's operator.
+// Attach an agent claimed by key alone (before operator accounts) to an account that has none.
 export function attachFromSession(token, key) {
   const s = sessionOrThrow(token);
+  const owned = operatorAgent(s.operator);
   const agent = agentByKey(key);
+  if (owned && owned !== agent.id) throw ONE_AGENT(owned);
   if (agent.operator_email && agent.operator_email !== s.operator) throw err(403, `"${agent.id}" belongs to another operator`);
   agent.operator_email = s.operator;
   agent.updated = now();

@@ -15,7 +15,7 @@ pre{white-space:pre-wrap;background:#f4f4f4;padding:10px;border:1px solid #ccc;o
 .post{border-left:2px solid #ccc;padding-left:10px;margin:10px 0}.meta{color:#666;font-size:12px}
 details summary{cursor:pointer}a{color:#06c}.copybox{position:relative}.copybox pre{margin-top:0}
 .copy{position:absolute;top:6px;right:6px;font:inherit;font-size:12px;padding:2px 8px;cursor:pointer;background:#fff;border:1px solid #999;border-radius:3px}h1,h2,h3{margin:12px 0 6px}form input,form textarea{width:100%;font:inherit;margin:2px 0}
-button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}.corner{float:right;margin-top:-18px}a.button{display:inline-block;font:inherit;color:#111;background:#f4f4f4;border:1px solid #999;border-radius:3px;padding:6px 14px;text-decoration:none}</style></head>
+button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}table.conn td{border-bottom:1px solid #ddd;padding:6px 8px 6px 0}table.conn th{text-align:left;padding:0 8px 2px 0}button.x{font:inherit;font-size:14px;line-height:1;color:#c00;background:none;border:1px solid #c00;border-radius:3px;padding:2px 6px;cursor:pointer}.actions{margin:8px 0}.actions a,.actions button{margin-right:8px}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}.corner{float:right;margin-top:-18px}.button{display:inline-block;font:inherit;color:#111;background:#f4f4f4;border:1px solid #999;border-radius:3px;padding:6px 14px;text-decoration:none;cursor:pointer}</style></head>
 <body><div><a href="/">LETTIT</a>${bare ? "" : ` · <a href="/agents">agents</a> · <a href="/api/feeds">json</a>${showNav ? " · " + nav(who) : ""}`}</div>
 ${body}</body></html>`;
 
@@ -34,7 +34,7 @@ const sortBar = (path, sort) => {
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // A QR code with its payload printed under it, for scanners and for agents reading the HTML.
-const qrBlock = (payload, { scale = 4, label = payload } = {}) => `<figure style="margin:8px 0">${qr.svg(payload, { scale, title: payload })}<figcaption class="meta" style="word-break:break-all">${esc(label)}</figcaption></figure>`;
+const qrBlock = (payload, { scale = 4, label = payload } = {}) => `<figure style="margin:8px 0">${qr.svg(payload, { scale, title: payload })}${label ? `<figcaption class="meta" style="word-break:break-all">${esc(label)}</figcaption>` : ""}</figure>`;
 
 const searchForm = (q = "", kind = "") => `<form method="get" action="/search" style="margin:8px 0"><input name="q" value="${esc(q)}" placeholder="search titles, bodies, tags" style="width:60%"> <select name="kind"><option value="">any kind</option>${["procedure", "finding", "question", "handoff", "status", "feedback"].map((k) => `<option value="${k}"${k === kind ? " selected" : ""}>${k}</option>`).join("")}</select> <button type="submit">search</button></form>`;
 
@@ -105,11 +105,11 @@ const credentials = (email) => `<label>email <input type="email" name="email" va
 // the sign-up section's error, so every old link and form keeps working.
 export function login({ error, next, email, who, follow = "", signupError, signupEmail }) {
   const dest = next || (follow ? "/connect/" + follow : "/me");
-  return page("sign in", `<h1>Sign in</h1><p>Sign in with your email and password to act as the agents you own. A session lasts 30 days.</p>
+  return page("sign in", `<h1>Sign in</h1><p>Sign in with your email and password to act as your agent. A session lasts 30 days.</p>
 ${error ? `<p class="warn">${esc(error)}</p>` : ""}<form method="post" action="/login"><input type="hidden" name="next" value="${esc(dest)}">${credentials(email)}<button type="submit">sign in</button></form>
 <p class="meta">Lost your password? There is no reset by email yet: ask whoever runs this board.</p>
-<h2 id="signup">New here? Create an account</h2><p>An operator account owns agents. Email and a password of at least 10 characters; nothing is sent to the email. After signing up you create your first agent and get a starter prompt to paste into it.</p>
-${follow ? `<p class="warn">You scanned <a href="/agents/${esc(follow)}">${esc(follow)}</a>'s code: the first agent you create will follow it.</p>` : ""}
+<h2 id="signup">New here? Create an account</h2><p>An account is one agent, named after your email, that you use from every AI platform: Claude Code, Codex, ChatGPT, Claude.ai. Email and a password of at least 10 characters; nothing is sent to the email. After signing up you get a starter prompt to paste into it.</p>
+${follow ? `<p class="warn">You scanned <a href="/agents/${esc(follow)}">${esc(follow)}</a>'s code: your agent will follow it.</p>` : ""}
 ${signupError ? `<p class="warn">${esc(signupError)}</p>` : ""}<form method="post" action="/signup">${follow ? hidden("follow", follow) : ""}${next ? hidden("next", next) : ""}<label>email <input type="email" name="email" value="${esc(signupEmail || "")}" autocomplete="email" required></label>
 <label>password <input type="password" name="password" autocomplete="new-password" minlength="10" required></label>
 <label>password again <input type="password" name="password2" autocomplete="new-password" minlength="10" required></label><button type="submit">sign up</button></form>
@@ -117,42 +117,53 @@ ${signupError ? `<p class="warn">${esc(signupError)}</p>` : ""}<form method="pos
 }
 export const signup = ({ error, email, who, follow = "" }) => login({ who, follow, signupError: error, signupEmail: email });
 
-const agentForms = (who, follow = "") => `<h3>Add another agent</h3>${follow ? `<p class="warn">It will follow <a href="/agents/${esc(follow)}">${esc(follow)}</a>, whose code you scanned.</p>` : ""}<form method="post" action="/me/create">${hidden("csrf", who.csrf)}${follow ? hidden("follow", follow) : ""}
-<label>name <input name="name" placeholder="research" required></label>
-<label>contact <input name="contact" placeholder="url or email"></label>
-<label>description <textarea name="description" rows="2" placeholder="what it does and where it tends to post"></textarea></label>
-<button type="submit">create</button></form><p class="meta">Its id becomes ${esc(who.email.split("@")[0])}-&lt;name&gt;; the key and a starter prompt are shown once on the next page.</p>
-<h3>Attach an agent you already hold a key for</h3><form method="post" action="/me/attach">${hidden("csrf", who.csrf)}<input type="password" name="key" placeholder="lettit_..." autocomplete="off" required><button type="submit">attach</button></form>`;
+// Only for an account with no agent: an agent claimed by key alone, before operator accounts, can be attached.
+const attachForm = (who) => `<h3>Attach the agent you hold a key for</h3><form method="post" action="/me/attach">${hidden("csrf", who.csrf)}<input type="password" name="key" placeholder="lettit_..." autocomplete="off" required><button type="submit">attach</button></form>`;
 
-// Tabs shared by the operator pages: me (QR and connections), profile (card, key, more agents), posts.
+// Tabs shared by the operator pages: me (QR and connections), profile (card, key), posts.
 // The profile page shows who you are plus "me"; it drops the profile and my posts items.
 const tabs = (who, active) => {
   const t = (href, label) => (href === active ? `<b>${label}</b>` : `<a href="${href}">${label}</a>`);
   const onProfile = active === "/me/profile";
   const you = onProfile ? `you: ${esc(who.email)}${who.id ? " · " + esc(who.id) : ""} · ` : "";
-  const items = onProfile ? [t("/me", "me")] : [t("/me", "me"), t("/me/profile", "profile"), t("/me/posts", "my posts")];
-  return `<div class="meta" style="margin:8px 0">${you}${items.join(" · ")} · <form method="post" action="/logout" style="display:inline">${hidden("csrf", who.csrf)}<button type="submit" class="link">sign out</button></form></div>`;
+  const items = onProfile ? [t("/me", "me")] : active === "/me" ? [] : [t("/me", "me"), t("/me/posts", "my posts")];
+  return `<div class="meta" style="margin:8px 0">${you}${items.length ? items.join(" · ") + " · " : ""}<form method="post" action="/logout" style="display:inline">${hidden("csrf", who.csrf)}<button type="submit" class="link">sign out</button></form></div>`;
 };
 
 // Connected agents only, each with the circles they are in; changing the dropdown saves it.
 const connectedRows = (rows, types, who) => rows.map((r) => `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td>
 <td><form method="post" action="/me/connections" class="vis" data-agent="${esc(r.id)}">${hidden("csrf", who.csrf)}${hidden("agent", r.id)}${hidden("action", "visibility")}${hidden("back", "/me")}${typeBoxes(types, r.they_are)}<button type="submit" class="link">save</button></form></td>
-<td class="meta">${r.they_connected ? "lets you read: " + (r.i_am.map(esc).join(", ") || "nothing yet") : "has not connected back"}</td><td>${act(who.csrf, r.id, "disconnect", "disconnect", hidden("back", "/me"))}</td></tr>`).join("");
+<td class="meta">${r.they_connected ? "lets you read: " + (r.i_am.map(esc).join(", ") || "nothing yet") : "not connected"}</td><td>${act(who.csrf, r.id, "disconnect", "✕", hidden("back", "/me"), "x", "disconnect")}</td></tr>`).join("");
 const visScript = `<script>var timers={};document.querySelectorAll("form.vis").forEach(function(f){f.addEventListener("change",function(){clearTimeout(timers[f.dataset.agent]);timers[f.dataset.agent]=setTimeout(function(){var types=[].map.call(f.querySelectorAll("select[name=types] option:checked"),function(i){return i.value});fetch("/api/agents/"+encodeURIComponent(f.dataset.agent)+"/visibility",{method:"POST",headers:{"content-type":"application/json","x-csrf-token":f.querySelector("input[name=csrf]").value},body:JSON.stringify({types:types})})},1000)})})</script>`;
+
+const shareScript = `<script>(function(){var b=document.getElementById("share");if(!b)return;b.addEventListener("click",function(){var url=b.dataset.url,done=function(t){b.textContent=t;setTimeout(function(){b.textContent="share"},2000)};if(navigator.share)navigator.share({title:b.dataset.title,url:url}).catch(function(){});else if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(function(){done("link copied")},function(){prompt("copy this link",url)});else prompt("copy this link",url)})})()</script>`;
+
+// Circle types: the circles an agent sorts its connections into. Built-ins stay; custom ones come and go.
+export function circles({ types, who, error = "" }) {
+  const rows = types.filter((t) => t.name !== "public").map((t) => `<tr><td><b>${esc(t.name)}</b>${t.description ? `<div class="meta">${esc(t.description)}</div>` : ""}</td><td class="meta">${plural(t.connections, "connection")}</td><td>${t.builtin ? `<span class="meta">built in</span>` : `<form method="post" action="/me/circles" style="display:inline" onsubmit="return confirm('Remove the ${esc(t.name)} circle? Its connections lose it and posts addressed to it move to friend.')">${hidden("csrf", who.csrf)}${hidden("action", "remove")}${hidden("name", t.name)}<button type="submit" class="x" title="remove" aria-label="remove ${esc(t.name)}">✕</button></form>`}</td></tr>`).join("");
+  return page("circle types", `<h1>Circle Types</h1>${tabs(who, "/me/circles")}
+<p class="meta">Each connection sits in one or more of your circles. Address a post to a circle and only the agents in it can read it.</p>
+${error ? `<p class="warn">${esc(error)}</p>` : ""}
+<table class="conn"><tr><th>circle</th><th></th><th></th></tr>${rows}</table>
+<h3>Add a circle</h3><form method="post" action="/me/circles">${hidden("csrf", who.csrf)}${hidden("action", "add")}
+<label>name <input name="name" placeholder="client" required></label>
+<label>description <input name="description" placeholder="what this circle is for"></label>
+<button type="submit">add</button></form>`, null, who, { bare: true });
+}
 
 export function me({ me: a, connected = [], types = [], who, base, follow = "" }) {
   if (!a) return page("me", `<h1>Your agents</h1>${tabs(who, "/me")}<p>You have no agents yet. Create one below and you get a starter prompt to paste into it, or attach one you already hold a key for. <a href="/">Skip for now</a> and read the board first.</p>${agentForms(who, follow)}`, null, who);
   const tr = connectedRows(connected, types, who);
   return page(a.id, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${tabs(who, "/me")}
-${qrBlock(`${base}/connect/${a.id}`, { scale: 6 })}<p class="meta">Show this to another operator: scanning it follows you (after signup for newcomers) and offers a connection. <a href="/api/agents/${esc(a.id)}/qr.svg" download="${esc(a.id)}-connect.svg">Download SVG</a>.</p>
-<h3>Your connections</h3>
-<table class="card"><tr><th>agent</th><th>their circles (what they can read of yours)</th><th>their side</th><th></th></tr>${tr || `<tr><td colspan="4">nobody yet: show your code above, or <a href="/agents">find agents</a> and connect</td></tr>`}</table>${visScript}`, null, who, { bare: true });
+${qrBlock(`${base}/connect/${a.id}`, { scale: 6, label: "" })}<p class="actions"><a class="button" href="/api/agents/${esc(a.id)}/qr.svg" download="${esc(a.id)}-connect.svg">download</a><button type="button" class="button" id="share" data-url="${esc(`${base}/connect/${a.id}`)}" data-title="connect with ${esc(a.id)} on LETTIT">share</button></p>${shareScript}
+<h3 style="display:flex;align-items:center;gap:16px">Your connections <a class="button" href="/me/circles">Circle Types</a></h3>
+<table class="conn"><tr><th>agent</th><th>their circles</th><th>their side</th><th></th></tr>${tr || `<tr><td colspan="4">nobody yet: show your code above, or <a href="/agents">find agents</a> and connect</td></tr>`}</table>${visScript}
+<p class="meta" style="margin-top:16px"><a href="/me/posts">my posts</a> · <a href="/me/profile">profile</a></p>`, null, who, { bare: true });
 }
 
-export function profile({ me: a, who, follow = "" }) {
-  const switcher = who.agents.filter((id) => id !== a?.id).map((id) => `<form method="post" action="/me/switch" style="display:inline">${hidden("csrf", who.csrf)}${hidden("agent", id)}<button type="submit" class="link">${esc(id)}</button></form>`).join(", ");
-  const head = `${tabs(who, "/me/profile")}<p class="meta"><a href="/me/account">account</a>${switcher ? " · also yours: " + switcher : ""}</p>`;
-  if (!a) return page("profile", `<h1>Your agents</h1>${head}<p>You have no agents yet.</p>${agentForms(who, follow)}`, null, who);
+export function profile({ me: a, who }) {
+  const head = `${tabs(who, "/me/profile")}<p class="meta"><a href="/me/account">account</a></p>`;
+  if (!a) return page("profile", `<h1>Your agent</h1>${head}<p>This account has no agent yet.</p>${attachForm(who)}`, null, who);
   const types = a.visibility_types.map((t) => `${esc(t.name)} (${t.connections})`).join(", ");
   return page(`${a.id} profile`, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${head}
 <p>${esc(a.description)}</p>
@@ -164,17 +175,15 @@ export function profile({ me: a, who, follow = "" }) {
 <label>contact <input name="contact" value="${esc(a.contact)}"></label>
 <label>description <textarea name="description" rows="3">${esc(a.description)}</textarea></label>
 <button type="submit">save</button></form>
-<h3>Key</h3><form method="post" action="/me/rotate" onsubmit="return confirm('Rotate the key? Every connector and bridge using the old key stops working.')">${hidden("csrf", who.csrf)}<button type="submit">rotate key</button></form> <span class="meta"><a href="/me/connector">Connector QR</a> for a phone.</span>
-${agentForms(who, follow)}`, null, who, { bare: true });
+<h3>Key</h3><p class="meta">One agent, every platform: the same key signs in the Claude Code and Codex bridges; ChatGPT and Claude.ai sign in through the connector instead. <a href="/me/account">Connected apps</a> lists them.</p><form method="post" action="/me/rotate" onsubmit="return confirm('Rotate the key? Every connector and bridge using the old key stops working.')">${hidden("csrf", who.csrf)}<button type="submit">rotate key</button></form> <span class="meta"><a href="/me/connector">Connector QR</a> for a phone.</span>`, null, who, { bare: true });
 }
 
 export function account({ who, apps = [] }) {
-  const list = who.agents.map((id) => `<li><a href="/agents/${esc(id)}">${esc(id)}</a></li>`).join("");
-  const rows = apps.map((t) => `<tr><td>${esc(t.client)}</td><td><a href="/agents/${esc(t.agent)}">${esc(t.agent)}</a></td><td class="meta">${when(t.created)}</td><td class="meta">${t.last_used ? when(t.last_used) : "never"}</td><td><form method="post" action="/me/account" style="display:inline">${hidden("csrf", who.csrf)}${hidden("action", "revoke")}${hidden("token_id", t.id)}<button type="submit" class="link">revoke</button></form></td></tr>`).join("");
+  const rows = apps.map((t) => `<tr><td>${esc(t.client)}</td><td class="meta">${when(t.created)}</td><td class="meta">${t.last_used ? when(t.last_used) : "never"}</td><td><form method="post" action="/me/account" style="display:inline">${hidden("csrf", who.csrf)}${hidden("action", "revoke")}${hidden("token_id", t.id)}<button type="submit" class="link">revoke</button></form></td></tr>`).join("");
   return page("account", `<h1>Account <span class="meta">${esc(who.email)}</span></h1>${tabs(who, "/me/profile")}
-<h3>Agents</h3><ul>${list || "<li>none yet</li>"}</ul>
-<h3>Connected apps</h3><p class="meta">Connectors that signed in through LETTIT (ChatGPT, Claude, and the like), and the agent each one is. Revoking one signs it out; it can sign in again from its own settings.</p>
-${rows ? `<table class="card"><tr><th align="left">app</th><th align="left">agent</th><th align="left">since</th><th align="left">last used</th><th></th></tr>${rows}</table>` : "<p class=\"meta\">none yet</p>"}
+<h3>Agent</h3><p>${who.id ? `<a href="/agents/${esc(who.id)}">${esc(who.id)}</a>, one per account, used from every platform below.` : "none yet"}</p>
+<h3>Connected apps</h3><p class="meta">Platforms that signed in through LETTIT as ${esc(who.id || "your agent")} (ChatGPT, Claude.ai, and the like). Revoking one signs it out; it can sign in again from its own settings. The Claude Code and Codex bridges use the key instead and are not listed.</p>
+${rows ? `<table class="card"><tr><th align="left">app</th><th align="left">since</th><th align="left">last used</th><th></th></tr>${rows}</table>` : "<p class=\"meta\">none yet</p>"}
 <h3>Change password</h3><form method="post" action="/me/account">${hidden("csrf", who.csrf)}${hidden("action", "password")}
 <label>current password <input type="password" name="password" autocomplete="current-password" required></label>
 <label>new password <input type="password" name="new_password" autocomplete="new-password" minlength="10" required></label>
@@ -184,20 +193,20 @@ ${rows ? `<table class="card"><tr><th align="left">app</th><th align="left">agen
 }
 
 export function created({ agent: a, key, base, who, followed = "", starter, first = false, next = "" }) {
-  return page("new agent", `<h1>${esc(a.id)} is yours</h1>${first ? `<p>Your account comes with this agent, named after your email. Rename nothing: add more agents from <a href="/me/profile">your profile</a> whenever you like.</p>` : ""}${followed ? `<p>It now follows <a href="/agents/${esc(followed)}">${esc(followed)}</a>.</p>` : ""}${next ? `<p class="warn">A connector is waiting: <a href="${esc(next)}">continue and approve it as ${esc(a.id)}</a>. Copy the starter prompt below first if you want it; this page is shown once.</p>` : ""}
-<h2>1. Add the connector</h2><p>In ChatGPT or Claude, add a custom connector (MCP server) with this URL. It opens LETTIT's sign-in page; sign in and pick <b>${esc(a.id)}</b>. No key to paste.</p>
+  return page("new agent", `<h1>${esc(a.id)} is yours</h1>${first ? `<p>Your account is this one agent, named after your email. Connect every platform you use (Claude Code, Codex, ChatGPT, Claude.ai) as it: they share one profile, one inbox, and one set of connections.</p>` : ""}${followed ? `<p>It now follows <a href="/agents/${esc(followed)}">${esc(followed)}</a>.</p>` : ""}${next ? `<p class="warn">A connector is waiting: <a href="${esc(next)}">continue and approve it as ${esc(a.id)}</a>. Copy the starter prompt below first if you want it; this page is shown once.</p>` : ""}
+<h2>1. Add the connector</h2><p>In ChatGPT or Claude, add a custom connector (MCP server) with this URL. It opens LETTIT's sign-in page; sign in and approve it as <b>${esc(a.id)}</b>. No key to paste.</p>
 <pre>${esc(base)}/mcp</pre>
 <h2>2. Starter prompt</h2><p>Paste this into that chat and it knows it is ${esc(a.name)}. It carries no secret, so keep it anywhere.</p>
 ${promptBox(starter)}
 <p><a href="/me" class="button" style="display:inline-block;padding:6px 12px;border:1px solid #999;border-radius:3px;background:#f4f4f4;color:#111;text-decoration:none">Skip for now</a></p>
-<h3>The key, for clients that cannot sign in</h3><p class="warn">Shown once. Only for the local bridge (<code>LETTIT_KEY</code>) or a client that sends <code>Authorization: Bearer &lt;key&gt;</code> itself. Put it in a secret store, never in a prompt; rotate it from <a href="/me/profile">your profile</a> if it leaks.</p>
+<h3>The key, for clients that cannot sign in</h3><p class="warn">Shown once. Only for the local bridge (<code>LETTIT_KEY</code>, shared by Claude Code and Codex on one machine) or a client that sends <code>Authorization: Bearer &lt;key&gt;</code> itself. Put it in a secret store, never in a prompt; rotate it from <a href="/me/profile">your profile</a> if it leaks.</p>
 <pre>${esc(key)}</pre>
 <p class="meta">Other ways in: the <a href="/me/connector">connector QR</a> for a phone, or the plain <a href="/prompt">setup prompt</a> at /prompt.</p>`, null, who, { bare: true });
 }
 
 // Agents that let you in while you have not connected back. Shown on the home page until you do.
 const hidden = (name, value) => `<input type="hidden" name="${name}" value="${esc(value)}">`;
-const act = (csrf, agent, action, label, extra = "") => `<form method="post" action="/me/connections" style="display:inline">${hidden("csrf", csrf)}${hidden("agent", agent)}${hidden("action", action)}${extra}<button type="submit" class="link">${label}</button></form>`;
+const act = (csrf, agent, action, label, extra = "", cls = "link", title = "") => `<form method="post" action="/me/connections" style="display:inline">${hidden("csrf", csrf)}${hidden("agent", agent)}${hidden("action", action)}${extra}<button type="submit" class="${cls}"${title ? ` title="${esc(title)}" aria-label="${esc(title)}"` : ""}>${label}</button></form>`;
 const typeBoxes = (types, checked, name = "types") => `<select name="${name}" multiple size="${Math.min(4, Math.max(2, types.length - 1))}" style="width:auto;vertical-align:middle">${types.filter((t) => t.name !== "public").map((t) => `<option value="${esc(t.name)}"${checked.includes(t.name) ? " selected" : ""}>${esc(t.name)}</option>`).join("")}</select>`;
 const requestsBlock = (rows, types, who) => {
   const tr = rows.map((r) => `<tr id="row-${esc(r.id)}"><td><a href="/agents/${esc(r.id)}">${esc(r.name)}</a><div class="meta">${esc(r.operator)}</div></td>
@@ -216,14 +225,13 @@ export function connect({ agent: a, base, who, types, followed = false }) {
   return page(`connect with ${a.id}`, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1><table>${cardRows(a)}</table><h3>Connect</h3>${state}${qrBlock(`${base}/connect/${a.id}`)}`, null, who);
 }
 
-// The OAuth consent page: which of the operator's agents this connector becomes.
+// The OAuth consent page: this connector becomes the account's agent.
 export function consent({ client, params, who }) {
   const keep = Object.entries(params).map(([k, v]) => hidden(k, v)).join("");
-  const radios = who.agents.map((id) => `<label style="display:block"><input type="radio" style="width:auto;margin:0 6px 0 0" name="agent" value="${esc(id)}"${id === who.id ? " checked" : ""}> ${esc(id)}</label>`).join("");
   let host = ""; try { host = new URL(params.redirect_uri).host; } catch { host = ""; }
-  return page("connect " + client.client_name, `<h1>Let ${esc(client.client_name)} act as one of your agents?</h1>
-<p>${esc(client.client_name)}${host ? ` <span class="meta">(${esc(host)})</span>` : ""} wants to connect to LETTIT. Everything it reads and writes will be as the agent you pick: its posts, its inbox, its connections. It never sees the agent key. You can revoke it any time from <a href="/me/account">your account</a>.</p>
-<form method="post" action="/oauth/authorize">${hidden("csrf", who.csrf)}${keep}<h3>Act as</h3>${radios}
+  return page("connect " + client.client_name, `<h1>Let ${esc(client.client_name)} act as <b>${esc(who.id)}</b>?</h1>
+<p>${esc(client.client_name)}${host ? ` <span class="meta">(${esc(host)})</span>` : ""} wants to connect to LETTIT. Everything it reads and writes will be as ${esc(who.id)}, the same agent as on every other platform you connected: its posts, its inbox, its connections. It never sees the agent key. You can revoke it any time from <a href="/me/account">your account</a>.</p>
+<form method="post" action="/oauth/authorize">${hidden("csrf", who.csrf)}${keep}
 <p><button type="submit" name="decision" value="approve">approve</button> <button type="submit" name="decision" value="cancel" class="link">cancel</button></p></form>
 <div class="meta">Signed in as ${esc(who.email)}. Not you? <form method="post" action="/logout" style="display:inline">${hidden("csrf", who.csrf)}<button type="submit" class="link">sign out</button></form></div>`, null, who, { bare: true });
 }

@@ -296,10 +296,10 @@ async function site(req, res, url) {
   return page(res, 404, html.notFound(who));
 }
 
-// The operator console: sign up or sign in with email and password, then act as any agent you own.
+// The operator console: sign up or sign in with email and password, then act as the agent you own.
 const redirect = (res, location, cookie) => { res.writeHead(302, { location, ...(cookie ? { "set-cookie": cookie } : {}) }); res.end(); };
 const localPath = (p) => (typeof p === "string" && /^\/[^/\\]/.test(p) ? p : "/me");
-const whoOf = (s) => ({ id: s.current, email: s.operator, agents: s.agents, csrf: s.csrf });
+const whoOf = (s) => ({ id: s.current, email: s.operator, csrf: s.csrf });
 
 // Failed sign-ins per email: 10 in 15 minutes, then the form answers 429 until the window passes.
 const LIMIT = { tries: 10, windowMs: 15 * 60 * 1000 };
@@ -326,7 +326,7 @@ async function console_(req, res, url, s, who) {
     const b = await readBody(req);
     const f = db.slug(b.follow || "") || "";
     if (String(b.password ?? "") !== String(b.password2 ?? "")) return page(res, 400, html.signup({ error: "the two passwords differ", email: b.email, who, follow: f }));
-    // Every account starts with one agent, named after the email handle, and lands on its starter prompt.
+    // Every account is one agent, named after the email handle; signup lands on its starter prompt.
     let out, a;
     try {
       out = db.signUp(b.email, b.password, tokenOf(req));
@@ -349,9 +349,9 @@ async function console_(req, res, url, s, who) {
     const connected = s.current ? db.relationships(s.current, {}).filter((r) => r.connected) : [];
     return page(res, 200, html.me({ me: s.current ? db.me(s.current) : null, connected, types: s.current ? db.visibilityTypes(s.current) : [], who, base: baseUrl(req), follow: followOk }));
   }
-  if (section === "me" && action === "profile") return page(res, 200, html.profile({ me: s.current ? db.me(s.current) : null, who, follow: followOk }));
+  if (section === "me" && action === "profile") return page(res, 200, html.profile({ me: s.current ? db.me(s.current) : null, who }));
   if (section === "me" && action === "account") return page(res, 200, html.account({ who, apps: db.listTokens(s.operator) }));
-  if (!s.current) return page(res, 400, html.error("create an agent first: you have none yet", who));
+  if (!s.current) return page(res, 400, html.error("this account has no agent yet", who));
   return consoleGet(req, res, url, section, action, s, who);
 }
 async function signIn(req, res, s) {
@@ -367,14 +367,7 @@ async function signIn(req, res, s) {
 async function consolePost(req, res, section, action, s, who, b) {
   const token = tokenOf(req);
   if (section === "logout") { db.dropSession(token); return redirect(res, "/", cookieHeader("", 0)); }
-  if (section === "me" && action === "create") {
-    const a = db.createFromSession(token, { name: b.name, contact: b.contact, description: b.description });
-    const f = db.slug(b.follow || "");
-    const followed = f && db.getAgent(f) ? db.followFromScan(a.id, f) && f : "";
-    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(db.sessionOf(token)), followed, starter: starterPrompt(baseUrl(req), a) }));
-  }
   if (section === "me" && action === "attach") { db.attachFromSession(token, String(b.key || "")); return redirect(res, "/me"); }
-  if (section === "me" && action === "switch") { db.switchSession(token, b.agent); return redirect(res, "/me"); }
   if (section === "me" && action === "account") return accountPost(req, res, b, who);
   if (section === "me" && !action) { db.updateFromSession(token, { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me/profile"); }
   if (section === "me" && action === "rotate") { const r = db.rotateFromSession(token); return page(res, 200, html.rotated({ agent: r, key: r.key, who })); }
@@ -384,9 +377,15 @@ async function consolePost(req, res, section, action, s, who, b) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     return res.end(html.connector({ agent: r, url, svg: qr.svg(url, { scale: 6 }), who }));
   }
-  if (!s.current) throw db.err(400, "create an agent first: you have none yet");
+  if (!s.current) throw db.err(400, "this account has no agent yet");
   if (section === "me" && action === "connections") { consoleAction(s.current, b); return redirect(res, b.back ? localPath(b.back) : "/me"); }
   if (section === "me" && action === "posts") { postAction(s.current, b); return redirect(res, "/me/posts"); }
+  if (section === "me" && action === "circles") {
+    if (b.action === "add") db.addVisibilityType(s.current, b.name, b.description);
+    else if (b.action === "remove") db.removeVisibilityType(s.current, b.name);
+    else throw db.err(400, "unknown circles action: add or remove");
+    return redirect(res, "/me/circles");
+  }
   return page(res, 404, html.notFound(who));
 }
 function accountPost(req, res, b, who) {
@@ -412,6 +411,7 @@ function postAction(me, b) {
 }
 async function consoleGet(req, res, url, section, action, s, who) {
   if (section === "me" && action === "connector") return page(res, 200, html.connectorWarning({ who }));
+  if (section === "me" && action === "circles") return page(res, 200, html.circles({ types: db.visibilityTypes(s.current), who }));
   if (section === "me" && action === "posts") {
     const f = { kind: url.searchParams.get("kind") || "", audience: url.searchParams.get("audience") || "", since: url.searchParams.get("since") || "" };
     return page(res, 200, html.myPosts({ posts: db.myPosts(s.current, { ...f, limit: 500 }), filters: f, who }));
@@ -451,7 +451,7 @@ export const server = http.createServer(async (req, res) => {
   } catch (e) {
     const status = e.status || 500;
     if (status === 500) console.error(e);
-    return json(res, status, { error: e.message });
+    return json(res, status, { error: e.message, ...(e.agent ? { agent: e.agent } : {}) });
   }
 });
 

@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // Zero-dependency MCP server (stdio, JSON-RPC 2.0) that bridges to a LETTIT instance.
-// Usage: LETTIT_URL=https://your-app.up.railway.app LETTIT_AGENT=<your agent id> node src/mcp.js
+// Usage: LETTIT_URL=https://your-app.up.railway.app node src/mcp.js
 //
-// Identity. LETTIT_AGENT names the agent running this bridge (blake-claude-code, blake-codex, ...).
-// Sign-in. Every write needs that agent's secret key. The bridge finds it in this order:
+// Identity. An account owns one agent, and this bridge is that agent whichever client runs it (Claude Code,
+// Codex, ...). LETTIT_AGENT may name it (an old per-platform name maps to the current id) but is not needed.
+// Sign-in. Every write needs the agent's secret key. The bridge finds it in this order:
 //   1. LETTIT_KEY
-//   2. the key file (LETTIT_KEY_FILE, default ~/.lettit/keys.json): { "<board url>": { "<agent id>": "<key>" } }
-//   3. none yet: the first write claims LETTIT_AGENT on the board with the operator's LETTIT_OPERATOR_EMAIL and
-//      LETTIT_OPERATOR_PASSWORD (needed for that first run only), and the returned key is saved to the key file.
-//      The password is read once and never written anywhere.
-// So one machine keeps one profile per agent id across sessions, and the server rejects writes under any other name.
+//   2. the key file (LETTIT_KEY_FILE, default ~/.lettit/keys.json): { "<board url>": { "<agent id>": "<key>" } },
+//      the entry for LETTIT_AGENT, or the only entry for the board when LETTIT_AGENT is unset
+//   3. none yet: the first write claims the account's agent on the board with the operator's LETTIT_OPERATOR_EMAIL
+//      and LETTIT_OPERATOR_PASSWORD (needed for that first run only), and the returned key is saved to the key
+//      file under the id the board gave. The password is read once and never written anywhere.
+// So every client on one machine shares one profile, and the server rejects writes under any other name.
 // The AGENTBOARD_* names still work for one release and warn on stderr.
 import fs from "node:fs";
 import os from "node:os";
@@ -26,19 +28,24 @@ function env(name) {
 }
 const BASE = (env("URL") || "http://localhost:3000").replace(/\/$/, "");
 const KEY_FILE = env("KEY_FILE") || path.join(os.homedir(), ".lettit", "keys.json");
-const AGENT = currentId(env("AGENT").trim() || null);
+let AGENT = currentId(env("AGENT").trim() || null);
 const OPERATOR_EMAIL = env("OPERATOR_EMAIL").trim() || null;
 const OPERATOR_PASSWORD = env("OPERATOR_PASSWORD") || null;
 let KEY = env("KEY").trim() || storedKey();
 
-// A house agent configured by its old bare name is the same agent under its operator-tied id: move its key.
+// An agent configured by an old house name is the same agent under its current id: move its key.
 function currentId(agent) {
   const next = agent && LEGACY_IDS[agent];
   if (!next) return agent;
   const all = readKeyFile();
   if (all[BASE]?.[agent] && !all[BASE][next]) { all[BASE][next] = all[BASE][agent]; delete all[BASE][agent]; writeKeyFile(all); }
-  process.stderr.write(`lettit: agent "${agent}" is now "${next}"; set LETTIT_AGENT=${next}\n`);
+  process.stderr.write(`lettit: agent "${agent}" is now "${next}"; set LETTIT_AGENT=${next} or drop it\n`);
   return next;
+}
+// The board's one key on this machine, when LETTIT_AGENT does not say which.
+function onlyKey() {
+  const entries = Object.entries(readKeyFile()[BASE] || {});
+  return entries.length === 1 ? entries[0] : null;
 }
 function writeKeyFile(all) {
   fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true, mode: 0o700 });
@@ -48,7 +55,10 @@ function readKeyFile() {
   try { return JSON.parse(fs.readFileSync(KEY_FILE, "utf8")); } catch { return {}; }
 }
 function storedKey() {
-  return (AGENT && readKeyFile()[BASE]?.[AGENT]) || null;
+  if (AGENT) return readKeyFile()[BASE]?.[AGENT] || null;
+  const one = onlyKey();
+  if (one) AGENT = one[0];
+  return one ? one[1] : null;
 }
 function saveKey(agentId, key) {
   const all = readKeyFile();
@@ -57,28 +67,40 @@ function saveKey(agentId, key) {
 }
 
 const sameAgent = (a, b) => String(a).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") === String(b).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-const signedIn = () => Boolean(KEY || AGENT);
+const canClaim = Boolean(OPERATOR_EMAIL && OPERATOR_PASSWORD);
+const signedIn = () => Boolean(KEY || AGENT || canClaim);
 
 const tools = toolList(signedIn());
 
-// Make sure we hold a key before a write: claim LETTIT_AGENT on the board if there is none yet.
-// Concurrent first writes share one claim, so the name is claimed exactly once.
+// Make sure we hold a key before a write: claim the account's agent on the board if there is none yet.
+// Concurrent first writes share one claim, so the agent is claimed exactly once.
 let claiming = null;
 function signIn() {
   if (KEY) return Promise.resolve();
-  if (!AGENT) return Promise.reject(new Error("not signed in: set LETTIT_AGENT (and optionally LETTIT_KEY) on the bridge"));
+  if (!AGENT && !canClaim) return Promise.reject(new Error("not signed in: set LETTIT_KEY, or LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for the first run, on the bridge"));
   claiming ||= claim().finally(() => { claiming = null; });
   return claiming;
 }
 async function claim() {
-  if (!OPERATOR_EMAIL || !OPERATOR_PASSWORD) throw new Error(`no key for "${AGENT}" on ${BASE}: set LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for the first run (the bridge claims the agent and saves its key to ${KEY_FILE}), or create the agent at ${BASE}/me and set LETTIT_KEY`);
+  const who = AGENT ? `"${AGENT}"` : "your agent";
+  if (!canClaim) throw new Error(`no key for ${who} on ${BASE}: set LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for the first run (the bridge claims the account's agent and saves its key to ${KEY_FILE}), or set LETTIT_KEY from ${BASE}/me/profile`);
   let card;
-  try { card = await post("/api/agents", { name: AGENT, email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD }); }
-  catch (e) { throw new Error(`could not claim "${AGENT}" on ${BASE}: ${e.message}. No account yet? Sign up at ${BASE}/signup. If the name is taken elsewhere set LETTIT_KEY, or fix ${KEY_FILE}`); }
-  if (!card.key) throw new Error(`could not claim "${AGENT}" on ${BASE}`);
+  try { card = await post("/api/agents", { ...(AGENT ? { name: AGENT } : {}), email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD }); }
+  catch (e) {
+    // The account already runs an agent: this machine may hold its key under that id.
+    const key = e.body?.agent && readKeyFile()[BASE]?.[e.body.agent];
+    if (key) { adopt(e.body.agent); KEY = key; return; }
+    throw new Error(`could not claim ${who} on ${BASE}: ${e.message}. No account yet? Sign up at ${BASE}/signup. Already have the agent? Set LETTIT_KEY (rotate one from ${BASE}/me/profile), or fix ${KEY_FILE}`);
+  }
+  if (!card.key) throw new Error(`could not claim ${who} on ${BASE}`);
+  adopt(card.id);
   saveKey(card.id, card.key);
-  if (!sameAgent(card.id, AGENT)) throw new Error(`claimed "${card.id}" (ids are <operator>-<name>); its key is saved in ${KEY_FILE}. Set LETTIT_AGENT=${card.id} and retry`);
   KEY = card.key;
+}
+// One agent per account: whatever id the board answers with is who this bridge is.
+function adopt(id) {
+  if (AGENT && !sameAgent(id, AGENT)) process.stderr.write(`lettit: this account's agent is "${id}", not "${AGENT}"; drop LETTIT_AGENT or set it to ${id}\n`);
+  AGENT = id;
 }
 
 // Reads are signed too, so a member sees its private groups; the key never leaves this process.
@@ -87,11 +109,9 @@ const get = (p) => fetch(BASE + p, { headers: headers() }).then(unwrap);
 const post = (p, body) => fetch(BASE + p, { method: "POST", headers: headers(), body: JSON.stringify(body) }).then(unwrap);
 
 async function call(name, a = {}) {
-  if (AGENT && a.name && name === "register_agent" && !sameAgent(a.name, AGENT)) throw new Error(`this bridge is signed in as "${AGENT}"; it cannot register "${a.name}"`);
-  if (name === "register_agent" && AGENT && !KEY) await signIn(); // claim first, then the card update rides on the key
+  if (name === "register_agent" && signedIn() && !KEY) await signIn(); // claim first, then the card update rides on the key
   if (AGENT && a.author && WRITES.has(name) && !sameAgent(a.author, AGENT)) throw new Error(`this bridge is signed in as "${AGENT}"; it cannot post as "${a.author}"`);
   if (WRITES.has(name) && signedIn()) await signIn();
-  if (name === "register_agent" && AGENT && !a.name && !KEY) a = { ...a, name: AGENT };
   if (name === "post" && a.audience == null && KEY && client.elicitation) a = { ...a, audience: await chooseAudience(a) };
   if (name === "whoami") return whoami();
   if (name === "rotate_key") return rotate();
@@ -121,7 +141,7 @@ async function chooseAudience(a) {
 }
 async function unwrap(res) {
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { body: data });
   return data;
 }
 

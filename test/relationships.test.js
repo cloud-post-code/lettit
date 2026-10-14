@@ -39,7 +39,7 @@ before(async () => {
 test("the relationships, preview, and circles pages are gone; /me keeps the connected table only", async () => {
   for (const p of ["/me/connections", "/me/preview?as=t-bob", "/me/visibility-types"]) assert.equal((await page(p, cookie)).status, 404, p);
   const html = await text("/me", cookie);
-  assert.match(row(html, "t-bob"), /name="types" value="colleague" checked/);
+  assert.match(row(html, "t-bob"), /<select name="types" multiple[^>]*>(?:(?!<\/select>).)*<option value="colleague" selected>/);
   assert.ok(!/all relationships|href="\/me\/visibility-types"|connected with you/.test(html), "the summary line is gone");
 });
 
@@ -71,7 +71,7 @@ test("a visibility change through the form is reflected for the target on its ne
   const [, rel] = await get("/api/agents/t-bob", me);
   assert.deepEqual(rel.relationship.they_are, ["friend", "colleague"]);
   const html = await text("/me", cookie);
-  assert.match(row(html, "t-bob"), /value="friend" checked/);
+  assert.match(row(html, "t-bob"), /<option value="friend" selected>/);
 });
 
 test("connect, disconnect, follow, and unfollow work from the console", async () => {
@@ -101,4 +101,30 @@ test("the circles form route is gone; the API still manages types", async () => 
   const [, rel] = await get("/api/agents/t-bob", me);
   assert.deepEqual(rel.relationship.they_are, ["client"]);
   assert.equal((await api("/api/me/visibility-types/delete", { name: "client" }, me))[0], 200);
+});
+
+test("/me: Circle Types button, two-word column, not connected, an X to disconnect, my posts at the bottom", async () => {
+  await form("/me/connections", { csrf, action: "connect", agent: "t-fay", types: "friend" }, cookie);
+  const html = await text("/me", cookie);
+  assert.match(html, /<a class="button" href="\/me\/circles">Circle Types<\/a>/);
+  assert.match(html, /<th>their circles<\/th>/);
+  assert.ok(!/has not connected back|what they can read of yours/.test(html));
+  assert.match(row(html, "t-fay") || "", /not connected/);
+  assert.match(row(html, "t-fay") || "", /class="x" title="disconnect"/);
+  assert.match(html, /id="share" data-url="[^"]*\/connect\/t-me"/);
+  assert.ok(html.indexOf('href="/me/posts">my posts') > html.indexOf("</table>"), "my posts sits under the table");
+  assert.ok(!/<div class="meta" style="margin:8px 0">[^<]*<a href="\/me">me<\/a>/.test(html), "no me · profile tabs on /me");
+});
+
+test("/me/circles lists circles, adds a custom one, and removes it", async () => {
+  let html = await text("/me/circles", cookie);
+  assert.match(html, /<b>friend<\/b>/);
+  assert.equal((await form("/me/circles", { csrf, action: "add", name: "Client", description: "paying" }, cookie)).status, 302);
+  html = await text("/me/circles", cookie);
+  assert.match(html, /<b>client<\/b>/);
+  assert.match(await text("/me", cookie), /<option value="client">client<\/option>/);
+  assert.equal((await form("/me/circles", { csrf, action: "add", name: "client" }, cookie)).status, 409);
+  assert.equal((await form("/me/circles", { csrf, action: "remove", name: "client" }, cookie)).status, 302);
+  assert.ok(!/<b>client<\/b>/.test(await text("/me/circles", cookie)));
+  assert.equal((await form("/me/circles", { csrf, action: "remove", name: "friend" }, cookie)).status, 400, "built-ins stay");
 });
