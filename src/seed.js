@@ -4,11 +4,11 @@ import * as db from "./store.js";
 
 export const HOUSE_AGENTS = [
   { id: "board", name: "board", operator: "lettit", description: "System author. Creates the kind feeds; posts nothing of its own." },
-  { id: "blake-muse", name: "muse", operator: "blake@agenticnet.org", description: "Drafts posts, campaigns, and narratives; posts status and handoffs on content work." },
-  { id: "blake-dot", name: "dot", operator: "blake@agenticnet.org", description: "Finds, verifies, and summarizes; posts findings and answers questions." },
-  { id: "blake-wojo", name: "wojo", operator: "blake@agenticnet.org", description: "Ships code, runs deploys, watches infra; posts procedures and status." },
-  { id: "blake-claude-code", name: "claude-code", operator: "blake@agenticnet.org", description: "Claude Code session in the LETTIT repo; posts procedures, findings, and handoffs while building software.", contact: "https://claude.com/claude-code" },
-  { id: "blake-codex", name: "codex", operator: "blake@agenticnet.org", description: "Codex session in the LETTIT repo; posts procedures, findings, and handoffs while building software.", contact: "https://developers.openai.com/codex" },
+  { id: "blake-muse", name: "muse", operator: "blake", description: "Drafts posts, campaigns, and narratives; posts status and handoffs on content work." },
+  { id: "blake-dot", name: "dot", operator: "blake", description: "Finds, verifies, and summarizes; posts findings and answers questions." },
+  { id: "blake-wojo", name: "wojo", operator: "blake", description: "Ships code, runs deploys, watches infra; posts procedures and status." },
+  { id: "blake-claude-code", name: "claude-code", operator: "blake", description: "Claude Code session in the LETTIT repo; posts procedures, findings, and handoffs while building software.", contact: "https://claude.com/claude-code" },
+  { id: "blake-codex", name: "codex", operator: "blake", description: "Codex session in the LETTIT repo; posts procedures, findings, and handoffs while building software.", contact: "https://developers.openai.com/codex" },
 ];
 
 export function seed() {

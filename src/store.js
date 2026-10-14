@@ -39,7 +39,7 @@ function hydrate(raw) {
   if (!db.seeded || typeof db.seeded !== "object") db.seeded = {};
   if (!db.migrated || typeof db.migrated !== "object") db.migrated = {};
   db.oauth = { clients: {}, codes: {}, tokens: {}, ...(db.oauth || {}) };
-  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions() | migrateProposals();
+  const changed = migrateResources() | migrateGroups() | migrateFeedback() | migrateOperatorIds() | migrateSessions() | migrateProposals() | migrateOperatorEmails();
   for (const a of Object.values(db.agents)) ensureTypes(a);
   if (changed) save();
   return db;
@@ -64,6 +64,14 @@ function migrateOperatorIds() {
   db.migrated["operator-ids"] = now();
   return true;
 }
+// Cards written before the rule below could carry the operator's email as display text: reduce them once.
+function migrateOperatorEmails() {
+  if (db.migrated["operator-emails"]) return false;
+  for (const a of Object.values(db.agents)) a.operator = operatorText(a.operator);
+  db.migrated["operator-emails"] = now();
+  return true;
+}
+
 // Sessions written before operator accounts belonged to agent keys, not operators: drop them once.
 // Connections used to be proposed and accepted. A pending proposal already said what the proposer would let
 // the other read, so it becomes that proposer's one-way connection; the proposals table then goes away.
@@ -206,7 +214,7 @@ function writeCard(aid, card, existing) {
   const agent = {
     id: aid,
     name: String(card.name || existing?.name || aid),
-    operator: str(card.operator ?? existing?.operator),
+    operator: operatorText(card.operator ?? existing?.operator),
     contact: str(card.contact ?? existing?.contact),
     description: str(card.description ?? existing?.description),
     created: existing?.created || now(),
@@ -220,6 +228,10 @@ function writeCard(aid, card, existing) {
   db.agents[aid] = agent;
   return agent;
 }
+
+// The card's operator is display text and is public everywhere the card is: an email address written there
+// is reduced to its handle, so no agent card, list, or page ever shows an operator's email.
+const operatorText = (v) => (str(v).includes("@") ? handle(v) : str(v));
 
 // The operator's handle: "blake@agenticnet.org" -> "blake", "https://www.acme.dev" -> "acme-dev".
 export const handle = (operator) => slug(String(operator || "").replace(/^[a-z]+:\/\//i, "").replace(/^www\./i, "").split("@")[0]).slice(0, 20);

@@ -40,7 +40,13 @@ test("a claim needs the operator's credentials and gets an operator-prefixed id;
   const [upd, updated] = await post("/api/agents", { operator: "ann@newjob.com", description: "moved" }, card.key);
   assert.equal(upd, 200);
   assert.equal(updated.id, "ann-research", "the id never moves");
-  assert.equal(updated.operator, "ann@newjob.com");
+  assert.equal(updated.operator, "ann", "an email in the operator field is reduced to its handle: the card never shows an email");
+  const [, shown] = await get("/api/agents/ann-research");
+  assert.equal(shown.operator, "ann");
+  const page = await fetch(base + "/agents/ann-research").then((r) => r.text());
+  assert.doesNotMatch(page, /ann@newjob\.com/);
+  const [, text] = await post("/api/agents", { operator: "Ann Labs" }, card.key);
+  assert.equal(text.operator, "Ann Labs", "plain display text is kept as typed");
 });
 
 const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
@@ -146,5 +152,6 @@ test("a bridge claim that lands on a different id saves the key under that id an
 test("the agents page shows description and operator", async () => {
   const html = await fetch(base + "/agents").then((r) => r.text());
   assert.match(html, /moved/);
-  assert.match(html, /ann@newjob.com/);
+  assert.match(html, /Ann Labs/);
+  assert.doesNotMatch(html, /ann@newjob\.com/, "an email never reaches the agents page");
 });

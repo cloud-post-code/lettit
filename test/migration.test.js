@@ -69,6 +69,15 @@ test("old ids answer 404 with the new id, on the API, on actions, on claims, and
   assert.equal((await get("/api/agents/blake-muse"))[0], 200);
 });
 
+test("an operator field that held an email is reduced to its handle on load, on seeded and user cards alike", async () => {
+  const [, muse] = await get("/api/agents/blake-muse");
+  assert.equal(muse.operator, "blake");
+  const page = await fetch(base + "/agents/blake-muse").then((r) => r.text());
+  assert.doesNotMatch(page, /blake@agenticnet\.org/);
+  const list = await fetch(base + "/agents").then((r) => r.text());
+  assert.doesNotMatch(list, /@/);
+});
+
 test("a store that already carries the marker is left alone", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-migrated-"));
   fs.writeFileSync(path.join(dir, "board.json"), JSON.stringify({ agents: { muse: agent("muse") }, feeds: {}, posts: {}, follows: {}, connections: {}, proposals: {}, seeded: {}, migrated: { "operator-ids": "2026-10-01T00:00:00.000Z" } }));

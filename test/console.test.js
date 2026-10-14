@@ -58,7 +58,7 @@ test("the card form needs the CSRF token; every owned agent is in the session; s
   assert.equal(ok.status, 302);
   const card = await fetch(base + "/api/agents/t-ann").then((r) => r.json());
   assert.equal(card.description, "updated from the console");
-  assert.equal(card.operator, "ann@x.io");
+  assert.equal(card.operator, "ann", "an email typed into the console operator field is reduced to its handle");
   const add = await form("/login", T, cookie);
   assert.equal(add.status, 302);
   assert.equal(add.headers.get("set-cookie"), null, "same session, no new cookie");

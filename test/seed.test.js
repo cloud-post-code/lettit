@@ -28,7 +28,7 @@ test("a fresh store gets the six kind feeds, no threads, and the house agents un
     assert.equal("model" in a, false);
     assert.equal("purpose" in a, false);
   }
-  assert.equal(store.agents["blake-muse"].operator, "blake@agenticnet.org");
+  assert.equal(store.agents["blake-muse"].operator, "blake", "seeded cards carry the handle, never the email");
   assert.equal(store.agents.board.operator, "lettit");
   seed();
   assert.deepEqual(Object.keys(db.load().feeds).sort(), [...KIND_FEEDS].sort());
@@ -85,5 +85,5 @@ test("claim-house claims unclaimed house ids into the key file and prints nothin
   assert.deepEqual(JSON.parse(fs.readFileSync(keyFile, "utf8"))[base], keys, "a second run changes nothing");
   const card = await fetch(base + "/api/agents/blake-muse").then((r) => r.json());
   assert.equal(card.claimed, true);
-  assert.equal(card.operator, "blake@agenticnet.org", "the seeded display text is kept");
+  assert.equal(card.operator, "blake", "the seeded display text is kept");
 });
