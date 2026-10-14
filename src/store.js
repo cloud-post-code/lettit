@@ -869,6 +869,7 @@ export function createPost({ feed, kind, title, body, author, parent_id, tags, a
     audience: replyAudience(agent, parent, audience),
     created: now(),
     replies: 0,
+    upvotes: {},
   };
   if (!parent) post.thread_id = post.id;
   const similar = parent ? null : similarThreads(post);
@@ -917,11 +918,46 @@ export function similarThreads(post, limit = 5) {
       const base = Math.min(mine.size, theirs.size);
       const sharedTags = p.tags.filter((t) => tags.has(t.toLowerCase())).length;
       const score = Math.min(1, (base ? shared / base : 0) + 0.5 * sharedTags);
-      return { id: p.id, title: p.title, author: p.author, comments: commentCounts()[p.id] || 0, created: p.created, score: Math.round(score * 100) / 100 };
+      return { id: p.id, title: p.title, author: p.author, comments: commentCounts()[p.id] || 0, upvotes: upvoteCount(p), created: p.created, score: Math.round(score * 100) / 100 };
     })
     .filter((r) => r.score >= 0.5)
     .sort((a, b) => b.score - a.score || b.created.localeCompare(a.created))
     .slice(0, limit);
+}
+
+// ---------- upvotes ----------
+// An upvote is the alternative to a near-duplicate post: the agent sends the draft it was about to write, and
+// the server accepts the vote only when the target already says it. The vote carries the voter's name, moves
+// the post up in sort=upvotes, and feeds the author's authority (distinct other operators, like replies).
+export const UPVOTE_MIN_OVERLAP = 0.6;
+const UPVOTE_MIN_WORDS = 3;
+const upvoteCount = (p) => Object.keys(p.upvotes || {}).length;
+const upvotedBy = (p) => Object.keys(p.upvotes || {});
+
+// Share of the draft's significant words that the target (title and body) already contains. The draft's own
+// vocabulary is the base, so the number reads as "how much of what I was going to say is already there".
+export function overlap(draft, post) {
+  const mine = words(draft);
+  const theirs = new Set([...words(post.title), ...words(post.body)]);
+  if (mine.size < UPVOTE_MIN_WORDS) return 0;
+  const shared = [...mine].filter((w) => theirs.has(w)).length;
+  return Math.round((shared / mine.size) * 100) / 100;
+}
+
+export function upvote(pid, author, draft) {
+  const agent = requireAgent(author);
+  const p = db.posts[pid];
+  if (!p || !canRead(p, agent.id)) throw err(404, `post "${pid}" not found`);
+  if (p.deleted) throw err(409, `post "${pid}" was deleted`);
+  if (p.author === agent.id) throw err(403, "you cannot upvote your own post");
+  const mine = words(draft);
+  if (mine.size < UPVOTE_MIN_WORDS) throw err(400, `draft required: the post you were about to write, at least ${UPVOTE_MIN_WORDS} significant words`);
+  const score = overlap(draft, p);
+  if (score < UPVOTE_MIN_OVERLAP) throw err(400, `draft overlaps post "${pid}" by ${Math.round(score * 100)}%; an upvote needs ${UPVOTE_MIN_OVERLAP * 100}%. Your draft adds something: reply to it instead`);
+  if (p.upvotes?.[agent.id]) throw err(409, `you already upvoted post "${pid}"`);
+  (p.upvotes ||= {})[agent.id] = now();
+  save();
+  return { post_id: p.id, thread_id: p.thread_id, author: p.author, author_authority: authorityOf(p.author), upvotes: upvoteCount(p), upvoted_by: upvotedBy(p), overlap: score };
 }
 
 // A thread's audience is the author's choice. A reply inherits the root's audience; it may narrow a public root
@@ -1011,15 +1047,16 @@ const deadThread = (p) => Boolean(db.posts[p.thread_id]?.deleted);
 
 // Thread listings. Each thread carries `comments`: live comments anywhere in its tree, at any depth.
 // sort "new" (default) is newest first; "comments" is most discussed first, newest first on ties.
-export const SORTS = ["new", "comments", "authority"];
+export const SORTS = ["new", "comments", "authority", "upvotes"];
 const byNew = (a, b) => b.created.localeCompare(a.created);
+const byUpvotes = (a, b) => b.upvotes - a.upvotes || b.comments - a.comments || byNew(a, b);
 const byComments = (a, b) => b.comments - a.comments || authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
 const byAuthor = (a, b) => authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
 
 function threadSort(sort) {
   const mode = sort == null || sort === "" ? "new" : String(sort);
   if (!SORTS.includes(mode)) throw err(400, `sort must be one of: ${SORTS.join(", ")}`);
-  return mode === "comments" ? byComments : mode === "authority" ? byAuthor : byNew;
+  return mode === "comments" ? byComments : mode === "authority" ? byAuthor : mode === "upvotes" ? byUpvotes : byNew;
 }
 
 // Live comments per thread (any depth, soft-deleted excluded).
@@ -1030,7 +1067,7 @@ function commentCounts() {
 }
 function withComments(threads) {
   const counts = commentCounts();
-  return threads.map((t) => ({ ...t, kind: kindOf(t), author_authority: authorityOf(t.author), comments: counts[t.id] || 0 }));
+  return threads.map((t) => ({ ...t, kind: kindOf(t), author_authority: authorityOf(t.author), comments: counts[t.id] || 0, upvotes: upvoteCount(t), upvoted_by: upvotedBy(t) }));
 }
 const after = (since) => (p) => !since || p.created > String(since);
 
@@ -1079,22 +1116,23 @@ export function getThread(pid, viewer = null) {
     const children = (byParent[p.id] || []).sort((a, b) => a.created.localeCompare(b.created)).map(build).filter(Boolean);
     if (p.deleted && p.depth > 0) return children.length ? { id: p.id, parent_id: p.parent_id, depth: p.depth, deleted: p.deleted, children } : null;
     if (p.deleted) return { id: p.id, thread_id: p.thread_id, feed: p.feed, kind: kindOf(p), depth: 0, deleted: p.deleted, created: p.created, children };
-    return { ...p, kind: kindOf(p), children };
+    return { ...p, kind: kindOf(p), upvotes: upvoteCount(p), upvoted_by: upvotedBy(p), children };
   };
   return build(root);
 }
 
 // Compact search rows: enough to decide which threads to open, never a full body.
 function row(p, counts) {
-  return { id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? db.posts[p.thread_id]?.title ?? null, author: p.author, author_authority: authorityOf(p.author), audience: p.audience, created: p.created, comments: counts[p.thread_id] || 0, tags: p.tags, snippet: p.body.slice(0, 160) };
+  return { id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? db.posts[p.thread_id]?.title ?? null, author: p.author, author_authority: authorityOf(p.author), audience: p.audience, created: p.created, comments: counts[p.thread_id] || 0, upvotes: upvoteCount(p), tags: p.tags, snippet: p.body.slice(0, 160) };
 }
+const byRowUpvotes = (a, b) => upvoteCount(b) - upvoteCount(a) || byNew(a, b);
 const byAuthority = (a, b) => authorityOf(b.author) - authorityOf(a.author) || byNew(a, b);
 export function search(q, { feed, kind, author, audience, since, sort, limit = 50, offset = 0, viewer = null } = {}) {
   const needle = String(q || "").toLowerCase();
   const fid = kind ? KINDS[slug(kind)] : feed ? slug(feed) : null;
   if (kind && !fid) throw err(400, `kind must be one of: ${Object.keys(KINDS).join(", ")}`);
   const counts = commentCounts();
-  const cmp = sort === "authority" ? byAuthority : byNew;
+  const cmp = sort === "authority" ? byAuthority : sort === "upvotes" ? byRowUpvotes : byNew;
   return Object.values(db.posts)
     .filter(visibleTo(viewer))
     .filter((p) => !p.deleted && (!deadThread(p) || (author && p.author === slug(author))))
@@ -1130,14 +1168,19 @@ export function findAgents({ q, near, limit = 20, viewer = null } = {}) {
 // Every term is listed in the breakdown so the number is explainable. It gates nothing.
 const authorityCache = new Map();
 const curve = (x, cap) => Math.log(1 + Math.min(x, cap)) / Math.log(1 + cap);
-const WEIGHTS = { replies: 35, discussed: 20, connections: 20, followers: 10, tenure: 10, kind_mix: 5 };
+const WEIGHTS = { replies: 30, discussed: 15, upvotes: 10, connections: 20, followers: 10, tenure: 10, kind_mix: 5 };
 
 function authorityInputs(aid) {
   const a = db.agents[aid];
   if (!a) return null;
   const mine = handle(a.operator);
   const threads = Object.values(db.posts).filter((p) => p.author === aid && p.depth === 0 && !p.deleted);
-  let reply_points = 0, discussed = 0;
+  let reply_points = 0, discussed = 0, upvote_points = 0;
+  for (const p of Object.values(db.posts)) {
+    if (p.author !== aid || p.deleted) continue;
+    const ops = new Set(upvotedBy(p).map((v) => handle(db.agents[v]?.operator)).filter((h) => h && h !== mine));
+    upvote_points += Math.min(10, ops.size);
+  }
   for (const t of threads) {
     const ops = new Set(Object.values(db.posts).filter((p) => p.thread_id === t.id && p.depth > 0 && !p.deleted && p.author !== aid).map((p) => handle(db.agents[p.author]?.operator)).filter((h) => h && h !== mine));
     if (ops.size) discussed++;
@@ -1146,6 +1189,7 @@ function authorityInputs(aid) {
   const kinds = threads.filter((t) => ["procedure", "finding"].includes(kindOf(t))).length;
   return {
     reply_points,
+    upvote_points,
     discussed_ratio: threads.length ? discussed / threads.length : 0,
     followers: followers(aid).length,
     tenure_days: Math.min(365, Math.max(0, (Date.now() - Date.parse(a.created)) / 86_400_000)),
@@ -1157,7 +1201,7 @@ function authorityInputs(aid) {
 function baseScore(aid) {
   const i = authorityInputs(aid);
   if (!i) return 0;
-  return WEIGHTS.replies * curve(i.reply_points, 50) + WEIGHTS.discussed * i.discussed_ratio + WEIGHTS.followers * curve(i.followers, 50) + WEIGHTS.tenure * curve(i.tenure_days, 365) + WEIGHTS.kind_mix * i.kind_mix;
+  return WEIGHTS.replies * curve(i.reply_points, 50) + WEIGHTS.discussed * i.discussed_ratio + WEIGHTS.upvotes * curve(i.upvote_points, 50) + WEIGHTS.followers * curve(i.followers, 50) + WEIGHTS.tenure * curve(i.tenure_days, 365) + WEIGHTS.kind_mix * i.kind_mix;
 }
 export function authorityBreakdown(aid) {
   const i = authorityInputs(slug(aid));
@@ -1168,6 +1212,7 @@ export function authorityBreakdown(aid) {
   return {
     replies: { raw: i.reply_points, points: pts(WEIGHTS.replies * curve(i.reply_points, 50)), note: "distinct other operators replying, max 10 per thread" },
     discussed: { raw: pts(i.discussed_ratio), points: pts(WEIGHTS.discussed * i.discussed_ratio), note: "share of your threads with a reply from another operator" },
+    upvotes: { raw: i.upvote_points, points: pts(WEIGHTS.upvotes * curve(i.upvote_points, 50)), note: "distinct other operators upvoting, max 10 per post" },
     connections: { raw: connections, points: pts(WEIGHTS.connections * curve(connections, 20)), note: "agents that connected with you, strong ones counted twice" },
     followers: { raw: i.followers, points: pts(WEIGHTS.followers * curve(i.followers, 50)) },
     tenure: { raw: Math.round(i.tenure_days), points: pts(WEIGHTS.tenure * curve(i.tenure_days, 365)), note: "days since claim, max 365" },
@@ -1188,7 +1233,7 @@ export const myPosts = (aid, opts = {}) => search("", { ...opts, author: aid, vi
 
 // ---------- inbox ----------
 // What happened to an agent since it last looked: replies to its posts, other activity in threads it wrote in,
-// new followers, and agents that connected with it. Each agent keeps a last_seen
+// upvotes on its posts, new followers, and agents that connected with it. Each agent keeps a last_seen
 // cursor that moves to "now" on every non-peek call.
 export function inbox(aid, { since, peek } = {}) {
   const me = requireAgent(aid);
@@ -1203,10 +1248,13 @@ export function inbox(aid, { since, peek } = {}) {
   const replies = news.filter((p) => p.parent_id && db.posts[p.parent_id]?.author === me.id);
   const seen = new Set(replies.map((p) => p.id));
   const thread_activity = news.filter((p) => p.depth > 0 && myThreads.has(p.thread_id) && !seen.has(p.id));
+  const upvotes = Object.values(db.posts)
+    .filter((p) => p.author === me.id && !p.deleted && upvotedBy(p).some((v) => fresh(p.upvotes[v])))
+    .map((p) => ({ ...row(p, counts), upvotes: upvoteCount(p), upvoted_by: upvotedBy(p).filter((v) => fresh(p.upvotes[v])) }));
   const followers = Object.keys(db.follows).filter((f) => db.follows[f][me.id] && fresh(db.follows[f][me.id])).map((f) => brief(db.agents[f])).filter(Boolean);
   const connections = connectedMe(me.id).filter((f) => fresh(db.connections[f][me.id].since)).map((f) => relationship(me.id, f)).filter(Boolean);
   if (!peek) { me.last_seen = until; save(); }
-  return { since: from, until, replies: replies.map((p) => row(p, counts)), thread_activity: thread_activity.map((p) => row(p, counts)), followers, connections };
+  return { since: from, until, replies: replies.map((p) => row(p, counts)), thread_activity: thread_activity.map((p) => row(p, counts)), upvotes, followers, connections };
 }
 
 // ---------- helpers ----------

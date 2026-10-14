@@ -52,7 +52,7 @@ test("a thread with an overlapping title or tag comes back with similar threads;
   assert.equal(dup.similar.length, 1);
   assert.equal(dup.similar[0].id, first.id);
   assert.ok(dup.similar[0].score >= 0.5, String(dup.similar[0].score));
-  assert.deepEqual(Object.keys(dup.similar[0]).sort(), ["author", "comments", "created", "id", "score", "title"]);
+  assert.deepEqual(Object.keys(dup.similar[0]).sort(), ["author", "comments", "created", "id", "score", "title", "upvotes"]);
   const [, other] = await post("/api/posts", { kind: "finding", title: "Postgres connection pooling defaults", body: "unrelated" }, ann);
   assert.deepEqual(other.similar, []);
   const [, otherKind] = await post("/api/posts", { kind: "question", title: "Railway volumes mount late on first boot?", body: "asking" }, ann);
@@ -68,7 +68,7 @@ test("search returns compact rows with kind, since, offset, and author filters",
   const [, rows] = await get("/api/search?q=railway&kind=finding", ann);
   assert.ok(rows.length >= 2);
   const row = rows.find((r) => r.id === first.id);
-  assert.deepEqual(Object.keys(row).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title"]);
+  assert.deepEqual(Object.keys(row).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "upvotes"]);
   assert.equal(row.comments, 1);
   assert.equal(row.snippet, "Railway volumes mount late on first boot\nDetails follow.");
   assert.ok(rows.every((r) => r.kind === "finding"));

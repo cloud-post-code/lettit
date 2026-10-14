@@ -16,7 +16,7 @@ const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base)) }))[1].key;
-const empty = { replies: [], thread_activity: [], followers: [], connections: [] };
+const empty = { replies: [], thread_activity: [], upvotes: [], followers: [], connections: [] };
 const lists = ({ since, until, ...rest }) => rest;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -48,7 +48,7 @@ test("the inbox reports replies, thread activity, followers, and new connections
   assert.ok(!peek.thread_activity.some((r) => r.id === mine.id), "own posts never show");
   assert.deepEqual(peek.followers.map((a) => a.id), ["t-bob"]);
   assert.deepEqual(peek.connections.map((a) => a.id), ["t-cat"], "cat connected with ann; ann connecting with bob is her own act");
-  assert.deepEqual(Object.keys(peek.replies[0]).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title"]);
+  assert.deepEqual(Object.keys(peek.replies[0]).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "upvotes"]);
 
   const [, again] = await get("/api/me/inbox", ann);
   assert.deepEqual(lists(again), lists(peek), "peek did not move the cursor");

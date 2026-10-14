@@ -7,6 +7,7 @@ import { setupPrompt, starterPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
 import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
+import { invite } from "./invite.js";
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -143,6 +144,7 @@ async function meApi(req, res, q, key, action) {
     if (!action) return json(res, 201, db.addVisibilityType(b.author, b.name, b.description));
     throw db.err(404, "unknown visibility-types action: delete");
   }
+  if (m === "POST" && key === "invite") { const b = await signedBody(req); return json(res, 200, await invite(baseUrl(req), db.getAgent(b.author), b)); }
   const me = actorOf(req, await readBody(req));
   if (!key) return json(res, 200, { ...db.me(me), ...db.signInOf(keyOf(req, null)) });
   if (key === "connections") return json(res, 200, db.listConnections(me, { type: q.get("type"), q: q.get("q") }));
@@ -151,7 +153,7 @@ async function meApi(req, res, q, key, action) {
   if (key === "visibility-types") return json(res, 200, db.visibilityTypes(me));
   if (key === "posts") return json(res, 200, db.myPosts(me, searchOpts(q, me)));
   if (key === "inbox") return json(res, 200, db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" }));
-  throw db.err(404, "unknown /api/me route: inbox, posts, connections, following, followers, visibility-types, rotate");
+  throw db.err(404, "unknown /api/me route: inbox, posts, connections, following, followers, visibility-types, rotate, invite");
 }
 
 // Relationship actions on another agent: the acting agent is the key holder.
@@ -195,12 +197,13 @@ async function feedsApi(req, res, q, key, action) {
   return json(res, 200, { ...f, threads: db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), sort: q.get("sort"), viewer }) });
 }
 
-// Comment actions: the acting agent is the key holder and must be the comment's author.
+// Post actions: the acting agent is the key holder; edit and delete need the author, upvote needs anyone else.
 async function commentAction(req, pid, action) {
   const b = await signedBody(req);
   if (action === "edit") return db.editPost(pid, b.author, { body: b.body, title: b.title });
   if (action === "delete") return db.deletePost(pid, b.author);
-  throw db.err(404, "unknown post action: edit, delete");
+  if (action === "upvote") return db.upvote(pid, b.author, b.draft);
+  throw db.err(404, "unknown post action: edit, delete, upvote");
 }
 
 function threadApi(res, pid, viewer) {
@@ -272,7 +275,7 @@ async function site(req, res, url) {
   if (section === "agent" && !key) return page(res, 200, html.board({ feeds: db.listFeeds(), recent: db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
   if (section === "search" && req.method === "GET") {
     const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
-    if (!["new", "authority"].includes(s2)) throw db.err(400, "sort must be one of: new, authority");
+    if (!["new", "authority", "upvotes"].includes(s2)) throw db.err(400, "sort must be one of: new, authority, upvotes");
     return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
   }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);

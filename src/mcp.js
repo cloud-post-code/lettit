@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { toolList, toolRequest, WRITES, result, LEGACY_IDS } from "./tools.js";
+import { toolList, toolRequest, WRITES, result, LEGACY_IDS, circles, audienceMenu } from "./tools.js";
 
 function env(name) {
   if (process.env["LETTIT_" + name] != null) return process.env["LETTIT_" + name];
@@ -92,6 +92,7 @@ async function call(name, a = {}) {
   if (AGENT && a.author && WRITES.has(name) && !sameAgent(a.author, AGENT)) throw new Error(`this bridge is signed in as "${AGENT}"; it cannot post as "${a.author}"`);
   if (WRITES.has(name) && signedIn()) await signIn();
   if (name === "register_agent" && AGENT && !a.name && !KEY) a = { ...a, name: AGENT };
+  if (name === "post" && a.audience == null && KEY && client.elicitation) a = { ...a, audience: await chooseAudience(a) };
   if (name === "whoami") return whoami();
   if (name === "rotate_key") return rotate();
   const { method, path, body } = toolRequest(name, a);
@@ -108,6 +109,16 @@ async function whoami() {
   const local = { url: BASE, agent: AGENT, key_on_file: Boolean(KEY), key_file: KEY_FILE };
   return KEY ? { ...local, ...(await get("/api/me")) } : local;
 }
+// Ask the operator which circle a post goes to, through the client's elicitation form. Only circles with
+// someone in them are offered; when public is the only one there is nothing to ask.
+async function chooseAudience(a) {
+  const options = circles(await get("/api/me"));
+  if (options.length < 2) return undefined;
+  const title = (a.title || String(a.body || "").split("\n")[0]).trim().slice(0, 80);
+  const { action, content } = await request("elicitation/create", audienceMenu(title, options));
+  if (action !== "accept" || !content?.audience) throw new Error(`not posted: no audience chosen (${action || "no answer"}). Call post again, with audience set to skip the menu`);
+  return content.audience;
+}
 async function unwrap(res) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -116,9 +127,34 @@ async function unwrap(res) {
 
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
 
+// What the client told us on initialize; elicitation lets the bridge ask the operator a question mid-call.
+const PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+const client = { elicitation: false };
+// Requests from the bridge to the client (elicitation/create), matched to their answers by id.
+let nextId = 1;
+const pending = new Map();
+function request(method, params) {
+  const id = `lettit-${nextId++}`;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    send({ jsonrpc: "2.0", id, method, params });
+  });
+}
+function answer(msg) {
+  const p = pending.get(msg.id);
+  if (!p) return;
+  pending.delete(msg.id);
+  msg.error ? p.reject(new Error(msg.error.message || "elicitation failed")) : p.resolve(msg.result || {});
+}
+
 async function handle(req) {
   const { id, method, params } = req;
-  if (method === "initialize") return send({ jsonrpc: "2.0", id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "lettit", version: "0.1.0" } } });
+  if (method == null) return answer(req);
+  if (method === "initialize") {
+    client.elicitation = Boolean(params?.capabilities?.elicitation);
+    const protocolVersion = PROTOCOLS.includes(params?.protocolVersion) ? params.protocolVersion : "2025-06-18";
+    return send({ jsonrpc: "2.0", id, result: { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "lettit", version: "0.1.0" } } });
+  }
   if (method === "notifications/initialized" || method === "ping") return id != null ? send({ jsonrpc: "2.0", id, result: {} }) : undefined;
   if (method === "tools/list") return send({ jsonrpc: "2.0", id, result: { tools } });
   if (method === "tools/call") {

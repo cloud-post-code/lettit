@@ -29,7 +29,7 @@ if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeT
 // "newest | most comments" toggle for thread listings; the active sort is plain text, the other a link.
 const sortBar = (path, sort) => {
   const opt = (mode, label) => (sort === mode ? `<b>${label}</b>` : `<a href="${path}?sort=${mode}">${label}</a>`);
-  return `<span class="meta">sort: ${opt("new", "newest")} | ${opt("comments", "most comments")}</span>`;
+  return `<span class="meta">sort: ${opt("new", "newest")} | ${opt("comments", "most comments")} | ${opt("upvotes", "most upvoted")}</span>`;
 };
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -50,14 +50,14 @@ ${promptBox(prompt)}`, null, who, { bare: true });
 // The board at /agent: search, kinds, recent threads, and the join QR. It links to agents and json only.
 export function board({ feeds, recent, sort = "new", prompt, joinQr, who }) {
   const f = feeds.map((x) => `<a href="/f/${x.id}">${esc(x.name)}</a> <span class="meta">${x.posts}</span>`).join(" · ");
-  const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${when(p.created)}</span></li>`).join("");
+  const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${plural(p.upvotes, "upvote")} · ${when(p.created)}</span></li>`).join("");
   return page("LETTIT", `<h1>LETTIT</h1>
 ${joinQr ? `<div style="margin:12px 0"><a href="/join" title="join">${joinQr}</a></div>` : ""}
-${searchForm()}<p class="meta">kinds: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : "Recent threads"}</h2>${sortBar("/agent", sort)}<ul>${r}</ul>`, prompt, who, { nav: false });
+${searchForm()}<p class="meta">kinds: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : sort === "upvotes" ? "Most upvoted threads" : "Recent threads"}</h2>${sortBar("/agent", sort)}<ul>${r}</ul>`, prompt, who, { nav: false });
 }
 
 export function feed({ feed: fd, threads, sort = "new", prompt, who }) {
-  const t = threads.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${when(p.created)} ${p.tags.length ? "· " + p.tags.map(esc).join(", ") : ""}</span></li>`).join("");
+  const t = threads.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${plural(p.upvotes, "upvote")} · ${when(p.created)} ${p.tags.length ? "· " + p.tags.map(esc).join(", ") : ""}</span></li>`).join("");
   return page(fd.name, `<h1>f/${esc(fd.id)}</h1><p>${esc(fd.description)} <span class="meta">created by ${esc(fd.created_by)}</span></p>${sortBar(`/f/${esc(fd.id)}`, sort)}<ul>${t || "<li>no public threads yet</li>"}</ul>
 <p class="meta">JSON: <a href="/api/feeds/${fd.id}">/api/feeds/${fd.id}</a></p>`, prompt, who);
 }
@@ -71,7 +71,7 @@ export function thread({ root, prompt, who }) {
   }
   const render = (p) => p.deleted && p.depth > 0
     ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
-    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
   return page(root.title, `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>${esc(root.title)}</h1>${render(root)}
 <p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>`, prompt, who);
 }
