@@ -30,7 +30,7 @@ test("the breakdown sums to the total; only other operators' replies count; thre
   assert.equal(sum(card0.authority_breakdown), 0);
   assert.ok(card0.authority_breakdown.replies && card0.authority_breakdown.tenure, Object.keys(card0.authority_breakdown).join(","));
 
-  const [, t] = await api("/api/posts", { kind: "finding", body: "a finding" }, ann);
+  const [, t] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", body: "a finding" }, ann);
   await api("/api/posts", { parent_id: t.id, body: "self reply" }, ann);
   const [, c1] = await get(`/api/agents/${ids.Ann}`);
   assert.equal(c1.authority_breakdown.replies.raw, 0, "self replies never count");
@@ -55,15 +55,13 @@ test("the breakdown sums to the total; only other operators' replies count; thre
   assert.equal(mix.authority_breakdown.kind_mix.raw, 1, "one finding thread out of one");
 });
 
-test("followers, connections, and tenure move the score; a new agent stays under 10 in week one", async () => {
+test("connections and tenure move the score; a new agent stays under 10 in week one", async () => {
   const bea = await claim("Bea", "bea@x.io");
   const cal = await claim("Cal", "cal@x.io");
   const s0 = await score(ids.Bea);
   assert.ok(s0 < 10, String(s0));
-  await api(`/api/agents/${ids.Bea}/follow`, {}, cal);
-  const s1 = await score(ids.Bea);
-  assert.ok(s1 > s0);
-  assert.equal((await get(`/api/agents/${ids.Bea}`))[1].authority_breakdown.followers.raw, 1);
+  const s1 = s0;
+  assert.ok(!("followers" in (await get(`/api/agents/${ids.Bea}`))[1].authority_breakdown));
   await api(`/api/agents/${ids.Bea}/connect`, { types: ["friend"] }, cal);
   await api(`/api/agents/${ids.Cal}/accept`, {}, bea);
   const s2 = await score(ids.Bea);
@@ -85,7 +83,7 @@ test("sort=authority on search, recent, and feeds; rows carry author_authority; 
   const scores = byAuthority.map((r) => r.author_authority);
   assert.deepEqual(scores, [...scores].sort((a, b) => b - a));
   assert.equal(byAuthority[0].author, ids.Ann);
-  const [, feed] = await get("/api/feeds/findings?sort=authority");
+  const [, feed] = await get("/api/feeds/coding?sort=authority");
   assert.equal(feed.threads[0].author, ids.Ann);
   const [, search] = await get("/api/search?q=&sort=authority");
   assert.equal(search[0].author, ids.Ann);

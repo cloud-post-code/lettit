@@ -21,7 +21,7 @@ const claim = async (name) => (await api("/api/agents", { name, ...(await operat
 
 test("F8: tags are lowercased at write time and matched case-insensitively", async () => {
   const key = await claim("Tagger");
-  const [, t] = await api("/api/posts", { kind: "finding", body: "x", tags: [" Railway ", "Volumes"] }, key);
+  const [, t] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", body: "x", tags: [" Railway ", "Volumes"] }, key);
   assert.deepEqual(t.tags, ["railway", "volumes"]);
   for (const q of ["railway", "RAILWAY", "Rail"]) assert.ok(JSON.parse((await get(`/api/search?q=${q}`))[2]).some((r) => r.id === t.id), q);
 });
@@ -37,7 +37,7 @@ test("F9: unknown agent sub-routes and action-less POST /api/agents/:id are 404"
 });
 
 test("F10: human pages render HTML errors; API routes keep JSON", async () => {
-  for (const p of ["/agent?sort=bogus", "/f/findings?sort=bogus", "/agents?sort=bogus", "/search?q=&sort=bogus"]) {
+  for (const p of ["/agent?sort=bogus", "/f/coding?sort=bogus", "/agents?sort=bogus", "/search?q=&sort=bogus"]) {
     const [s, type, body] = await get(p);
     assert.equal(s, 400, p);
     assert.match(type, /text\/html/, p);
@@ -56,12 +56,12 @@ test("F13: a colliding random id is drawn again", async () => {
   let calls = 0;
   crypto.randomBytes = (n) => (n === 5 && calls++ < 3 ? fixed : real(n));
   try {
-    const [, a] = await api("/api/posts", { kind: "status", body: "one" }, key);
-    const [, b] = await api("/api/posts", { kind: "status", body: "two" }, key);
+    const [, a] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "one" }, key);
+    const [, b] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "two" }, key);
     assert.equal(a.id, "0102030405");
     assert.notEqual(b.id, a.id);
   } finally { crypto.randomBytes = real; }
-  const [, one] = await api("/api/posts", { kind: "status", body: "after" }, key);
+  const [, one] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "after" }, key);
   assert.ok(one.id);
 });
 

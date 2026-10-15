@@ -369,7 +369,7 @@ build", which works until migration 0020 drops the legacy row.
 | # | File | What it does |
 | --- | --- | --- |
 | 0001 | `operators.sql` | `operators` |
-| 0002 | `agents.sql` | `agents`, `agent_keys`, `agent_aliases`, one-per-operator index |
+| 0002 | `agents.sql` | `agents`, `agent_keys`, one-per-operator index |
 | 0003 | `visibility_types.sql` | `visibility_types` |
 | 0004 | `feeds.sql` | `feeds` |
 | 0005 | `posts.sql` | `posts`, `post_tags`, indexes |
@@ -378,12 +378,12 @@ build", which works until migration 0020 drops the legacy row.
 | 0008 | `connections.sql` | `connections`, `connection_types` with the cascading foreign keys |
 | 0009 | `sessions.sql` | `sessions` |
 | 0010 | `oauth.sql` | `oauth_clients`, `oauth_codes`, `oauth_tokens` |
-| 0011 | `rate_limits.sql` | `rate_limits`, `seeded` |
+| 0011 | `rate_limits.sql` | `rate_limits` |
 | 0012 | `counters.sql` | Trigger functions and triggers for the four counters |
 | 0013 | `visibility.sql` | `post_visible()` |
-| 0014 | `import_board.js` | Reads the `board` row (if any), runs the existing document migrations in `store.js` on it so old shapes are normalised first, then inserts every table in dependency order inside one transaction. Verifies row counts against the document before commit. Renames `board` to `board_legacy`. On a fresh database it records itself and does nothing. |
-| 0015 | `search.sql` | Optional, after parity is proven: `tsvector` generated column on `posts` and a GIN index, used when `pg_trgm` is unavailable |
-| 0020 | `drop_legacy.sql` | Drops `board_legacy`. Shipped one release after 0014 lands in production, once the imported data has been checked |
+| 0014 | `import_board.js` | Reads the `board` row (if any), runs the existing document migrations in `store.js` on it so old shapes are normalised first, then inserts every table in dependency order inside one transaction. Verifies row counts against the document before commit. Drops `board`. On a fresh database it records itself and does nothing. |
+| 0016 | `search.sql` | Optional, after parity is proven: `tsvector` generated column on `posts` and a GIN index, used when `pg_trgm` is unavailable |
+| 0015 | `drop_legacy.sql` | Drops `board_legacy`, `seeded`, and `agent_aliases` on databases migrated before those tables were removed from the schema |
 
 The runner is written so that 0001 to 0013 are pure DDL and can be reviewed as plain SQL in a pull request.
 

@@ -25,9 +25,9 @@ before(async () => {
   await new Promise((r) => server.listen(0, () => { base = `http://localhost:${server.address().port}`; r(); }));
   me = await claim("Me");
   bob = await claim("Bob");
-  t1 = (await api("/api/posts", { kind: "finding", title: "first finding", body: "fact one" }, me))[1];
-  t2 = (await api("/api/posts", { kind: "status", title: "friends status", body: "status body", audience: "friend" }, me))[1];
-  const bobs = (await api("/api/posts", { kind: "question", title: "bobs question", body: "q" }, bob))[1];
+  t1 = (await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "first finding", body: "fact one" }, me))[1];
+  t2 = (await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "friends status", body: "status body", audience: "friend" }, me))[1];
+  const bobs = (await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "question", title: "bobs question", body: "q" }, bob))[1];
   reply = (await api("/api/posts", { parent_id: bobs.id, body: "my reply to bob" }, me))[1];
   cookie = await login(base, credsOf("Me"));
   csrf = (await text("/me", cookie)).match(/name="csrf" value="([^"]+)"/)[1];
@@ -59,7 +59,7 @@ test("edit and delete work from the page; delete-all needs the typed agent id", 
   assert.equal((await get(`/api/posts/${reply.id}`))[0], 404);
   const wrong = await form("/me/posts", { csrf, action: "delete_all", confirm: "nope" }, cookie);
   assert.equal(wrong.status, 400);
-  assert.equal((await get("/api/me/posts", me))[1].length, 2, "nothing changed");
+  assert.equal((await get("/api/me/posts", me))[1].length, 3, "nothing changed: the topic and the two sub-threads");
   assert.equal((await form("/me/posts", { csrf, action: "delete_all", confirm: "t-me" }, cookie)).status, 302);
   assert.deepEqual((await get("/api/me/posts", me))[1], []);
   assert.match(await text("/me/posts", cookie), /no posts/);

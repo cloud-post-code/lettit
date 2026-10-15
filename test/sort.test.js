@@ -26,9 +26,9 @@ before(async () => {
   await new Promise((r) => server.listen(0, () => { base = `http://localhost:${server.address().port}`; r(); }));
   key = await claim("Ranker");
   const other = await claim("Chatter");
-  quiet = (await post("/api/posts", { feed: "feedback", title: "quiet thread", body: "b" }, key))[1];
-  mid = (await post("/api/posts", { feed: "feedback", title: "middling thread", body: "b" }, key))[1];
-  busy = (await post("/api/posts", { feed: "feedback", title: "busy thread", body: "b" }, key))[1];
+  quiet = (await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "quiet thread", body: "b" }, key))[1];
+  mid = (await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "middling thread", body: "b" }, key))[1];
+  busy = (await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "busy thread", body: "b" }, key))[1];
   for (const t of [quiet, mid, busy]) mine.add(t.id);
   // busy: one direct reply with two nested comments under it = 3 comments; plus a deleted one that must not count
   const [, r] = await post("/api/posts", { parent_id: busy.id, body: "r" }, other);
@@ -41,52 +41,54 @@ before(async () => {
   await post("/api/posts", { parent_id: mid.id, body: "b" }, other);
 });
 
-test("listed threads carry a total comment count that spans depths and skips deleted comments", async () => {
-  const [, f] = await get("/api/feeds/feedback");
-  const by = Object.fromEntries(f.threads.map((t) => [t.id, t]));
+test("listed sub-threads carry a total comment count that spans depths and skips deleted comments", async () => {
+  const [, recent] = await get("/api/recent?limit=100");
+  const by = Object.fromEntries(recent.map((t) => [t.id, t]));
   assert.equal(by[busy.id].comments, 3);
   assert.equal(by[busy.id].replies, 1);
   assert.equal(by[mid.id].comments, 2);
   assert.equal(by[quiet.id].comments, 0);
+  const [, f] = await get("/api/feeds/feedback");
+  assert.equal(f.threads[0].id, busy.topic_id, "a category lists its topics");
+  assert.equal(f.threads[0].comments, 8, "a topic counts its three sub-threads and their five live replies");
 });
 
-test("sort=comments ranks by comment count on feeds, recent, and posts; the default stays newest first", async () => {
-  const [, newest] = await get("/api/feeds/feedback");
-  assert.deepEqual(ids(newest.threads), [busy.id, mid.id, quiet.id]);
-  const [, byNew] = await get("/api/feeds/feedback?sort=new");
-  assert.deepEqual(ids(byNew.threads), ids(newest.threads));
-  // make the tie-break observable: busy is newest, so put quiet (0) last and mid (2) between
-  const [, ranked] = await get("/api/feeds/feedback?sort=comments");
-  assert.deepEqual(ids(ranked.threads), [busy.id, mid.id, quiet.id]);
-  const [, recent] = await get("/api/recent?sort=comments");
-  assert.deepEqual(ids(recent), [busy.id, mid.id, quiet.id]);
+test("sort=comments ranks by comment count on recent and posts; the default stays newest first", async () => {
+  const [, newest] = await get("/api/recent");
+  assert.deepEqual(ids(newest), [busy.id, mid.id, quiet.id]);
+  const [, byNew] = await get("/api/recent?sort=new");
+  assert.deepEqual(ids(byNew), ids(newest));
+  const [, ranked] = await get("/api/recent?sort=comments");
+  assert.deepEqual(ids(ranked), [busy.id, mid.id, quiet.id]);
   const [, posts] = await get("/api/posts?sort=comments");
   assert.equal(posts[0].id, busy.id);
-  const [bad, e] = await get("/api/feeds/feedback?sort=hot");
-  assert.equal(bad, 400);
-  assert.match(e.error, /sort/);
+  for (const p of ["/api/feeds/feedback?sort=hot", "/api/recent?sort=hot"]) {
+    const [bad, e] = await get(p);
+    assert.equal(bad, 400, p);
+    assert.match(e.error, /sort/);
+  }
 });
 
-test("sort=comments puts an older busy thread above a newer quiet one", async () => {
-  const [, late] = await post("/api/posts", { feed: "feedback", title: "latest quiet thread", body: "b" }, key);
+test("sort=comments puts an older busy sub-thread above a newer quiet one", async () => {
+  const [, late] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "latest quiet thread", body: "b", force_new: true }, key);
   mine.add(late.id);
-  const [, newest] = await get("/api/feeds/feedback");
-  assert.equal(newest.threads[0].id, late.id);
-  const [, ranked] = await get("/api/feeds/feedback?sort=comments");
-  assert.deepEqual(ids(ranked.threads), [busy.id, mid.id, late.id, quiet.id]);
+  const [, newest] = await get("/api/recent");
+  assert.equal(newest[0].id, late.id);
+  const [, ranked] = await get("/api/recent?sort=comments");
+  assert.deepEqual(ids(ranked), [busy.id, mid.id, late.id, quiet.id]);
 });
 
-test("the feed and home pages honour sort=comments and show the toggle", async () => {
+test("the category and home pages honour sort=comments and show the toggle", async () => {
   const feedPage = await page("/f/feedback?sort=comments");
-  assert.ok(feedPage.indexOf("busy thread") < feedPage.indexOf("latest quiet thread"));
-  assert.match(feedPage, /3 comments/);
+  assert.match(feedPage, /general/);
   assert.match(feedPage, /href="\/f\/feedback\?sort=new"/);
   const feedDefault = await page("/f/feedback");
-  assert.ok(feedDefault.indexOf("latest quiet thread") < feedDefault.indexOf("busy thread"));
   assert.match(feedDefault, /href="\/f\/feedback\?sort=comments"/);
   const home = await page("/agent?sort=comments");
   assert.ok(home.indexOf("busy thread") < home.indexOf("latest quiet thread"));
+  assert.match(home, /3 comments/);
   assert.match(home, /href="\/agent\?sort=new"/);
   const homeDefault = await page("/agent");
+  assert.ok(homeDefault.indexOf("latest quiet thread") < homeDefault.indexOf("busy thread"));
   assert.match(homeDefault, /href="\/agent\?sort=comments"/);
 });

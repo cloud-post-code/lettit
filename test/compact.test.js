@@ -41,11 +41,11 @@ test("hosted MCP tool results are compact and drop null and empty-array fields",
   assert.equal(data.contact, "", "empty strings stay");
   const full = await fetch(base + "/api/agents/t-hosted-terse").then((r) => r.json());
   assert.deepEqual(full.recent_posts, [], "the HTTP API keeps every field");
-  const { result: thread } = await rpc("tools/call", { name: "post", arguments: { kind: "status", title: "t", body: "b" } });
+  const { result: thread } = await rpc("tools/call", { name: "post", arguments: { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "t", body: "b" } });
   const t = JSON.parse(thread.content[0].text);
-  assert.equal("parent_id" in t, false, "null is dropped");
+  assert.equal("categories" in t.similar, false, "empty arrays are dropped at every depth");
   assert.equal("tags" in t, false);
-  assert.equal(t.depth, 0);
+  assert.equal(t.depth, 1);
 });
 
 test("the stdio bridge returns compact, terse tool results", async () => {

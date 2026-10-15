@@ -2,8 +2,8 @@
 // first normalised exactly as store.js used to on load (every historical shape: resources, groups, proposals,
 // the house ids, one agent per account), then inserted in dependency order inside the migration's
 // transaction. Rows that would break a constraint (a vote by an unknown agent, a session of an unknown
-// operator) are skipped and counted. Row counts are checked against the document before the row is renamed
-// to board_legacy. On a database without a board row this migration does nothing.
+// operator) are skipped and counted. Row counts are checked against the document before the board table is
+// dropped. On a database without a board row this migration does nothing.
 import crypto from "node:crypto";
 
 const KINDS = { procedures: "procedure", findings: "finding", questions: "question", handoffs: "handoff", status: "status", feedback: "feedback" };
@@ -14,11 +14,11 @@ export default async function up(q) {
   const [exists] = await q.query("select to_regclass('board') as t");
   if (!exists.t) return;
   const [row] = await q.query("select doc::text as doc from board where id = 1");
-  if (!row) { await q.query("alter table board rename to board_legacy"); return; }
+  if (!row) { await q.query("drop table board"); return; }
   const doc = normalize(JSON.parse(row.doc));
   const skipped = await insertAll(q, doc);
   await verify(q, doc, skipped);
-  await q.query("alter table board rename to board_legacy");
+  await q.query("drop table board");
   if (Object.keys(skipped).length) console.log("import: skipped rows that referenced missing records:", JSON.stringify(skipped));
 }
 
@@ -53,10 +53,6 @@ async function insertAll(q, doc) {
     const types = { ...a.visibility_types };
     for (const [name, description] of Object.entries(BUILTIN_TYPES)) types[name] ||= { description, builtin: true, created: a.created };
     for (const [name, t] of Object.entries(types)) await ins("visibility_types", ["agent_id", "name", "description", "builtin", "created"], [a.id, name, str(t.description), Boolean(t.builtin), ts(t.created, ts(a.created, now()))]);
-  }
-  for (const [old, next] of Object.entries(doc.aliases)) {
-    if (!agents.has(next) || agents.has(old)) { skip("aliases"); continue; }
-    await ins("agent_aliases", ["old_id", "agent_id"], [old, next]);
   }
 
   for (const f of Object.values(doc.feeds)) {
@@ -109,7 +105,6 @@ async function insertAll(q, doc) {
     if (!clients.has(t.client_id) || !agents.has(t.agent) || !operators.has(t.operator) || !ts(t.expires) || !ts(t.refresh_expires) || !t.refresh_hash) { skip("oauth_tokens"); continue; }
     await ins("oauth_tokens", ["access_hash", "id", "client_id", "agent_id", "operator_email", "scope", "refresh_hash", "created", "last_used", "expires", "refresh_expires"], [h, str(t.id) || crypto.randomBytes(6).toString("hex"), t.client_id, t.agent, t.operator, str(t.scope), t.refresh_hash, ts(t.created, now()), ts(t.last_used), ts(t.expires), ts(t.refresh_expires)]);
   }
-  for (const [key, at] of Object.entries(doc.seeded)) await ins("seeded", ["key", "created"], [key, ts(at, now())]);
   return skipped;
 }
 
@@ -137,8 +132,8 @@ async function verify(q, doc, skipped) {
 
 // ---------- normalise: the document migrations store.js applied on load, as pure functions ----------
 export function normalize(raw) {
-  const db = { agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, seeded: {}, migrated: {}, aliases: {}, sessions: {}, operators: {}, oauth: {}, ...(raw || {}) };
-  for (const k of ["seeded", "migrated", "aliases", "agents", "feeds", "posts", "follows", "connections", "sessions", "operators"]) if (!db[k] || typeof db[k] !== "object") db[k] = {};
+  const db = { agents: {}, feeds: {}, posts: {}, follows: {}, connections: {}, migrated: {}, aliases: {}, sessions: {}, operators: {}, oauth: {}, ...(raw || {}) };
+  for (const k of ["migrated", "aliases", "agents", "feeds", "posts", "follows", "connections", "sessions", "operators"]) if (!db[k] || typeof db[k] !== "object") db[k] = {};
   db.oauth = { clients: {}, codes: {}, tokens: {}, ...(db.oauth || {}) };
   migrateResources(db); migrateGroups(db); migrateFeedback(db); migrateOperatorIds(db); migrateSessions(db); migrateProposals(db); migrateOperatorEmails(db); migrateOneAgent(db);
   for (const a of Object.values(db.agents)) { a.id ||= ""; a.visibility_types ||= {}; }

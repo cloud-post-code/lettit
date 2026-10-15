@@ -36,7 +36,7 @@ test("connect one-way, list both directions, retype, connect back, and disconnec
   assert.deepEqual({ id: rel.id, connected: rel.connected, they_connected: rel.they_connected, they_are: rel.they_are, i_am: rel.i_am }, { id: "t-ben", connected: true, they_connected: false, they_are: ["friend", "colleague"], i_am: [] });
   await post("/api/agents/t-ann/connect", {}, cat);
   const [, me] = await get("/api/me", ann);
-  assert.deepEqual({ following: me.following, followers: me.followers, connections: me.connections, connected_me: me.connected_me }, { following: 0, followers: 0, connections: 1, connected_me: 1 });
+  assert.deepEqual({ connections: me.connections, connected_me: me.connected_me }, { connections: 1, connected_me: 1 });
   assert.equal(Array.isArray(me.visibility_types), true);
   const [, lists] = await get("/api/me/connections", ann);
   assert.deepEqual(lists.connected.map((r) => r.id), ["t-ben"]);
@@ -103,7 +103,7 @@ test("visibility types: built-ins are present and protected; custom types can be
 
   await post("/api/agents/t-fay/connect", { types: ["client"] }, eve);
   await post("/api/agents/t-eve/accept", {}, fay);
-  const [, t] = await post("/api/posts", { feed: "feedback", title: "for clients", body: "x", audience: "client" }, eve);
+  const [, t] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "for clients", body: "x", audience: "client" }, eve);
   assert.equal((await get(`/api/posts/${t.id}`, fay))[0], 200);
   const [s2, out] = await post("/api/me/visibility-types/delete", { name: "client" }, eve);
   assert.equal(s2, 200, out.error);
@@ -115,15 +115,8 @@ test("visibility types: built-ins are present and protected; custom types can be
   assert.equal((await get(`/api/posts/${t.id}`, fay))[0], 404, "fay is no longer in any circle");
 });
 
-test("following and followers are filterable lists; group tools and routes are gone", async () => {
+test("group tools and routes are gone", async () => {
   const gus = await claim("Gus");
-  const hal = await claim("Hal");
-  await post("/api/agents/t-hal/follow", {}, gus);
-  const [, following] = await get("/api/me/following?q=ha", gus);
-  assert.deepEqual(following.map((a) => a.id), ["t-hal"]);
-  const [, followers] = await get("/api/me/followers", hal);
-  assert.deepEqual(followers.map((a) => a.id), ["t-gus"]);
-  assert.equal((await get("/api/me/following?q=zzz", gus))[1].length, 0);
   for (const action of ["join", "leave", "invite", "approve", "remove", "delete", "members"]) {
     assert.equal((await post(`/api/feeds/feedback/${action}`, {}, gus))[0], 404, action);
   }
@@ -133,7 +126,6 @@ test("following and followers are filterable lists; group tools and routes are g
   const rpc = await fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", ...auth(gus) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }).then((r) => r.json());
   const names = rpc.result.tools.map((t) => t.name);
   for (const t of ["join_group", "leave_group", "add_group_member", "remove_group_member", "delete_group", "group_members"]) assert.ok(!names.includes(t), t);
-  for (const t of ["connect", "accept_connection", "disconnect", "set_visibility", "connections", "following", "followers", "visibility_types", "add_visibility_type", "remove_visibility_type"]) assert.ok(names.includes(t), t);
+  for (const t of ["connect", "accept_connection", "disconnect", "set_visibility", "connections", "visibility_types", "add_visibility_type", "remove_visibility_type"]) assert.ok(names.includes(t), t);
   assert.ok(rpc.result.tools.find((t) => t.name === "post").inputSchema.properties.audience);
-  assert.match(rpc.result.tools.find((t) => t.name === "follow_agent").description, /followers/);
 });

@@ -24,18 +24,18 @@ before(async () => {
   ann = await claim("Ann", "ann@x.io");
   bob = await claim("Bob", "bob@x.io");
   await claim("Zed", "zed@x.io");
-  await api("/api/posts", { kind: "finding", title: "public railway finding", body: "x" }, ann);
-  await api("/api/posts", { kind: "status", title: "friends railway status", body: "x", audience: "friend" }, ann);
-  await api("/api/posts", { kind: "question", title: "unrelated question", body: "x" }, bob);
+  await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "public railway finding", body: "x" }, ann);
+  await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "friends railway status", body: "x", audience: "friend" }, ann);
+  await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "question", title: "unrelated question", body: "x" }, bob);
   await api("/api/agents/bob/connect", { types: ["friend"] }, ann);
   await api("/api/agents/ann/accept", {}, bob);
   cookie = await login(base, { email: "bob@x.io", password: "test-password-10" });
 });
 
-test("home drops the feed list, keeps kind links, and gains a search box", async () => {
+test("home drops the feed list, keeps category links, and gains a search box", async () => {
   const [, home] = await text("/agent");
   assert.ok(!home.includes("<h2>Feeds</h2>"));
-  assert.match(home, /href="\/f\/findings"/);
+  assert.match(home, /href="\/f\/coding"/);
   assert.match(home, /<form[^>]*action="\/search"/);
   assert.match(home, /public railway finding/);
 });

@@ -34,27 +34,25 @@ const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "conten
 test("an old store is imported once: the house agents become the one agent blake, everywhere", async () => {
   const col = async (q, p) => (await dbq(q, p)).map((r) => Object.values(r)[0]);
   assert.deepEqual(await col("select version from schema_migrations where version = 14"), [14]);
-  assert.deepEqual(await col("select to_regclass('board_legacy')::text"), ["board_legacy"], "the document is kept for one release");
+  assert.deepEqual(await col("select to_regclass('board')::text"), [null], "the document is dropped once imported");
   assert.deepEqual(await col("select id from agents order by 1"), ["blake", "board"]);
   assert.deepEqual(await dbq("select key_hash, current from agent_keys where agent_id = 'blake'"), [{ key_hash: hash(MUSE_KEY), current: true }], "the one claimed key is kept");
   assert.deepEqual(await dbq("select name, post_count from agents where id = 'blake'"), [{ name: "blake", post_count: 1 }]);
   assert.deepEqual(await col("select author_id from posts where id = 'p1'"), ["blake"]);
-  assert.deepEqual(await col("select created_by from feeds where id = 'status'"), ["blake"]);
-  assert.deepEqual(await dbq("select * from follows"), [], "follows between the merged agents were self follows");
-  assert.deepEqual(await dbq("select * from connections"), [], "and so were the connections");
-  assert.deepEqual(await col("select old_id from agent_aliases order by 1"), ["codex", "dot", "muse"]);
-  const [s, t] = await post("/api/posts", { kind: "status", body: "still me" }, MUSE_KEY);
+  assert.deepEqual(await col("select feed_id from posts where id = 'p1'"), ["coding"], "the old status kind feed folded into coding");
+  assert.deepEqual(await dbq("select * from connections"), [], "connections between the merged agents were self pairs");
+  const [s, t] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "still me" }, MUSE_KEY);
   assert.equal(s, 201, t.error);
   assert.equal(t.author, "blake");
   const [, me] = await get("/api/me", MUSE_KEY);
-  assert.deepEqual([me.id, me.following, me.connections, me.connected_me], ["blake", 0, 0, 0]);
+  assert.deepEqual([me.id, me.connections, me.connected_me], ["blake", 0, 0]);
 });
 
 test("old ids answer 404 with the new id on the API, on actions, and on the HTML page; the operator attaches the merged agent by key", async () => {
   const [s1, e1] = await get("/api/agents/muse");
   assert.equal(s1, 404);
   assert.match(e1.error, /"muse" is now "blake"/);
-  const [s2, e2] = await post("/api/agents/blake-codex/follow", {}, MUSE_KEY);
+  const [s2, e2] = await post("/api/agents/blake-codex/connect", {}, MUSE_KEY);
   assert.equal(s2, 404);
   assert.match(e2.error, /"blake-codex" is now "blake"/);
   const page = await fetch(base + "/agents/muse");
@@ -100,9 +98,7 @@ test("the bridge maps an old LETTIT_AGENT to the new id and moves its key file e
   const line = await new Promise((r) => child.stdout.once("data", (d) => r(String(d))));
   child.kill();
   const who = JSON.parse(JSON.parse(line).result.content[0].text);
-  assert.equal(who.agent, "blake");
-  assert.equal(who.key_on_file, true);
-  assert.equal(who.id, "blake");
+  assert.deepEqual(Object.keys(who).sort(), ["description", "name"], "the bridge signs in with the migrated key");
   const keys = JSON.parse(fs.readFileSync(keyFile, "utf8"))[base];
   assert.deepEqual(keys, { blake: MUSE_KEY });
   assert.match(err, /"muse" is now "blake"/);

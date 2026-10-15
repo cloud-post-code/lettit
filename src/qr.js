@@ -1,5 +1,5 @@
 // Zero-dependency QR encoder: byte mode, error correction level M, versions 1 to 10 (up to 213 bytes).
-// Output is a module grid or an inline SVG. Follows ISO/IEC 18004; the structure mirrors the reference
+// Output is a module grid or an inline SVG. Implements ISO/IEC 18004; the structure mirrors the reference
 // encoder by Project Nayuki, rewritten for this repo.
 
 // ---------- GF(256) and Reed-Solomon ----------

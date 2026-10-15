@@ -1,4 +1,4 @@
-// The migration runner and migrations 0001 to 0013: the whole schema on a fresh database, idempotent.
+// The migration runner and every migration: the whole schema on a fresh database, idempotent.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -12,7 +12,7 @@ let schema, c;
 before(async () => { schema = await freshSchema(); c = await connect(schema.url); });
 after(async () => { c.end(); await schema.drop(); });
 
-const TABLES = ["agent_aliases", "agent_keys", "agents", "connection_types", "connections", "feeds", "oauth_clients", "oauth_codes", "oauth_tokens", "operators", "post_tags", "posts", "rate_limits", "schema_migrations", "seeded", "sessions", "upvotes", "visibility_types", "follows"].sort();
+const TABLES = ["agent_keys", "agents", "connection_types", "connections", "feeds", "oauth_clients", "oauth_codes", "oauth_tokens", "operators", "post_tags", "posts", "rate_limits", "schema_migrations", "sessions", "upvotes", "visibility_types"].sort();
 
 test("a fresh schema gets every table, and a second run applies nothing", async () => {
   const before = await status(c);
@@ -46,9 +46,9 @@ test("a failing migration rolls back and leaves the version unrecorded", async (
 
 test("counters: posts and upvotes keep feed, agent, reply, and upvote counts", async () => {
   await c.query("insert into agents (id, name) values ('ann', 'Ann'), ('bob', 'Bob')");
-  await c.query("insert into feeds (id, name, kind, created_by) values ('findings', 'findings', 'finding', 'ann')");
-  await c.query("insert into posts (id, feed_id, thread_id, depth, title, body, author_id) values ('p1', 'findings', 'p1', 0, 'T', 'b', 'ann')");
-  await c.query("insert into posts (id, feed_id, thread_id, parent_id, depth, body, author_id) values ('p2', 'findings', 'p1', 'p1', 1, 'reply', 'bob')");
+  await c.query("insert into feeds (id, name, created_by) values ('findings', 'findings', 'ann')");
+  await c.query("insert into posts (id, feed_id, topic_id, thread_id, depth, title, body, author_id) values ('p1', 'findings', 'p1', 'p1', 0, 'T', 'b', 'ann')");
+  await c.query("insert into posts (id, feed_id, topic_id, thread_id, parent_id, depth, title, body, author_id) values ('p2', 'findings', 'p1', 'p2', 'p1', 1, 'sub', 'reply', 'bob')");
   await c.query("insert into upvotes (post_id, agent_id) values ('p1', 'bob')");
   const counts = async () => ({
     feed: (await c.query("select post_count from feeds where id = 'findings'"))[0].post_count,
@@ -64,11 +64,11 @@ test("counters: posts and upvotes keep feed, agent, reply, and upvote counts", a
   assert.deepEqual(await counts(), { feed: 1, ann: 1, bob: 0, p1: { reply_count: 0, upvote_count: 0 } });
 });
 
-test("post_visible applies audience, followers, circles, and reply narrowing", async () => {
+test("post_visible applies audience, circles, and reply narrowing", async () => {
   await c.query("insert into agents (id, name) values ('cat', 'Cat')");
   await c.query("insert into visibility_types (agent_id, name) values ('ann', 'friend'), ('ann', 'public'), ('bob', 'friend'), ('bob', 'public')");
-  await c.query("insert into posts (id, feed_id, thread_id, depth, title, body, author_id, audience) values ('f1', 'findings', 'f1', 0, 'friends', 'b', 'ann', 'friend'), ('w1', 'findings', 'w1', 0, 'followers', 'b', 'ann', 'followers')");
-  await c.query("insert into posts (id, feed_id, thread_id, parent_id, depth, body, author_id, audience) values ('n1', 'findings', 'p1', 'p1', 1, 'narrowed', 'bob', 'friend')");
+  await c.query("insert into posts (id, feed_id, topic_id, thread_id, depth, title, body, author_id, audience) values ('f1', 'findings', 'f1', 'f1', 0, 'friends', 'b', 'ann', 'friend'), ('w1', 'findings', 'w1', 'w1', 0, 'followers', 'b', 'ann', 'followers')");
+  await c.query("insert into posts (id, feed_id, topic_id, thread_id, parent_id, depth, title, body, author_id, audience) values ('n1', 'findings', 'p1', 'p1', 'p1', 1, 'n', 'narrowed', 'bob', 'friend')");
   const vis = async (id, viewer) => (await c.query("select post_visible(p, $2) as v from posts p where id = $1", [id, viewer]))[0].v;
   assert.equal(await vis("p1", null), true);
   assert.equal(await vis("f1", null), false);
@@ -78,9 +78,7 @@ test("post_visible applies audience, followers, circles, and reply narrowing", a
   await c.query("insert into connection_types (from_id, to_id, type) values ('ann', 'bob', 'friend')");
   assert.equal(await vis("f1", "bob"), true);
   assert.equal(await vis("f1", "cat"), false);
-  assert.equal(await vis("w1", "cat"), false);
-  await c.query("insert into follows (follower_id, followed_id) values ('cat', 'ann')");
-  assert.equal(await vis("w1", "cat"), true);
+  assert.equal(await vis("w1", "cat"), false, "followers is just a name: only a circle of that name admits anyone");
   assert.equal(await vis("n1", "cat"), false, "narrowed reply under a public root");
   assert.equal(await vis("n1", "bob"), true);
   await c.query("insert into connections (from_id, to_id) values ('bob', 'cat')");

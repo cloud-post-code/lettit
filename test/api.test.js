@@ -19,29 +19,29 @@ const keys = {};
 const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...(keys[b.author] ? { authorization: `Bearer ${keys[b.author]}` } : {}) }, body: JSON.stringify(b) }).then(async (r) => { const d = await r.json(); if (d.key) keys[d.id] = d.key; return [r.status, d]; });
 const claim = async (card) => { const [s, d] = await claimCard(base, card); if (d.key) keys[d.id] = d.key; return [s, d]; };
 
-test("seeds the kind feeds and house agents", async () => {
+test("seeds the coding category and house agents", async () => {
   const [, feeds] = await get("/api/feeds");
-  assert.deepEqual(feeds.map((f) => f.id).sort(), ["feedback", "findings", "handoffs", "procedures", "questions", "status"]);
+  assert.deepEqual(feeds.map((f) => f.id), ["coding"]);
   const [, agents] = await get("/api/agents");
   assert.deepEqual(agents.map((a) => a.id).sort(), ["blake", "board"]);
 });
 
-test("feedback always lists last, even when it has the most posts", async () => {
+test("categories list busiest first, on the API and the board page", async () => {
   await claim({ name: "Sorter" });
   await post("/api/feeds", { name: "alpha", description: "d", author: "t-sorter" });
-  await post("/api/posts", { feed: "feedback", title: "one", body: "b", author: "t-sorter" });
-  await post("/api/posts", { feed: "feedback", title: "two", body: "b", author: "t-sorter" });
+  await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "one", body: "b", author: "t-sorter" });
+  await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "two", body: "b", author: "t-sorter" });
   const [, feeds] = await get("/api/feeds");
-  assert.equal(feeds.at(-1).id, "feedback");
-  assert.ok(feeds.at(-1).posts > feeds[0].posts);
+  assert.equal(feeds[0].id, "feedback");
+  assert.equal(feeds[0].posts, 3, "the topic and its two sub-threads");
   const home = await fetch(base + "/agent").then((r) => r.text());
-  const feedList = home.slice(home.indexOf("kinds:"), home.indexOf("<h2>Recent threads</h2>"));
-  assert.ok(feedList.indexOf("f/alpha") < feedList.indexOf("f/feedback"));
-  assert.ok(feedList.indexOf("f/findings") < feedList.indexOf("f/feedback"));
+  const feedList = home.slice(home.indexOf("categories:"), home.indexOf("<h2>Recent threads</h2>"));
+  assert.ok(feedList.indexOf("f/feedback") < feedList.indexOf("f/alpha"));
+  assert.ok(feedList.indexOf("f/feedback") < feedList.indexOf("f/coding"));
 });
 
 test("an agent without a key cannot write", async () => {
-  const [status, body] = await post("/api/posts", { feed: "feedback", title: "x", body: "y", author: "ghost" });
+  const [status, body] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "x", body: "y", author: "ghost" });
   assert.equal(status, 401);
   assert.match(body.error, /key/);
 });
@@ -52,10 +52,10 @@ test("register, post thread, nested replies, search", async () => {
   assert.equal(card.id, "t-test-bot");
   assert.equal(card.description, "d");
 
-  const [, thread] = await post("/api/posts", { feed: "feedback", title: "Zebra question", body: "why stripes", author: "t-test-bot", tags: ["zoo"] });
+  const [, thread] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "Zebra question", body: "why stripes", author: "t-test-bot", tags: ["zoo"] });
   const [, reply] = await post("/api/posts", { parent_id: thread.id, body: "camouflage", author: "t-test-bot" });
   const [, sub] = await post("/api/posts", { parent_id: reply.id, body: "source?", author: "t-test-bot" });
-  assert.equal(sub.depth, 2);
+  assert.equal(sub.depth, 3);
   assert.equal(sub.thread_id, thread.id);
 
   const [, tree] = await get(`/api/posts/${sub.id}`);

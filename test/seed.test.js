@@ -17,13 +17,12 @@ let base;
 before(() => new Promise((r) => server.listen(0, () => { base = `http://localhost:${server.address().port}`; r(); })));
 after(() => server.close());
 
-const KIND_FEEDS = ["procedures", "findings", "questions", "handoffs", "status", "feedback"];
+const CATEGORIES = ["coding"];
 const HOUSE = ["blake", "board"];
 
-test("a fresh store gets the six kind feeds, no threads, and the two house agents", async () => {
+test("a fresh store gets the coding category, no threads, and the two house agents", async () => {
   const feeds = await db.listFeeds();
-  assert.deepEqual(feeds.map((f) => f.id).sort(), [...KIND_FEEDS].sort());
-  assert.equal(feeds.at(-1).id, "feedback");
+  assert.deepEqual(feeds.map((f) => f.id), CATEGORIES);
   assert.equal((await dbq("select count(*)::int as n from posts"))[0].n, 0);
   const agents = await db.listAgents();
   assert.deepEqual(agents.map((a) => a.id).sort(), HOUSE);
@@ -35,11 +34,11 @@ test("a fresh store gets the six kind feeds, no threads, and the two house agent
   assert.equal(agents.find((a) => a.id === "blake").operator, "blake", "seeded cards carry the handle, never the email");
   assert.equal(agents.find((a) => a.id === "board").operator, "lettit");
   await seed();
-  assert.deepEqual((await db.listFeeds()).map((f) => f.id).sort(), [...KIND_FEEDS].sort());
+  assert.deepEqual((await db.listFeeds()).map((f) => f.id), CATEGORIES);
   assert.equal((await dbq("select count(*)::int as n from posts"))[0].n, 0);
 });
 
-test("an old store with lettit-feedback is imported as feedback with its posts, and the seed adds the rest", async () => {
+test("an old store with lettit-feedback is imported, and its posts fold into coding", async () => {
   const old = await freshSchema({ cleanup: true, board: {
     agents: { board: { id: "board", name: "board", posts: 1, created: "2026-01-01T00:00:00.000Z" } },
     feeds: { "lettit-feedback": { id: "lettit-feedback", name: "lettit-feedback", description: "old", created_by: "board", created: "2026-01-01T00:00:00.000Z", posts: 1, position: "last" } },
@@ -49,9 +48,8 @@ test("an old store with lettit-feedback is imported as feedback with its posts, 
   const child = spawn(process.execPath, ["-e", "const db = await import('./src/store.js'); const { seed } = await import('./src/seed.js'); await db.open(); await seed(); db.close();"], { env: { ...process.env, DATABASE_URL: old.url }, stdio: ["ignore", "ignore", "inherit"] });
   await new Promise((resolve) => child.on("exit", resolve));
   const q = await sql(old.url);
-  assert.deepEqual(await q("select id, position, post_count from feeds where id in ('feedback', 'lettit-feedback')"), [{ id: "feedback", position: "last", post_count: 1 }]);
-  assert.deepEqual(await q("select feed_id from posts where id = 'p1'"), [{ feed_id: "feedback" }]);
-  assert.deepEqual((await q("select id from feeds order by id")).map((r) => r.id), [...KIND_FEEDS].sort());
+  assert.deepEqual(await q("select id, post_count from feeds"), [{ id: "coding", post_count: 1 }]);
+  assert.deepEqual(await q("select feed_id, depth from posts where id = 'p1'"), [{ feed_id: "coding", depth: 0 }]);
 });
 
 test("claim-house claims the operator's one agent into the key file and prints nothing", async () => {

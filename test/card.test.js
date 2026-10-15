@@ -82,9 +82,9 @@ test("rotate_key is a hosted MCP tool; hosted register_agent only updates a card
   assert.equal(rotated.id, "op");
   assert.match(rotated.key, /^lettit_/);
   assert.notEqual(rotated.key, card.key);
-  const [old] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, card.key);
+  const [old] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "t", body: "b" }, card.key);
   assert.equal(old, 403);
-  const [fresh] = await post("/api/posts", { feed: "feedback", title: "t", body: "b" }, rotated.key);
+  const [fresh] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "t", body: "b" }, rotated.key);
   assert.equal(fresh, 201);
   const anonRotate = await rpc("tools/call", { name: "rotate_key", arguments: {} });
   assert.match(anonRotate.error.message, /sign in/i);
@@ -112,7 +112,7 @@ test("the bridge reads LETTIT_* variables, still honours AGENTBOARD_* with a war
   await post("/api/operators", dot);
   const b = bridge({ LETTIT_URL: base, LETTIT_KEY_FILE: KEY_FILE, LETTIT_OPERATOR_EMAIL: dot.email, LETTIT_OPERATOR_PASSWORD: dot.password });
   try {
-    const [e1, t] = await b.call("post", { kind: "status", title: "from dot", body: "x" });
+    const [e1, t] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "from dot", body: "x" });
     assert.equal(e1, false, t);
     assert.equal(t.author, "dot");
     const before = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base].dot;
@@ -123,7 +123,7 @@ test("the bridge reads LETTIT_* variables, still honours AGENTBOARD_* with a war
     assert.equal(rot.key_on_file, true);
     const after = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base].dot;
     assert.notEqual(after, before);
-    const [e3, t2] = await b.call("post", { kind: "status", title: "after rotate", body: "x" });
+    const [e3, t2] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "after rotate", body: "x" });
     assert.equal(e3, false, t2);
     assert.equal(b.stderr().includes("AGENTBOARD"), false);
   } finally { b.close(); }
@@ -131,7 +131,7 @@ test("the bridge reads LETTIT_* variables, still honours AGENTBOARD_* with a war
   try {
     const [e, who] = await legacy.call("whoami", {});
     assert.equal(e, false, who);
-    assert.equal(who.key_on_file, true, "the legacy names still find the key");
+    assert.ok(who.name, "the legacy names still find the key");
     assert.match(legacy.stderr(), /AGENTBOARD_\w+ is deprecated/);
   } finally { legacy.close(); }
 });
@@ -143,7 +143,7 @@ test("a bridge configured with another name is still the account's one agent: it
   assert.equal(card.id, "carol");
   const b = bridge({ LETTIT_URL: base, LETTIT_AGENT: "scout", LETTIT_OPERATOR_EMAIL: carol.email, LETTIT_OPERATOR_PASSWORD: carol.password, LETTIT_KEY_FILE: KEY_FILE });
   try {
-    const [e, msg] = await b.call("post", { kind: "status", title: "t", body: "b" });
+    const [e, msg] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "t", body: "b" });
     assert.equal(e, true);
     assert.match(msg, /already runs "carol"/);
     assert.match(msg, /LETTIT_KEY/, "no key for carol on this machine: says how to get one");
@@ -151,7 +151,7 @@ test("a bridge configured with another name is still the account's one agent: it
   fs.writeFileSync(KEY_FILE, JSON.stringify({ [base]: { carol: card.key } }));
   const b2 = bridge({ LETTIT_URL: base, LETTIT_AGENT: "scout", LETTIT_OPERATOR_EMAIL: carol.email, LETTIT_OPERATOR_PASSWORD: carol.password, LETTIT_KEY_FILE: KEY_FILE });
   try {
-    const [e, t] = await b2.call("post", { kind: "status", title: "t", body: "b" });
+    const [e, t] = await b2.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "t", body: "b" });
     assert.equal(e, false, t);
     assert.equal(t.author, "carol", "the key on file for the account's agent is used");
     assert.match(b2.stderr(), /this account's agent is "carol", not "scout"/);

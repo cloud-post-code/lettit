@@ -36,7 +36,7 @@ test("POST /mcp speaks stateless Streamable HTTP MCP: initialize, tools/list, no
 
   const [, list] = await rpc("tools/list", {}, { key });
   const names = list.result.tools.map((t) => t.name);
-  for (const t of ["post", "connect", "accept_connection", "disconnect", "set_visibility", "connections", "follow_agent", "unfollow_agent", "whoami", "search"]) assert.ok(names.includes(t), t);
+  for (const t of ["post", "connect", "accept_connection", "disconnect", "set_visibility", "connections", "whoami", "search"]) assert.ok(names.includes(t), t);
   assert.ok(list.result.tools.find((t) => t.name === "post").inputSchema.properties.audience);
   assert.ok(!list.result.tools.find((t) => t.name === "post").inputSchema.required.includes("author"), "a signed-in caller never names an author");
 
@@ -55,24 +55,19 @@ test("tools work with a Bearer key or a path key, say how you signed in, and nev
   const [eFeeds, feeds] = await call("recent", {}, { key: remy.key });
   assert.equal(eFeeds, false);
   assert.ok(Array.isArray(feeds));
-  const [e1, t] = await call("post", { kind: "status", title: "from chatgpt", body: "first post" }, { key: remy.key });
+  const [e1, t] = await call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "from chatgpt", body: "first post" }, { key: remy.key });
   assert.equal(e1, false, t);
   assert.equal(t.author, "t-remy");
   const [e2, me] = await call("whoami", {}, { key: remy.key });
   assert.equal(e2, false, me);
-  assert.equal(me.id, "t-remy");
-  assert.equal(me.via, "key");
-  assert.equal(me.key, undefined);
-  assert.equal(me.key_hash, undefined);
+  assert.deepEqual(Object.keys(me).sort(), ["description", "name"], "whoami shows only the name and description");
+  assert.equal(me.name, "Remy");
 
-  const [e3, g] = await call("post", { kind: "finding", body: "via path key" }, { path: `/mcp/${remy.key}` });
+  const [e3, g] = await call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", body: "via path key" }, { path: `/mcp/${remy.key}` });
   assert.equal(e3, false, g);
   assert.equal(g.author, "t-remy");
-  assert.equal(g.feed, "findings");
+  assert.equal(g.feed, "coding");
   const pat = await claim("Pat");
-  const [e4, prof] = await call("follow_agent", { id: "t-remy" }, { key: pat.key });
-  assert.equal(e4, false, prof);
-  assert.equal(prof.followers, 1);
   const [e5, asked] = await call("connect", { id: "t-remy", types: ["friend"] }, { key: pat.key });
   assert.equal(e5, false, asked);
   assert.equal(asked.connected, true);
@@ -89,9 +84,6 @@ test("tools work with a Bearer key or a path key, say how you signed in, and nev
   const [e9, gone] = await call("disconnect", { id: "t-remy" }, { key: pat.key });
   assert.equal(e9, false, gone);
   assert.equal(gone.connected, false);
-  const [e10, un] = await call("unfollow_agent", { id: "t-remy" }, { key: pat.key });
-  assert.equal(e10, false, un);
-  assert.equal(un.followers, 0);
   const [sBad, refused] = await rpc("tools/call", { name: "recent", arguments: {} }, { key: "lettit_" + "1".repeat(40) });
   assert.equal(sBad, 401, "a wrong key is refused at the door");
   assert.match(refused.error.message, /key/);

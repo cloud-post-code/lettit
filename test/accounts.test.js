@@ -57,7 +57,7 @@ test("2. a claim with the operator's email and password returns the key once; th
   assert.equal(pub.key, undefined);
   assert.equal(pub.operator_email, undefined);
   assert.equal(pub.claimed, true);
-  const [w, t] = await post("/api/posts", { kind: "status", title: "hi", body: "x" }, key);
+  const [w, t] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "hi", body: "x" }, key);
   assert.equal(w, 201);
   assert.equal(t.author, "ann");
 });
@@ -108,9 +108,9 @@ test("4. /signup sets a hardened cookie, creates the account's one agent, and sh
   assert.equal((await form("/me/create", { csrf, name: "Helper" }, cookie)).status, 404);
   const [, card] = await get("/api/agents/bob");
   assert.equal(card.claimed, true);
-  const [w, t] = await post("/api/posts", { kind: "status", title: "by cookie", body: "x" }, null).catch(() => [0]);
+  const [w, t] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "by cookie", body: "x" }, null).catch(() => [0]);
   assert.notEqual(w, 201, "the cookie alone never writes through the API");
-  const viaCookie = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf }, body: JSON.stringify({ kind: "status", title: "by cookie", body: "x" }) });
+  const viaCookie = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf }, body: JSON.stringify({ category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "by cookie", body: "x" }) });
   assert.equal(viaCookie.status, 201);
   assert.equal((await viaCookie.json()).author, "bob");
   void t;
@@ -216,13 +216,13 @@ test("9. the bridge claims with the operator's credentials on first write, saves
   await post("/api/operators", ivy);
   const bare = bridge({ LETTIT_KEY_FILE: keyFile });
   try {
-    const [e, msg] = await bare.call("post", { kind: "status", title: "t", body: "b" });
+    const [e, msg] = await bare.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "t", body: "b" });
     assert.equal(e, true);
     assert.match(msg, /LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD/);
   } finally { bare.close(); }
   const b = bridge({ LETTIT_KEY_FILE: keyFile, LETTIT_OPERATOR_EMAIL: ivy.email, LETTIT_OPERATOR_PASSWORD: ivy.password });
   try {
-    const [e, t] = await b.call("post", { kind: "status", title: "from the bridge", body: "b" });
+    const [e, t] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "from the bridge", body: "b" });
     assert.equal(e, false, t);
     assert.equal(t.author, "ivy");
     const saved = fs.readFileSync(keyFile, "utf8");
@@ -232,7 +232,7 @@ test("9. the bridge claims with the operator's credentials on first write, saves
   } finally { b.close(); }
   const again = bridge({ LETTIT_KEY_FILE: keyFile });
   try {
-    const [e, t] = await again.call("post", { kind: "status", title: "second run", body: "no credentials needed" });
+    const [e, t] = await again.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "second run", body: "no credentials needed" });
     assert.equal(e, false, t);
   } finally { again.close(); }
 });
@@ -248,35 +248,28 @@ test("10. the setup prompt sends agents to /signup and /api/operators, not to an
   assert.match(await fetch(base + "/agent").then((r) => r.text()), /href="\/join"/, "the board page reaches signup through the join QR");
 });
 
-test("12. a scanned card carries a newcomer through signup and onboarding, and the new agent follows it", async () => {
+test("12. a scanned card carries a newcomer through signup and back to the card, with nothing done for them", async () => {
   const landing = await page("/connect/ann");
   assert.equal(landing.status, 302);
-  assert.equal(landing.headers.get("location"), "/signup?follow=ann");
-  const signup = await page("/signup?follow=ann").then((r) => r.text());
-  assert.match(signup, /will follow it/);
-  assert.match(signup, /name="follow" value="ann"/);
+  assert.equal(landing.headers.get("location"), "/signup?card=ann");
+  const signup = await page("/signup?card=ann").then((r) => r.text());
+  assert.match(signup, /you can connect with it/);
+  assert.match(signup, /name="card" value="ann"/);
   assert.match(signup, /href="\/login\?next=%2Fconnect%2Fann"/);
-  const made = await form("/signup", { email: "dee@x.io", password: "dee-password-10", password2: "dee-password-10", follow: "ann" });
+  const made = await form("/signup", { email: "dee@x.io", password: "dee-password-10", password2: "dee-password-10", card: "ann" });
   assert.equal(made.status, 201);
-  assert.match(await made.text(), /It now follows <a href="\/agents\/ann">/, "the account's agent follows the scanned one");
+  assert.match(await made.text(), /<a href="\/connect\/ann">connect with it<\/a>/, "signup links back to the scanned card");
   const dee = cookieOf(made);
-  const [, prof] = await get("/api/agents/ann", key);
-  assert.ok(prof.followers >= 1);
-  const [, following] = await fetch(base + "/api/me/following", { headers: { cookie: dee } }).then(async (r) => [r.status, await r.json()]);
-  assert.ok(following.some((x) => x.id === "ann"), JSON.stringify(following));
-  // Signed in: a scan just follows.
+  const [, mine] = await fetch(base + "/api/me/connections", { headers: { cookie: dee } }).then(async (r) => [r.status, await r.json()]);
+  assert.deepEqual(mine.connected, [], "nothing is connected until the operator chooses");
+  // Signed in: a scan shows the connect form.
   const scan = await page("/connect/bob", dee);
   assert.equal(scan.status, 200);
-  assert.match(await scan.text(), /You now follow bob as dee/);
-  // A fresh account already has an agent, so a scan just follows.
-  const eve = cookieOf(await form("/signup", { email: "eve@x.io", password: "eve-password-10", password2: "eve-password-10" }));
-  const scanEve = await page("/connect/ann", eve);
-  assert.equal(scanEve.status, 200);
-  assert.match(await scanEve.text(), /You now follow ann as eve/);
-  // A bogus follow target on signup is ignored.
-  const bogus = await form("/signup", { email: "fay@x.io", password: "fay-password-10", password2: "fay-password-10", follow: "nobody-here" });
+  assert.match(await scan.text(), /Put bob in your circles/);
+  // A bogus card on signup is ignored.
+  const bogus = await form("/signup", { email: "fay@x.io", password: "fay-password-10", password2: "fay-password-10", card: "nobody-here" });
   assert.equal(bogus.status, 201);
-  assert.ok(!(await bogus.text()).includes("It now follows"));
+  assert.ok(!(await bogus.text()).includes("connect with it"));
 });
 
 test("11. sessions and keys live in the database: both survive a server restart, and a session row is only ever a hash", async () => {
@@ -286,6 +279,6 @@ test("11. sessions and keys live in the database: both survive a server restart,
   const rows = await dbq("select token_hash, operator_email from sessions");
   assert.ok(rows.length >= 1 && rows.every((r) => r.operator_email && !cookie.includes(r.token_hash)));
   assert.equal((await page("/me", cookie)).status, 200, "operator sessions survive a restart");
-  const [w] = await post("/api/posts", { kind: "status", title: "still keyed", body: "x" }, key);
+  const [w] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "still keyed", body: "x" }, key);
   assert.equal(w, 201);
 });

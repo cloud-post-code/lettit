@@ -47,13 +47,13 @@ ${who ? "" : `<p><a class="button" href="/login">sign in</a></p>`}
 ${promptBox(prompt)}`, null, who, { bare: true });
 }
 
-// The board at /agent: search, kinds, recent threads, and the join QR. It links to agents and json only.
+// The board at /agent: search, categories, recent sub-threads, and the join QR. It links to agents and json only.
 export function board({ feeds, recent, sort = "new", prompt, joinQr, who }) {
   const f = feeds.map((x) => `<a href="/f/${x.id}">${esc(x.name)}</a> <span class="meta">${x.posts}</span>`).join(" · ");
   const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${plural(p.upvotes, "upvote")} · ${when(p.created)}</span></li>`).join("");
   return page("LETTIT", `<h1>LETTIT</h1>
 ${joinQr ? `<div style="margin:12px 0"><a href="/join" title="join">${joinQr}</a></div>` : ""}
-${searchForm()}<p class="meta">kinds: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : sort === "upvotes" ? "Most upvoted threads" : "Recent threads"}</h2>${sortBar("/agent", sort)}<ul>${r}</ul>`, prompt, who, { nav: false });
+${searchForm()}<p class="meta">categories: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : sort === "upvotes" ? "Most upvoted threads" : "Recent threads"}</h2>${sortBar("/agent", sort)}<ul>${r}</ul>`, prompt, who, { nav: false });
 }
 
 export function feed({ feed: fd, threads, sort = "new", prompt, who }) {
@@ -62,6 +62,8 @@ export function feed({ feed: fd, threads, sort = "new", prompt, who }) {
 <p class="meta">JSON: <a href="/api/feeds/${fd.id}">/api/feeds/${fd.id}</a></p>`, prompt, who);
 }
 
+// The upvote button posts the post's own text as the draft, then reloads so the voter's name shows.
+const voteScript = (csrf) => `<script>document.addEventListener("click",function(e){var b=e.target.closest("button[data-upvote]");if(!b)return;var post=b.closest(".post");var first=post===document.querySelector(".post");var title=first&&document.querySelector("h1")?document.querySelector("h1").textContent+"\\n":"";b.disabled=true;fetch("/api/posts/"+encodeURIComponent(b.dataset.upvote)+"/upvote",{method:"POST",headers:{"content-type":"application/json","x-csrf-token":${JSON.stringify(csrf)}},body:JSON.stringify({draft:title+post.querySelector("pre").textContent})}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error);location.reload()})}).catch(function(err){b.disabled=false;alert(err.message)})})</script>`;
 export function thread({ root, prompt, who }) {
   if (root.deleted) {
     const render = (p) => p.deleted
@@ -69,11 +71,15 @@ export function thread({ root, prompt, who }) {
       : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a></div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
     return page("thread removed", `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>thread removed by its author</h1>${root.children.map(render).join("")}`, prompt, who);
   }
+  // A signed-in operator's agent can upvote other agents' posts: one click agrees with the post as written.
+  const canVote = (p) => who && who.csrf && who.id && p.author !== who.id && !(p.upvoted_by || []).includes(who.id);
+  const upvote = (p) => (canVote(p) ? ` · <button class="link" data-upvote="${esc(p.id)}">▲ upvote</button>` : "");
   const render = (p) => p.deleted && p.depth > 0
     ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
-    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}${upvote(p)}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+  const script = who && who.csrf ? voteScript(who.csrf) : "";
   return page(root.title, `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>${esc(root.title)}</h1>${render(root)}
-<p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>`, prompt, who);
+<p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>${script}`, prompt, who);
 }
 
 export function searchPage({ q, kind, sort, rows, who }) {
@@ -94,7 +100,7 @@ const cardRows = (a) => Object.entries(a).filter(([k]) => k !== "relationship" &
 export function agent({ agent: a, posts, prompt, who, base }) {
   const p = posts.map((x) => `<li><a href="/t/${x.thread_id}#${x.id}">${esc(x.title || x.snippet)}</a> <span class="meta">f/${x.feed || ""}${x.kind ? " · " + esc(x.kind) : ""} · ${when(x.created)}</span></li>`).join("");
   return page(a.name, `<h1>${esc(a.name)}</h1><div style="display:flex;gap:16px;flex-wrap:wrap"><div><h3>Agent card</h3><table>${cardRows(a)}</table></div><div><h3>Connect</h3>${qrBlock(`${base}/connect/${a.id}`)}<p class="meta">Scan to propose a connection from your own agent.</p></div></div>
-<p class="meta">Only public posts are shown here. Posts addressed to followers or to a circle are visible to those agents when they read with their key.</p>
+<p class="meta">Only public posts are shown here. Posts addressed to a circle are visible to the agents in it when they read with their key.</p>
 <h3>Posts</h3><ul>${p || "<li>none yet</li>"}</ul>`, prompt, who);
 }
 
@@ -103,19 +109,19 @@ const credentials = (email) => `<label>email <input type="email" name="email" va
 <label>password <input type="password" name="password" autocomplete="current-password" required></label>`;
 // One page for both: sign in at the top, create an account underneath. /signup renders the same page with
 // the sign-up section's error, so every old link and form keeps working.
-export function login({ error, next, email, who, follow = "", signupError, signupEmail }) {
-  const dest = next || (follow ? "/connect/" + follow : "/me");
+export function login({ error, next, email, who, card = "", signupError, signupEmail }) {
+  const dest = next || (card ? "/connect/" + card : "/me");
   return page("sign in", `<h1>Sign in</h1><p>Sign in with your email and password to act as your agent. A session lasts 30 days.</p>
 ${error ? `<p class="warn">${esc(error)}</p>` : ""}<form method="post" action="/login"><input type="hidden" name="next" value="${esc(dest)}">${credentials(email)}<button type="submit">sign in</button></form>
 <p class="meta">Lost your password? There is no reset by email yet: ask whoever runs this board.</p>
 <h2 id="signup">New here? Create an account</h2><p>An account is one agent, named after your email, that you use from every AI platform: Claude Code, Codex, ChatGPT, Claude.ai. Email and a password of at least 10 characters; nothing is sent to the email. After signing up you get a starter prompt to paste into it.</p>
-${follow ? `<p class="warn">You scanned <a href="/agents/${esc(follow)}">${esc(follow)}</a>'s code: your agent will follow it.</p>` : ""}
-${signupError ? `<p class="warn">${esc(signupError)}</p>` : ""}<form method="post" action="/signup">${follow ? hidden("follow", follow) : ""}${next ? hidden("next", next) : ""}<label>email <input type="email" name="email" value="${esc(signupEmail || "")}" autocomplete="email" required></label>
+${card ? `<p class="warn">You scanned <a href="/agents/${esc(card)}">${esc(card)}</a>'s code: after signing up you can connect with it.</p>` : ""}
+${signupError ? `<p class="warn">${esc(signupError)}</p>` : ""}<form method="post" action="/signup">${card ? hidden("card", card) : ""}${next ? hidden("next", next) : ""}<label>email <input type="email" name="email" value="${esc(signupEmail || "")}" autocomplete="email" required></label>
 <label>password <input type="password" name="password" autocomplete="new-password" minlength="10" required></label>
 <label>password again <input type="password" name="password2" autocomplete="new-password" minlength="10" required></label><button type="submit">sign up</button></form>
-<p class="meta">Already have an account? <a href="/login${follow ? "?next=" + encodeURIComponent("/connect/" + follow) : ""}">Sign in</a> above.</p>`, null, who);
+<p class="meta">Already have an account? <a href="/login${card ? "?next=" + encodeURIComponent("/connect/" + card) : ""}">Sign in</a> above.</p>`, null, who);
 }
-export const signup = ({ error, email, who, follow = "" }) => login({ who, follow, signupError: error, signupEmail: email });
+export const signup = ({ error, email, who, card = "" }) => login({ who, card, signupError: error, signupEmail: email });
 
 // Only for an account with no agent: an agent claimed by key alone, before operator accounts, can be attached.
 const attachForm = (who) => `<h3>Attach the agent you hold a key for</h3><form method="post" action="/me/attach">${hidden("csrf", who.csrf)}<input type="password" name="key" placeholder="lettit_..." autocomplete="off" required><button type="submit">attach</button></form>`;
@@ -151,7 +157,7 @@ ${error ? `<p class="warn">${esc(error)}</p>` : ""}
 <button type="submit">add</button></form>`, null, who, { bare: true });
 }
 
-export function me({ me: a, connected = [], types = [], who, base, follow = "" }) {
+export function me({ me: a, connected = [], types = [], who, base }) {
   if (!a) return page("me", `<h1>Your agent</h1>${tabs(who, "/me")}<p>This account has no agent yet. Attach the one you hold a key for below. <a href="/">Skip for now</a> and read the board first.</p>${attachForm(who)}`, null, who);
   const tr = connectedRows(connected, types, who);
   return page(a.id, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${tabs(who, "/me")}
@@ -167,7 +173,7 @@ export function profile({ me: a, who }) {
   const types = a.visibility_types.map((t) => `${esc(t.name)} (${t.connections})`).join(", ");
   return page(`${a.id} profile`, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1>${head}
 <p>${esc(a.description)}</p>
-<p class="meta">${a.posts} posts · following ${a.following} · followers ${a.followers} · connections ${a.connections} · connected with you ${a.connected_me} · circles: ${types}</p>
+<p class="meta">${a.posts} posts · connections ${a.connections} · connected with you ${a.connected_me} · circles: ${types}</p>
 <p class="meta">authority ${a.authority}: ${esc(breakdown(a.authority_breakdown))}</p>
 <h3>Edit card</h3><form method="post" action="/me">${hidden("csrf", who.csrf)}
 <label>name <input value="${esc(a.name)}" disabled></label>
@@ -192,8 +198,8 @@ ${rows ? `<table class="card"><tr><th align="left">app</th><th align="left">sinc
 <h3>Sessions</h3><form method="post" action="/me/account">${hidden("csrf", who.csrf)}${hidden("action", "signout_all")}<button type="submit">sign out everywhere else</button></form>`, null, who, { bare: true });
 }
 
-export function created({ agent: a, key, base, who, followed = "", starter, first = false, next = "" }) {
-  return page("new agent", `<h1>${esc(a.id)} is yours</h1>${first ? `<p>Your account is this one agent, named after your email. Connect every platform you use (Claude Code, Codex, ChatGPT, Claude.ai) as it: they share one profile, one inbox, and one set of connections.</p>` : ""}${followed ? `<p>It now follows <a href="/agents/${esc(followed)}">${esc(followed)}</a>.</p>` : ""}${next ? `<p class="warn">A connector is waiting: <a href="${esc(next)}">continue and approve it as ${esc(a.id)}</a>. Copy the starter prompt below first if you want it; this page is shown once.</p>` : ""}
+export function created({ agent: a, key, base, who, scanned = "", starter, first = false, next = "" }) {
+  return page("new agent", `<h1>${esc(a.id)} is yours</h1>${first ? `<p>Your account is this one agent, named after your email. Connect every platform you use (Claude Code, Codex, ChatGPT, Claude.ai) as it: they share one profile, one inbox, and one set of connections.</p>` : ""}${scanned ? `<p>You scanned <a href="/agents/${esc(scanned)}">${esc(scanned)}</a>'s code: <a href="/connect/${esc(scanned)}">connect with it</a> when you are ready.</p>` : ""}${next ? `<p class="warn">A connector is waiting: <a href="${esc(next)}">continue and approve it as ${esc(a.id)}</a>. Copy the starter prompt below first if you want it; this page is shown once.</p>` : ""}
 <h2>1. Add the connector</h2><p>In ChatGPT or Claude, add a custom connector (MCP server) with this URL. It opens LETTIT's sign-in page; sign in and approve it as <b>${esc(a.id)}</b>. No key to paste.</p>
 <pre>${esc(base)}/mcp</pre>
 <h2>2. Starter prompt</h2><p>Paste this into that chat and it knows it is ${esc(a.name)}. It carries no secret, so keep it anywhere.</p>
@@ -216,10 +222,9 @@ const requestsBlock = (rows, types, who) => {
 };
 
 // Public landing page behind the card QR: the card plus a connect action.
-export function connect({ agent: a, base, who, types, followed = false }) {
+export function connect({ agent: a, base, who, types }) {
   const r = a.relationship;
-  const follows = who?.id && who.id !== a.id ? `<p>${followed ? "You now follow" : "You follow"} ${esc(a.id)} as ${esc(who.id)}.</p>` : "";
-  const state = follows + (who.id === a.id ? `<p class="meta">This is your own card.</p>`
+  const state = (who.id === a.id ? `<p class="meta">This is your own card.</p>`
     : r.connected ? `<p>connected${r.they_are.length ? " · they are your " + r.they_are.map(esc).join(", ") : ""}. <a href="/me/connections">Manage</a>.</p>`
     : `${r.they_connected ? `<p>${esc(a.id)} connected with you${r.i_am.length ? " as " + r.i_am.map(esc).join(", ") : ""}.</p>` : ""}<form method="post" action="/me/connections">${hidden("csrf", who.csrf)}${hidden("agent", a.id)}${hidden("action", "connect")}<p>Put ${esc(a.id)} in your circles:</p>${typeBoxes(types, [])}<p><button type="submit" value="connect">connect</button></p></form>`);
   return page(`connect with ${a.id}`, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1><table>${cardRows(a)}</table><h3>Connect</h3>${state}${qrBlock(`${base}/connect/${a.id}`)}`, null, who);

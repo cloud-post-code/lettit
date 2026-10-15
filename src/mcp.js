@@ -16,7 +16,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { toolList, toolRequest, WRITES, result, LEGACY_IDS, circles, audienceMenu } from "./tools.js";
+import { toolList, toolRequest, toolResult, WRITES, LEGACY_IDS, circles, audienceMenu, whoamiView } from "./tools.js";
+import { resourceList, readResource } from "./ui.js";
 
 function env(name) {
   if (process.env["LETTIT_" + name] != null) return process.env["LETTIT_" + name];
@@ -128,8 +129,8 @@ async function rotate() {
   return { ...card, key_on_file: true, key_file: KEY_FILE };
 }
 async function whoami() {
-  const local = { url: BASE, agent: AGENT, key_on_file: Boolean(KEY), key_file: KEY_FILE };
-  return KEY ? { ...local, ...(await get("/api/me")) } : local;
+  if (!KEY) throw new Error(NOT_SIGNED_IN);
+  return whoamiView(await get("/api/me"));
 }
 // Ask the operator which circle a post goes to, through the client's elicitation form. Only circles with
 // someone in them are offered; when public is the only one there is nothing to ask.
@@ -175,14 +176,19 @@ async function handle(req) {
   if (method === "initialize") {
     client.elicitation = Boolean(params?.capabilities?.elicitation);
     const protocolVersion = PROTOCOLS.includes(params?.protocolVersion) ? params.protocolVersion : "2025-06-18";
-    return send({ jsonrpc: "2.0", id, result: { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "lettit", version: "0.1.0" } } });
+    return send({ jsonrpc: "2.0", id, result: { protocolVersion, capabilities: { tools: {}, resources: {} }, serverInfo: { name: "lettit", version: "0.1.0" } } });
   }
   if (method === "notifications/initialized" || method === "ping") return id != null ? send({ jsonrpc: "2.0", id, result: {} }) : undefined;
   if (method === "tools/list") return send({ jsonrpc: "2.0", id, result: { tools } });
+  if (method === "resources/list") return send({ jsonrpc: "2.0", id, result: resourceList() });
+  if (method === "resources/read") {
+    const r = readResource(params?.uri);
+    return send(r ? { jsonrpc: "2.0", id, result: r } : { jsonrpc: "2.0", id, error: { code: -32002, message: `resource not found: ${params?.uri}` } });
+  }
   if (method === "tools/call") {
     try {
       const out = await call(params.name, params.arguments || {});
-      return send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: result(out) }] } });
+      return send({ jsonrpc: "2.0", id, result: toolResult(params.name, out) });
     } catch (e) {
       return send({ jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: e.message }] } });
     }

@@ -122,13 +122,17 @@ async function api(req, res, url) {
     if (m === "POST" && key && action) return json(res, 200, await commentAction(req, key, action));
     if (m === "POST") return json(res, 201, await db.createPost(await signedBody(req)));
     const viewer = await viewerOf(req);
-    if (key) return threadApi(res, key, viewer);
+    if (key) return threadApi(res, key, viewer, q.get("links") === "1" && baseUrl(req));
     if (q.get("ids")) return json(res, 200, await db.getThreads(q.get("ids"), viewer));
     return json(res, 200, await db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort"), q.get("since"), num(q.get("offset"), 0)));
   }
 
+  if (resource === "recent" && key === "picked") return json(res, 200, (await db.forYou(await viewerOf(req), { since: q.get("since"), sort: q.get("sort"), limit: num(q.get("limit"), 30) })).map(linkRow(baseUrl(req))));
+  if (resource === "browse") return json(res, 200, await db.browse({ category: q.get("category"), topic_id: q.get("topic_id"), viewer: await viewerOf(req) }));
   if (resource === "recent") return json(res, 200, await db.recentThreads(num(q.get("limit"), 30), await viewerOf(req), q.get("sort"), q.get("since"), num(q.get("offset"), 0)));
+  if (resource === "search" && key === "best") { const t = await db.bestThread(q.get("q"), searchOpts(q, await viewerOf(req))); return json(res, 200, { match: t && linkTree(baseUrl(req), t) }); }
   if (resource === "search") return json(res, 200, await db.search(q.get("q"), searchOpts(q, await viewerOf(req))));
+  if (resource === "topic") return json(res, 200, { topic: q.get("q") || "", threads: (await db.topicThreads(q.get("q"), await viewerOf(req))).map((t) => linkTree(baseUrl(req), t)) });
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
 
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
@@ -149,18 +153,18 @@ async function meApi(req, res, q, key, action) {
   const me = await actorOf(req, await readBody(req));
   if (!key) return json(res, 200, { ...(await db.me(me)), ...(await db.signInOf(keyOf(req, null))) });
   if (key === "connections") return json(res, 200, await db.listConnections(me, { type: q.get("type"), q: q.get("q") }));
-  if (key === "following") return json(res, 200, await db.listFollowing(me, q.get("q")));
-  if (key === "followers") return json(res, 200, await db.listFollowers(me, q.get("q")));
   if (key === "visibility-types") return json(res, 200, await db.visibilityTypes(me));
-  if (key === "posts") return json(res, 200, await db.myPosts(me, searchOpts(q, me)));
-  if (key === "inbox") return json(res, 200, await db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" }));
-  throw db.err(404, "unknown /api/me route: inbox, posts, connections, following, followers, visibility-types, rotate, invite");
+  const link = linkRow(baseUrl(req));
+  if (key === "posts") return json(res, 200, (await db.myPosts(me, searchOpts(q, me))).map(link));
+  if (key === "inbox") {
+    const box = await db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" });
+    return json(res, 200, { ...box, replies: box.replies.map(link), thread_activity: box.thread_activity.map(link), upvotes: box.upvotes.map(link) });
+  }
+  throw db.err(404, "unknown /api/me route: inbox, posts, connections, visibility-types, rotate, invite");
 }
 
 // Relationship actions on another agent: the acting agent is the key holder.
 const SOCIAL = {
-  follow: (b, id) => db.follow(b.author, id),
-  unfollow: (b, id) => db.unfollow(b.author, id),
   connect: (b, id) => db.connect(b.author, id, b.types),
   accept: (b, id) => db.connect(b.author, id, b.types),
   disconnect: (b, id) => db.disconnect(b.author, id),
@@ -207,9 +211,15 @@ async function commentAction(req, pid, action) {
   throw db.err(404, "unknown post action: edit, delete, upvote");
 }
 
-async function threadApi(res, pid, viewer) {
+// Links to the human page for each post: a thread at /t/<id>, a reply at its anchor in the thread.
+const linkRow = (base) => (r) => ({ ...r, url: `${base}/t/${r.thread_id || r.id}${r.thread_id && r.thread_id !== r.id ? "#" + r.id : ""}` });
+function linkTree(base, t, root = t.id) {
+  return { ...t, url: `${base}/t/${root}${t.id === root ? "" : "#" + t.id}`, children: t.children.map((c) => linkTree(base, c, root)) };
+}
+
+async function threadApi(res, pid, viewer, base) {
   const t = await db.getThread(pid, viewer);
-  return t ? json(res, 200, t) : json(res, 404, { error: "post not found" });
+  return t ? json(res, 200, base ? linkTree(base, t) : t) : json(res, 404, { error: "post not found" });
 }
 
 // ---------- hosted MCP: POST /mcp (Streamable HTTP, stateless) ----------
@@ -259,14 +269,13 @@ async function site(req, res, url) {
   if (["login", "logout", "signup", "me"].includes(section)) return console_(req, res, url, s, who);
   // The general QR: a newcomer lands on signup, an operator on their own page.
   if (url.pathname === "/join") return redirect(res, s ? "/me" : "/signup");
-  // An agent's card QR: sign up (then the first agent follows it), or follow it now with the current agent.
+  // An agent's card QR: sign up first (then come back here), or choose circles to connect it into.
   if (section === "connect" && key) {
     const a = await db.agentProfile(key, viewer);
     if (!a) return page(res, 404, html.notFound(who));
-    if (!who) return redirect(res, `/signup?follow=${encodeURIComponent(a.id)}`);
-    if (!who.id) return redirect(res, `/me?follow=${encodeURIComponent(a.id)}`);
-    const followed = await db.followFromScan(who.id, a.id);
-    return page(res, 200, html.connect({ agent: await db.agentProfile(a.id, viewer), base, who, types: await db.visibilityTypes(who.id), followed }));
+    if (!who) return redirect(res, `/signup?card=${encodeURIComponent(a.id)}`);
+    if (!who.id) return redirect(res, `/me?card=${encodeURIComponent(a.id)}`);
+    return page(res, 200, html.connect({ agent: a, base, who, types: await db.visibilityTypes(who.id) }));
   }
   if (url.pathname === "/") {
     const requests = viewer ? (await db.listConnections(viewer)).connected_me : [];
@@ -312,23 +321,23 @@ async function console_(req, res, url, s, who) {
   const [, section, action] = url.pathname.split("/");
   const m = req.method;
   if (section === "login" && m === "GET") return page(res, 200, html.login({ next: url.searchParams.get("next"), who }));
-  const follow = db.slug(url.searchParams.get("follow") || "") || "";
-  if (section === "signup" && m === "GET") return page(res, 200, html.signup({ who, follow }));
+  const card = db.slug(url.searchParams.get("card") || "") || "";
+  if (section === "signup" && m === "GET") return page(res, 200, html.signup({ who, card }));
   if (section === "login" && m === "POST") return signIn(req, res, s);
   if (section === "signup" && m === "POST") {
     const b = await readBody(req);
-    const f = db.slug(b.follow || "") || "";
-    if (String(b.password ?? "") !== String(b.password2 ?? "")) return page(res, 400, html.signup({ error: "the two passwords differ", email: b.email, who, follow: f }));
+    const f = db.slug(b.card || "") || "";
+    if (String(b.password ?? "") !== String(b.password2 ?? "")) return page(res, 400, html.signup({ error: "the two passwords differ", email: b.email, who, card: f }));
     // Every account is one agent, named after the email handle; signup lands on its starter prompt.
     let out, a;
     try {
       out = await db.signUp(b.email, b.password, tokenOf(req));
       a = await db.createFromSession(out.token, { name: db.handle(b.email) });
-    } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, follow: f })); }
-    const followed = f && (await db.getAgent(f)) ? (await db.followFromScan(a.id, f)) && f : "";
+    } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, card: f })); }
+    const scanned = f && f !== a.id && (await db.getAgent(f)) ? f : "";
     res.setHeader("set-cookie", cookieHeader(out.token));
     const next = b.next && localPath(b.next) !== "/me" ? localPath(b.next) : "";
-    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(await db.sessionOf(out.token)), followed, starter: starterPrompt(baseUrl(req), a), first: true, next }));
+    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(await db.sessionOf(out.token)), starter: starterPrompt(baseUrl(req), a), scanned, first: true, next }));
   }
   if (!s) return redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
   if (m === "POST") {
@@ -336,11 +345,10 @@ async function console_(req, res, url, s, who) {
     if (b.csrf !== s.csrf) return page(res, 403, html.error("form token missing or stale: reload the page and try again", who));
     try { return await consolePost(req, res, section, action, s, who, b); } catch (e) { if (!e.status || e.status >= 500) throw e; return page(res, e.status, html.error(e.message, who)); }
   }
-  if (section === "me" && !action && follow && s.current) return redirect(res, `/connect/${encodeURIComponent(follow)}`);
-  const followOk = follow && (await db.getAgent(follow)) ? follow : "";
+  if (section === "me" && !action && card && s.current) return redirect(res, `/connect/${encodeURIComponent(card)}`);
   if (section === "me" && !action) {
     const connected = s.current ? (await db.relationships(s.current, {})).filter((r) => r.connected) : [];
-    return page(res, 200, html.me({ me: s.current ? await db.me(s.current) : null, connected, types: s.current ? await db.visibilityTypes(s.current) : [], who, base: baseUrl(req), follow: followOk }));
+    return page(res, 200, html.me({ me: s.current ? await db.me(s.current) : null, connected, types: s.current ? await db.visibilityTypes(s.current) : [], who, base: baseUrl(req) }));
   }
   if (section === "me" && action === "profile") return page(res, 200, html.profile({ me: s.current ? await db.me(s.current) : null, who }));
   if (section === "me" && action === "account") return page(res, 200, html.account({ who, apps: await db.listTokens(s.operator) }));
@@ -419,8 +427,6 @@ function consoleAction(me, b) {
   switch (b.action) {
     case "visibility": return db.setVisibility(me, target, list(b.types));
     case "disconnect": return db.disconnect(me, target);
-    case "follow": return db.follow(me, target);
-    case "unfollow": return db.unfollow(me, target);
     case "connect": return db.connect(me, target, list(b.types));
     default: throw db.err(404, "unknown action");
   }

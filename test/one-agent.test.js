@@ -51,7 +51,7 @@ const form = (p, fields, cookie) => fetch(base + p, { method: "POST", redirect: 
 const text = (p, cookie) => fetch(base + p, { headers: cookie ? { cookie } : {} }).then((r) => r.text());
 const s256 = (v) => crypto.createHash("sha256").update(v).digest("base64url");
 
-test("an operator's agents are merged into one named after the handle: posts, follows, connections, circles, tokens, key", async () => {
+test("an operator's agents are merged into one named after the handle: posts, connections, circles, tokens, key", async () => {
   const col = async (q, p) => (await dbq(q, p)).map((r) => Object.values(r)[0]);
   assert.deepEqual(await col("select id from agents order by 1"), ["ann", "blake", "board"]);
   const [ann_] = await dbq("select post_count from agents where id = 'ann'");
@@ -67,21 +67,20 @@ test("an operator's agents are merged into one named after the handle: posts, fo
   assert.deepEqual(await col("select name from visibility_types where agent_id = 'blake' and not builtin"), ["client"], "custom circles are kept");
   assert.deepEqual(await col("select author_id from posts where id in ('p1', 'p2')"), ["blake", "blake"]);
   assert.deepEqual(await col("select agent_id from upvotes where post_id = 'p1'"), ["ann"], "a self upvote after the merge is dropped");
-  assert.deepEqual(await col("select created_by from feeds where id = 'status'"), ["blake"]);
-  assert.deepEqual(await dbq("select follower_id, followed_id, created from follows order by 1"), [{ follower_id: "ann", followed_id: "blake", created: "2026-01-03T00:00:00.000Z" }, { follower_id: "blake", followed_id: "ann", created: "2026-01-03T00:00:00.000Z" }], "no self follow");
+  assert.deepEqual(await col("select feed_id from posts where id = 'p1'"), ["coding"], "the old status kind feed folded into coding");
   assert.deepEqual(await dbq("select to_id, created from connections where from_id = 'blake'"), [{ to_id: "ann", created: "2026-01-03T00:00:00.000Z" }], "since the earliest");
   assert.deepEqual(await col("select type from connection_types where from_id = 'blake' order by 1"), ["colleague", "friend"], "types are the union");
   assert.deepEqual(await col("select to_id from connections where from_id = 'ann'"), ["blake"]);
   assert.deepEqual(await col("select agent_id from oauth_tokens where access_hash = 'tok1'"), ["blake"]);
 
-  const [s, t] = await api("/api/posts", { kind: "status", body: "still me" }, CODEX_KEY);
+  const [s, t] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "still me" }, CODEX_KEY);
   assert.equal(s, 201, t.error);
   assert.equal(t.author, "blake");
-  const [s2, t2] = await api("/api/posts", { kind: "status", body: "from the other platform" }, CLAUDE_KEY);
+  const [s2, t2] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "from the other platform" }, CLAUDE_KEY);
   assert.equal(s2, 201, "the merged agent's key keeps working until the next rotation");
   assert.equal(t2.author, "blake");
   const [, me] = await get("/api/me", CODEX_KEY);
-  assert.deepEqual([me.id, me.following, me.followers, me.connections, me.connected_me], ["blake", 1, 1, 1, 1]);
+  assert.deepEqual([me.id, me.connections, me.connected_me], ["blake", 1, 1]);
   const [s404, e] = await get("/api/agents/blake-claude-code");
   assert.equal(s404, 404);
   assert.match(e.error, /"blake-claude-code" is now "blake"/);
@@ -173,24 +172,24 @@ test("the stdio bridge needs no LETTIT_AGENT: it claims the account's agent, the
   };
   const first = run({ LETTIT_OPERATOR_EMAIL: dee.email, LETTIT_OPERATOR_PASSWORD: dee.password });
   try {
-    const [e, t] = await first.call("post", { kind: "status", title: "from codex", body: "x" });
+    const [e, t] = await first.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "from codex", body: "x" });
     assert.equal(e, false, t);
     assert.equal(t.author, "dee");
     const [, who] = await first.call("whoami", {});
-    assert.deepEqual([who.agent, who.id, who.key_on_file], ["dee", "dee", true]);
+    assert.deepEqual(Object.keys(who).sort(), ["description", "name"], "the saved key signs the bridge in");
   } finally { first.close(); }
   assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base]), ["dee"]);
   // A second platform on the same machine, no agent name and no password: the key file is enough.
   const second = run({});
   try {
-    const [e, t] = await second.call("post", { kind: "status", title: "from claude code", body: "y" });
+    const [e, t] = await second.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "from claude code", body: "y" });
     assert.equal(e, false, t);
     assert.equal(t.author, "dee");
   } finally { second.close(); }
   // An old per-platform name resolves to the same agent.
   const third = run({ LETTIT_AGENT: "dee-codex", LETTIT_OPERATOR_EMAIL: dee.email, LETTIT_OPERATOR_PASSWORD: dee.password });
   try {
-    const [e, t] = await third.call("post", { kind: "status", title: "old name", body: "z" });
+    const [e, t] = await third.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "old name", body: "z" });
     assert.equal(e, false, t);
     assert.equal(t.author, "dee");
   } finally { third.close(); }

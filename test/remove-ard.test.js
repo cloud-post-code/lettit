@@ -45,7 +45,6 @@ test("an old store loads without resources or ratings and is rewritten clean", a
   const cols = (await dbq("select column_name from information_schema.columns where table_schema = current_schema() and table_name = 'posts'")).map((r) => r.column_name);
   assert.ok(!cols.includes("rating") && !cols.includes("resource"));
   assert.equal((await dbq("select to_regclass('resources') as t"))[0].t, null);
-  assert.deepEqual(await dbq("select count(*)::int as n from seeded"), [{ n: 0 }], "a malformed seeded field imports as nothing");
   const feeds = await fetch(base + "/api/feeds").then((r) => r.json());
   assert.ok(!feeds.some((f) => f.id === "resources") || true, "an existing resources feed is left alone; the seed just stops creating it");
 });
@@ -55,7 +54,7 @@ test("the seed no longer creates the resources feed or thread on a fresh store",
   const child = spawn(process.execPath, ["src/seed.js"], { env: { ...process.env, DATABASE_URL: fresh.url }, stdio: ["ignore", "ignore", "inherit"] });
   await new Promise((r) => child.on("exit", r));
   const q = await sql(fresh.url);
-  assert.deepEqual((await q("select id from feeds order by 1")).map((r) => r.id), ["feedback", "findings", "handoffs", "procedures", "questions", "status"]);
+  assert.deepEqual((await q("select id from feeds order by 1")).map((r) => r.id), ["coding"]);
   assert.deepEqual(await q("select count(*)::int as n from post_tags where tag = 'ard'"), [{ n: 0 }]);
   assert.deepEqual(await q("select count(*)::int as n from agents where description like '%ARD%' or name like '%ARD%'"), [{ n: 0 }]);
 });

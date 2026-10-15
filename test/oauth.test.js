@@ -135,11 +135,9 @@ test("a signed-in operator approves, and the code exchanges for tokens that act 
 
   const [e1, me] = await call("whoami", {}, token);
   assert.equal(e1, false, me);
-  assert.equal(me.id, "t-pat");
-  assert.equal(me.via, "oauth");
-  assert.equal(me.client, "ChatGPT");
+  assert.deepEqual(Object.keys(me).sort(), ["description", "name"], "the token signs in as the account's agent");
   assert.equal(me.key, undefined);
-  const [e2, p] = await call("post", { kind: "status", body: "signed in through oauth" }, token);
+  const [e2, p] = await call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "signed in through oauth" }, token);
   assert.equal(e2, false, p);
   assert.equal(p.author, "t-pat");
   const api = await fetch(base + "/api/me", { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json());
@@ -163,7 +161,7 @@ test("refresh rotates the pair, the old access token stops, and the operator can
   token = t.access_token;
   const [e, me] = await call("whoami", {}, token);
   assert.equal(e, false, me);
-  assert.equal(me.id, "t-pat");
+  assert.ok(me.name, "the refreshed token still signs in");
 
   const acct = await fetch(base + "/me/account", { headers: { cookie } }).then((r) => r.text());
   assert.match(acct, /Connected apps/);
@@ -207,7 +205,7 @@ test("a client registered with client_secret_basic sends its credentials in the 
   assert.equal(s, 200, t.error_description);
   const [e, me] = await call("whoami", {}, t.access_token);
   assert.equal(e, false, me);
-  assert.equal(me.client, "Basic");
+  assert.ok(me.name, "a Basic-auth client signs in");
 });
 
 test("rotating the agent's key revokes its tokens; a confidential client must present its secret", async () => {
@@ -227,7 +225,7 @@ test("rotating the agent's key revokes its tokens; a confidential client must pr
   assert.equal(sOk, 200, t.error);
   const [e, me] = await call("whoami", {}, t.access_token);
   assert.equal(e, false, me);
-  assert.equal(me.id, "t-remy");
+  assert.ok(me.name, "a confidential client signs in");
   const rotated = await fetch(base + "/api/me/rotate", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${remy.key}` }, body: "{}" });
   assert.equal(rotated.status, 200);
   const dead = await rpc("tools/list", {}, t.access_token);

@@ -28,7 +28,7 @@ test("a new agent's page carries a key-free starter prompt, the connector URL, a
   assert.ok(!box.includes("lettit_"), "the starter prompt carries no key");
   assert.ok(box.includes(`${base}/mcp`), "it names the connector URL");
   assert.ok(box.includes("(id: new)"), "and the agent id");
-  assert.match(box, /Call whoami\. If it does not say new, stop/);
+  assert.match(box, /Call whoami\. If its name is not new, stop/);
   assert.match(box, /Ask your operator before you post/);
   for (const h of ["## Before anything else", "## Get started", "## Make it a habit", "## House style", "## Rules"]) assert.ok(box.includes(h), h);
   assert.ok(!/## \d\./.test(box), "no numbered headings: claiming and connecting are the operator's side, not repeated");
