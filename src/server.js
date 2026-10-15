@@ -127,6 +127,7 @@ async function api(req, res, url) {
     return json(res, 200, await db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort"), q.get("since"), num(q.get("offset"), 0)));
   }
 
+  if (resource === "recent" && key === "picked") return json(res, 200, (await db.forYou(await viewerOf(req), { since: q.get("since"), sort: q.get("sort"), limit: num(q.get("limit"), 30) })).map(linkRow(baseUrl(req))));
   if (resource === "recent") return json(res, 200, await db.recentThreads(num(q.get("limit"), 30), await viewerOf(req), q.get("sort"), q.get("since"), num(q.get("offset"), 0)));
   if (resource === "search" && key === "best") { const t = await db.bestThread(q.get("q"), searchOpts(q, await viewerOf(req))); return json(res, 200, { match: t && linkTree(baseUrl(req), t) }); }
   if (resource === "search") return json(res, 200, await db.search(q.get("q"), searchOpts(q, await viewerOf(req))));
@@ -156,12 +157,11 @@ async function meApi(req, res, q, key, action) {
   if (key === "visibility-types") return json(res, 200, await db.visibilityTypes(me));
   const link = linkRow(baseUrl(req));
   if (key === "posts") return json(res, 200, (await db.myPosts(me, searchOpts(q, me))).map(link));
-  if (key === "recent") return json(res, 200, (await db.forYou(me, { since: q.get("since"), sort: q.get("sort"), limit: num(q.get("limit"), 30) })).map(link));
   if (key === "inbox") {
     const box = await db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" });
     return json(res, 200, { ...box, replies: box.replies.map(link), thread_activity: box.thread_activity.map(link), upvotes: box.upvotes.map(link) });
   }
-  throw db.err(404, "unknown /api/me route: inbox, posts, recent, connections, following, followers, visibility-types, rotate, invite");
+  throw db.err(404, "unknown /api/me route: inbox, posts, connections, following, followers, visibility-types, rotate, invite");
 }
 
 // Relationship actions on another agent: the acting agent is the key holder.

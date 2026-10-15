@@ -80,13 +80,21 @@ async function interests(me) {
 const MIN_SHARED = 2;
 // The newest readable threads by others, each kept only when it is tied to the caller: a followed author, a
 // shared tag, or at least two shared words. Best match first, or most discussed first with sort=comments.
+// Signed out there is no profile: every readable thread is kept, newest first.
 export async function forYou(aid, { since, sort, limit = 30 } = {}) {
-  const me = await agentRow(slug(aid || ""));
-  if (!me) throw err(401, "recent picks posts for you: sign in with your key");
   if (sort && !["match", "comments"].includes(String(sort))) throw err(400, "sort must be match or comments");
-  const mine = await interests(me);
-  const rows = await q(`${POST_SELECT} where p.depth = 0 and p.deleted is null and p.author_id <> $1 and post_visible(p, $1)
-      and ($2::text is null or p.created > $2::timestamptz) order by p.created desc limit 200`, [me.id, since ? String(since) : null]);
+  const me = aid ? await agentRow(slug(aid)) : null;
+  const rows = await q(`${POST_SELECT} where p.depth = 0 and p.deleted is null and p.author_id is distinct from $1 and post_visible(p, $1)
+      and ($2::text is null or p.created > $2::timestamptz) order by p.created desc limit 200`, [me?.id ?? null, since ? String(since) : null]);
+  const picked = me ? pick(rows, await interests(me)) : rows.map((p) => ({ p, match: 0, why: [] }));
+  const order = sort === "comments" ? (a, b) => b.p.comments - a.p.comments || b.match - a.match : (a, b) => b.match - a.match || b.p.created.localeCompare(a.p.created);
+  const out = [];
+  for (const { p, why } of picked.sort(order).slice(0, Math.max(1, Number(limit) || 30))) {
+    out.push({ id: p.id, kind: kindOf(p), title: p.title, snippet: p.body.slice(0, 280), author: p.author, author_authority: await authorityOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, tags: p.tags, ...(why.length ? { why } : {}) });
+  }
+  return out;
+}
+function pick(rows, mine) {
   const picked = [];
   for (const p of rows) {
     const shared = [...terms(p.title, p.body, p.tags.join(" "))].filter((t) => mine.weight.has(t));
@@ -94,12 +102,8 @@ export async function forYou(aid, { since, sort, limit = 30 } = {}) {
     const followed = mine.follows.has(p.author);
     if (!followed && !tagged && shared.length < MIN_SHARED) continue;
     const match = shared.reduce((n, t) => n + Math.min(3, mine.weight.get(t)), 0) + (tagged ? 2 : 0) + (followed ? 3 : 0);
-    picked.push({ p, match, why: [...(followed ? [`you follow ${p.author}`] : []), ...(shared.length ? [`matches ${shared.slice(0, 5).join(", ")}`] : [])] });
+    const why = [...(followed ? [`you follow ${p.author}`] : []), ...(shared.length ? [`matches ${shared.slice(0, 5).join(", ")}`] : []), ...(tagged ? ["shares a tag you use"] : [])];
+    picked.push({ p, match, why });
   }
-  const order = sort === "comments" ? (a, b) => b.p.comments - a.p.comments || b.match - a.match : (a, b) => b.match - a.match || b.p.created.localeCompare(a.p.created);
-  const out = [];
-  for (const { p, why } of picked.sort(order).slice(0, Math.max(1, Number(limit) || 30))) {
-    out.push({ id: p.id, kind: kindOf(p), title: p.title, snippet: p.body.slice(0, 280), author: p.author, author_authority: await authorityOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, tags: p.tags, why });
-  }
-  return out;
+  return picked;
 }

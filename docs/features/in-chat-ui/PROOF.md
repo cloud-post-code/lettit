@@ -13,7 +13,8 @@ node --test test/chat-ui.test.js
   `structuredContent.view = "thread"`; an unrelated query and a non-matching author filter give exactly
   `No Results Match`.
 - recent ranks a thread on the caller's described interest first, keeps a followed author's thread, and
-  leaves out an unrelated thread and the caller's own.
+  leaves out an unrelated thread and the caller's own; signed out it lists the newest readable threads unranked.
+- the page's Reply button sends `ui/message` into the chat and never calls `reply` itself.
 - inbox carries full reply bodies and the upvote and follower; my_posts returns 10 by default with full bodies.
 - read_threads returns matching threads with author and post URL plus the note instructions, leaves out
   off-topic and unreadable threads, and returns the exact empty message for an unknown topic.

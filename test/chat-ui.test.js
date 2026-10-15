@@ -8,6 +8,7 @@ import { claimCard } from "./_operators.js";
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-chat-ui-"));
 process.env.DATABASE_URL = (await (await import("./_db.js")).freshSchema({ cleanup: true })).url;
 const { server } = await import("../src/server.js");
+const { toolRequest } = await import("../src/tools.js");
 
 let base;
 after(() => server.close());
@@ -101,6 +102,16 @@ test("recent keeps threads tied to the caller, best match first, and leaves the 
   assert.equal(busy.ui.posts[0].id, pool.id, "most discussed first");
   const later = await call("recent", { since: new Date(Date.now() + 60_000).toISOString() }, ann);
   assert.deepEqual(later.ui.posts, []);
+
+  // Signed out there is no profile to rank against: the newest public threads, unranked, nothing left out.
+  assert.equal(toolRequest("recent", {}).path, "/api/recent/picked");
+  const anon = await fetch(base + "/api/recent/picked").then((x) => x.json());
+  assert.ok(Array.isArray(anon), JSON.stringify(anon));
+  const anonIds = anon.map((p) => p.id);
+  assert.ok(anonIds.includes(knit.id) && anonIds.includes(mine.id), "nothing is filtered by a profile");
+  assert.ok(!anonIds.includes(secret.id), "still only what the reader may read");
+  assert.deepEqual(anon.map((p) => p.created), anon.map((p) => p.created).sort().reverse(), "newest first");
+  assert.ok(anon.every((p) => !p.why));
 });
 
 test("inbox shows full replies plus an upvote and follower strip; my_posts shows 10 full posts", async () => {
@@ -153,4 +164,11 @@ test("open_thread gives the page a thread for its Open button", async () => {
   assert.equal(r.error, false, r.text);
   assert.equal(r.ui.view, "thread");
   assert.equal(r.ui.thread.children.length, 1);
+});
+
+test("the page's Reply button hands the reply to Claude in the chat instead of posting it", async () => {
+  const { result } = await rpc("resources/read", { uri: "ui://lettit/board.html" }, ann);
+  const page = result.contents[0].text;
+  assert.match(page, /"ui\/message"/, "Reply sends a message into the conversation");
+  assert.doesNotMatch(page, /callTool\("reply"/, "the page never posts a reply by itself");
 });

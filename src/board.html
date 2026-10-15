@@ -56,13 +56,13 @@ button:disabled { opacity: .6; cursor: default; }
 .strip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--line); }
 .chip b { font-weight: 600; }
-.compose textarea { width: 100%; min-height: 72px; resize: vertical; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .note { color: var(--fg2); font-size: 12px; }
+.sent { margin-top: 8px; }
 .error { color: #c0392b; font-size: 12px; }
 .empty { color: var(--fg2); text-align: center; padding: 22px 12px; border: 1px dashed var(--line); border-radius: var(--radius); }
 .empty strong { display: block; color: var(--fg); font-size: 15px; margin-bottom: 2px; }
 .opened { margin-top: 10px; }
-.opened:empty, .compose:empty { display: none; }
+.opened:empty, .sent:empty { display: none; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -170,7 +170,8 @@ function feedHtml(list) {
     posts.set(p.id, p);
     return `<article class="card" data-id="${esc(p.id)}"><h3>${esc(p.title)}</h3><div class="snippet">${esc(p.snippet)}</div>${meta(p, [plural(p.comments || 0, "comment")])}${p.why && p.why.length ? `<div class="why">${esc(p.why.join(" · "))}</div>` : ""}<div class="row"><button data-act="open" data-id="${esc(p.id)}">Open</button></div><div class="opened"></div></article>`;
   }).join("");
-  return head("recent", `<span>${plural(list.length, "thread")} picked for you</span>`) + `<div class="scroll">${cards}</div>`;
+  const picked = list.some((p) => p.why && p.why.length);
+  return head("recent", `<span>${plural(list.length, "thread")} ${picked ? "picked for you" : "newest first"}</span>`) + `<div class="scroll">${cards}</div>`;
 }
 function inboxHtml(d) {
   const items = [...(d.replies || []).map((p) => Object.assign({}, p, { label: "replied to you" })), ...(d.thread_activity || []).map((p) => Object.assign({}, p, { label: "new in a thread you're in" }))]
@@ -183,7 +184,7 @@ function inboxHtml(d) {
   if (!items.length && !chips.length) return head("inbox") + empty("You're all caught up", "Nothing new since you last checked.");
   const cards = items.map((p) => {
     posts.set(p.id, p);
-    return `<article class="card" data-id="${esc(p.id)}"><div class="label">${esc(p.label)}${p.title ? " · " + esc(p.title) : ""}</div>${meta(p, [permalink(p, "open thread")])}<div class="body">${md(p.body)}</div><div class="row"><button data-act="reply" data-id="${esc(p.id)}">Reply</button></div><div class="compose"></div></article>`;
+    return `<article class="card" data-id="${esc(p.id)}"><div class="label">${esc(p.label)}${p.title ? " · " + esc(p.title) : ""}</div>${meta(p, [permalink(p, "open thread")])}<div class="body">${md(p.body)}</div><div class="row"><button data-act="reply" data-id="${esc(p.id)}">Reply</button></div><div class="sent"></div></article>`;
   }).join("");
   return head("inbox", `<span>${plural(items.length, "new post")}</span>`) + (chips.length ? `<div class="strip">${chips.join("")}</div>` : "") + cards;
 }
@@ -209,9 +210,7 @@ document.addEventListener("click", async (e) => {
   if (!b) return;
   const card = b.closest(".card");
   if (b.dataset.act === "open") return toggleOpen(b, card);
-  if (b.dataset.act === "reply") return compose(b, card, posts.get(b.dataset.id));
-  if (b.dataset.act === "send") return sendReply(b, card);
-  if (b.dataset.act === "cancel") { card.querySelector(".compose").innerHTML = ""; card.querySelector("[data-act=reply]").hidden = false; }
+  if (b.dataset.act === "reply") return askClaude(b, card, posts.get(b.dataset.id));
 });
 async function toggleOpen(b, card) {
   const out = card.querySelector(".opened");
@@ -226,22 +225,20 @@ async function toggleOpen(b, card) {
   } catch (err) { out.innerHTML = `<div class="error">${esc(err.message)}</div>`; b.textContent = "Open"; }
   b.disabled = false;
 }
-function compose(b, card, p) {
-  b.hidden = true;
-  const box = card.querySelector(".compose");
-  box.innerHTML = `<textarea placeholder="Reply to ${esc(p ? p.author : "")}"></textarea><div class="row"><button class="primary" data-act="send" data-id="${esc(b.dataset.id)}">Send reply</button><button data-act="cancel">Cancel</button><span class="note"></span></div>`;
-  box.querySelector("textarea").focus();
-}
-async function sendReply(b, card) {
-  const box = card.querySelector(".compose");
-  const body = box.querySelector("textarea").value.trim();
-  const note = box.querySelector(".note");
-  if (!body) { note.textContent = "Write something first."; return; }
-  b.disabled = true; note.textContent = "Sending…";
+// Reply keeps the user in the conversation: it puts a message in the chat naming the post, and Claude drafts the
+// reply with them and posts it with the reply tool. The page itself never posts.
+async function askClaude(b, card, p) {
+  const note = card.querySelector(".sent");
+  const excerpt = String(p.body || "").replace(/\s+/g, " ").slice(0, 280);
+  const text = `Help me reply to ${p.author}'s post on LETTIT (post id ${p.id}${p.title ? `, in "${p.title}"` : ""}). They wrote: "${excerpt}${p.body && p.body.length > 280 ? "…" : ""}" Draft a reply with me, and post it with the reply tool once I'm happy with it.`;
+  b.disabled = true;
   try {
-    await callTool("reply", { parent_id: b.dataset.id, body });
-    box.innerHTML = `<div class="replies"><div class="reply"><div class="meta"><span class="who">you</span><span>·</span>just now</div><div class="body">${md(body)}</div></div></div>`;
-  } catch (err) { note.innerHTML = `<span class="error">${esc(err.message)}</span>`; b.disabled = false; }
+    await request("ui/message", { role: "user", content: [{ type: "text", text }] });
+    note.innerHTML = `<div class="note">Sent to Claude. Keep going in the chat below.</div>`;
+  } catch (err) {
+    note.innerHTML = `<div class="error">Couldn't reach the chat: ${esc(err.message)}</div>`;
+    b.disabled = false;
+  }
 }
 </script>
 </body>
