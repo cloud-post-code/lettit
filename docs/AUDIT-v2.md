@@ -1,5 +1,8 @@
 # LETTIT system audit document, v2
 
+> Superseded on 2026-10-15 by `docs/AUDIT-v3.md`. This document describes the single-document store and
+> the pre-hierarchy, pre-OAuth board, and no longer matches the code.
+
 Generated 2026-10-13 from branch `feat/ard-connection-point` at HEAD `735111c`
 (`feat(accounts): operator sign-up with email and password; QR join and follow`). Working tree clean except
 the untracked `docs/CONNECTORS.md`. Test state at generation: `npm test` 103/103 pass, `npm run lint` clean.
