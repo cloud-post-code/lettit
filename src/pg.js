@@ -1,7 +1,7 @@
-// Minimal Postgres client: the wire protocol over node:net/node:tls, no dependencies. Enough for the store:
-// connect from a DATABASE_URL, run one simple query at a time, read rows back as strings. Auth: trust,
-// password, md5, and SCRAM-SHA-256 (what Railway and modern Postgres use). TLS when the URL asks for it or
-// the host is not local.
+// Minimal Postgres client: the wire protocol over node:net/node:tls, no dependencies. Simple queries
+// (query(sql)), parameterised queries over the extended protocol (query(sql, params)), typed decoding of the
+// common column types, transactions (tx), and a small pool. Auth: trust, password, md5, and SCRAM-SHA-256
+// (what Railway and modern Postgres use). TLS when the URL asks for it or the host is not local.
 import net from "node:net";
 import tls from "node:tls";
 import crypto from "node:crypto";
@@ -16,6 +16,7 @@ export function parseUrl(url) {
     user: decodeURIComponent(u.username), password: decodeURIComponent(u.password),
     database: decodeURIComponent(u.pathname.replace(/^\//, "")) || decodeURIComponent(u.username),
     ssl: sslmode ? sslmode !== "disable" : !local,
+    search_path: u.searchParams.get("search_path") || "",
   };
 }
 
@@ -28,6 +29,7 @@ function frame(type, ...parts) {
   return Buffer.concat([head, body]);
 }
 function int32(n) { const b = Buffer.alloc(4); b.writeInt32BE(n); return b; }
+function int16(n) { const b = Buffer.alloc(2); b.writeInt16BE(n); return b; }
 
 // Splits ErrorResponse/NoticeResponse fields into {S, C, M, ...}.
 function fields(body) {
@@ -41,7 +43,7 @@ function fields(body) {
   }
   return out;
 }
-const pgError = (f) => Object.assign(new Error(f.M || "postgres error"), { code: f.C, severity: f.S, detail: f.D });
+const pgError = (f) => Object.assign(new Error(f.M || "postgres error"), { code: f.C, severity: f.S, detail: f.D, constraint: f.n });
 
 export async function connect(url) {
   const cfg = parseUrl(url);
@@ -104,7 +106,9 @@ class Client {
 
   async startup() {
     const { user, database } = this.cfg;
-    this.socket.write(frame(null, int32(196608), str("user"), str(user), str("database"), str(database), str("client_encoding"), str("UTF8"), Buffer.alloc(1)));
+    const params = [str("user"), str(user), str("database"), str(database), str("client_encoding"), str("UTF8"), str("TimeZone"), str("UTC"), str("DateStyle"), str("ISO")];
+    if (this.cfg.search_path) params.push(str("search_path"), str(this.cfg.search_path));
+    this.socket.write(frame(null, int32(196608), ...params, Buffer.alloc(1)));
     const scram = new Scram(user, this.cfg.password);
     await this.wait((type, body) => {
       if (type === "E") throw pgError(fields(body));
@@ -124,22 +128,50 @@ class Client {
     }, () => undefined);
   }
 
-  // Simple query: one statement (or several separated by ;), rows of the last result as objects of strings.
-  query(sql) {
+  // query(sql): simple protocol, one or more statements, rows of the last result, values decoded by type.
+  // query(sql, params): extended protocol, one statement with $1.. placeholders. Both resolve to an array of
+  // row objects carrying a non-enumerable `count` (rows affected, from the command tag).
+  query(sql, params) {
     if (this.closed) return Promise.reject(new Error("postgres connection closed"));
     let columns = [];
     let rows = [];
+    let count = 0;
     let error = null;
     const p = this.wait((type, body) => {
       if (type === "T") { columns = rowDescription(body); rows = []; }
       else if (type === "D") rows.push(dataRow(body, columns));
+      else if (type === "C") count = Number(body.toString("utf8").replace(/\0$/, "").split(" ").pop()) || 0;
       else if (type === "E") error = pgError(fields(body));
       else if (type === "Z") { if (error) throw error; return true; }
       return false;
-    }, () => rows);
-    this.socket.write(frame("Q", str(sql)));
+    }, () => Object.defineProperty(rows, "count", { value: count, enumerable: false }));
+    if (params === undefined) this.socket.write(frame("Q", str(sql)));
+    else this.socket.write(Buffer.concat([
+      frame("P", str(""), str(sql), int16(0)),
+      frame("B", str(""), str(""), int16(0), int16(params.length), ...params.map(encode), int16(0)),
+      frame("D", "P", str("")),
+      frame("E", str(""), int32(0)),
+      frame("S"),
+    ]));
     return p;
   }
+
+  // Runs fn(client) inside a transaction: commit on return, rollback on throw.
+  async tx(fn) {
+    await this.query("begin");
+    try {
+      const out = await fn(this);
+      await this.query("commit");
+      return out;
+    } catch (e) {
+      await this.query("rollback").catch(() => {});
+      throw e;
+    }
+  }
+
+  // An idle pooled connection never keeps the process alive.
+  ref() { this.socket.ref(); }
+  unref() { this.socket.unref(); }
 
   end() {
     this.closed = true;
@@ -150,16 +182,34 @@ class Client {
 
 export const literal = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 
+// ---------- parameters ----------
+// Every parameter travels as text: null, string, number, boolean, Date, array (as a Postgres array literal),
+// and plain object (as JSON).
+function encode(v) {
+  if (v === null || v === undefined) return int32(-1);
+  const t = Buffer.from(text(v), "utf8");
+  return Buffer.concat([int32(t.length), t]);
+}
+function text(v) {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "bigint") return String(v);
+  if (typeof v === "boolean") return v ? "t" : "f";
+  if (v instanceof Date) return v.toISOString();
+  if (Array.isArray(v)) return "{" + v.map((x) => (x === null || x === undefined ? "NULL" : '"' + text(x).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"')).join(",") + "}";
+  return JSON.stringify(v);
+}
+
+// ---------- rows ----------
 function rowDescription(body) {
   const n = body.readInt16BE(0);
-  const names = [];
+  const cols = [];
   let i = 2;
   for (let c = 0; c < n; c++) {
     const end = body.indexOf(0, i);
-    names.push(body.toString("utf8", i, end));
+    cols.push({ name: body.toString("utf8", i, end), oid: body.readInt32BE(end + 7) });
     i = end + 1 + 18;
   }
-  return names;
+  return cols;
 }
 function dataRow(body, columns) {
   const n = body.readInt16BE(0);
@@ -168,10 +218,71 @@ function dataRow(body, columns) {
   for (let c = 0; c < n; c++) {
     const len = body.readInt32BE(i);
     i += 4;
-    row[columns[c]] = len < 0 ? null : body.toString("utf8", i, i + len);
+    row[columns[c].name] = len < 0 ? null : decode(columns[c].oid, body.toString("utf8", i, i + len));
     if (len > 0) i += len;
   }
   return row;
+}
+// Column types by OID: numbers, booleans, timestamps (ISO strings in UTC), json, and text arrays; else text.
+const NUMBERS = new Set([20, 21, 23, 26, 700, 701, 1700]);
+const TIMES = new Set([1114, 1184]);
+const ARRAYS = new Set([1009, 1015, 1005, 1007, 1016]);
+export function decode(oid, s) {
+  if (oid === 16) return s === "t";
+  if (NUMBERS.has(oid)) return Number(s);
+  if (TIMES.has(oid)) { const t = s.replace(" ", "T"); return new Date(/[+-]\d\d$/.test(t) ? t + ":00" : /[+-]\d\d:\d\d$/.test(t) ? t : t + "Z").toISOString(); }
+  if (oid === 114 || oid === 3802) return JSON.parse(s);
+  if (ARRAYS.has(oid)) return parseArray(s).map((x) => (x === null || oid === 1009 || oid === 1015 ? x : Number(x)));
+  return s;
+}
+// Parses a one-dimensional Postgres array literal: {a,"b c",NULL,"q\"x"}.
+export function parseArray(s) {
+  const out = [];
+  if (s === "{}") return out;
+  let i = 1, cur = "", quoted = false, had = false;
+  while (i < s.length) {
+    const ch = s[i];
+    if (quoted) {
+      if (ch === "\\") { cur += s[i + 1]; i += 2; continue; }
+      if (ch === '"') { quoted = false; i++; continue; }
+      cur += ch; i++; continue;
+    }
+    if (ch === '"') { quoted = true; had = true; i++; continue; }
+    if (ch === "," || ch === "}") { out.push(!had && cur === "NULL" ? null : cur); cur = ""; had = false; i++; continue; }
+    cur += ch; i++;
+  }
+  return out;
+}
+
+// ---------- pool ----------
+// Up to `size` connections to one URL; query/tx borrow one. A connection that failed is dropped, not reused.
+export function pool(url, size = Number(process.env.PG_POOL) || 4) {
+  const idle = [], waiting = [];
+  let open = 0, closed = false;
+  async function acquire() {
+    if (closed) throw new Error("pool closed");
+    const c = idle.pop();
+    if (c && !c.closed) { c.ref(); return c; }
+    if (c) open--;
+    if (open < size) { open++; try { return await connect(url); } catch (e) { open--; throw e; } }
+    return new Promise((resolve) => waiting.push(resolve));
+  }
+  function release(c) {
+    if (c.closed || closed) { open--; if (c.closed === false) c.end(); if (waiting.length) acquire().then(waiting.shift()); return; }
+    const w = waiting.shift();
+    if (w) w(c); else { c.unref(); idle.push(c); }
+  }
+  async function withClient(fn) {
+    const c = await acquire();
+    try { return await fn(c); } finally { release(c); }
+  }
+  return {
+    query: (sql, params) => withClient((c) => c.query(sql, params)),
+    tx: (fn) => withClient((c) => c.tx(fn)),
+    connection: withClient,
+    end() { closed = true; for (const c of idle.splice(0)) c.end(); },
+    get size() { return open; },
+  };
 }
 
 function md5Password(user, password, salt) {

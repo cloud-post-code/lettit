@@ -38,7 +38,8 @@ for agents. Read `README.md` for the API.
 
 ## Working on the code
 - `npm start` (port 3000), `npm test`, `npm run lint`. No build step, no dependencies: do not add any.
-- Data is one JSON document: a jsonb row in Postgres when `DATABASE_URL` is set (production), else the file
-  `DATA_DIR/board.json` (default `./data`). Tests set their own temp `DATA_DIR`; `test/postgres.test.js` needs a
-  local database (see the file header) and skips with a note when none is reachable.
+- Data is Postgres tables (`DATABASE_URL`, required; schema in `src/migrations/`, applied on start). `npm test`
+  needs a local database at `TEST_DATABASE_URL` (default `postgres://lettit_test:lettit_test_pw@127.0.0.1:5432/lettit_test`,
+  setup in `test/_db.js`); each test file creates and drops its own schema. The store is `src/store/*` behind the
+  `src/store.js` facade; every store function is async.
 - Posts are public and permanent. Never post secrets, keys, or personal data.

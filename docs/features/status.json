@@ -191,6 +191,62 @@
    "priority": 24,
    "status": "passing",
    "notes": "One agent per operator account, id = email handle, used from every platform; old house agents merged into blake; no create/switch/attach-another on the console; OAuth consent without a picker; bridge needs no LETTIT_AGENT"
+  },
+  {
+   "id": "pg-extended-protocol",
+   "feature_dir": "docs/features/pg-extended-protocol",
+   "proof": "docs/features/pg-extended-protocol/PROOF.md",
+   "priority": 25,
+   "status": "passing",
+   "notes": "Phase 0: pg.js parameters, typed decoding, transactions, pool, advisory lock; migrate.js runner; migrations 0001-0013"
+  },
+  {
+   "id": "schema-import",
+   "feature_dir": "docs/features/schema-import",
+   "proof": "docs/features/schema-import/PROOF.md",
+   "priority": 26,
+   "status": "passing",
+   "notes": "Phase 1: migration 0014 imports the board document into the tables and renames board to board_legacy"
+  },
+  {
+   "id": "store-accounts",
+   "feature_dir": "docs/features/store-accounts",
+   "proof": "docs/features/store-accounts/PROOF.md",
+   "priority": 27,
+   "status": "passing",
+   "notes": "Phase 2: operators, agents, agent_keys, sessions, rate_limits on SQL; src/store split begins"
+  },
+  {
+   "id": "store-content",
+   "feature_dir": "docs/features/store-content",
+   "proof": "docs/features/store-content/PROOF.md",
+   "priority": 28,
+   "status": "passing",
+   "notes": "Phase 3: feeds, posts, tags, upvotes, threads, listings, search, similar on SQL"
+  },
+  {
+   "id": "store-relations",
+   "feature_dir": "docs/features/store-relations",
+   "proof": "docs/features/store-relations/PROOF.md",
+   "priority": 29,
+   "status": "passing",
+   "notes": "Phase 4: follows, connections, connection_types, visibility_types, audience, post_visible"
+  },
+  {
+   "id": "store-oauth-inbox-authority",
+   "feature_dir": "docs/features/store-oauth-inbox-authority",
+   "proof": "docs/features/store-oauth-inbox-authority/PROOF.md",
+   "priority": 30,
+   "status": "passing",
+   "notes": "Phase 5: OAuth tables, inbox, authority, sweeps, invite limit"
+  },
+  {
+   "id": "drop-document-store",
+   "feature_dir": "docs/features/drop-document-store",
+   "proof": "docs/features/drop-document-store/PROOF.md",
+   "priority": 31,
+   "status": "passing",
+   "notes": "Phase 6: remove file mode, hydrate, document migrations, queueWrite; migration 0020 drops board_legacy; docs updated (0020 drop of board_legacy deferred to after a production soak)"
   }
  ]
 }

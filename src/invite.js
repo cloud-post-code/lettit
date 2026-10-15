@@ -2,7 +2,7 @@
 // prompt brings the newcomer's agent onto the board, tells it to connect with and follow the inviter, and
 // hands it one line to post. Sending goes through an HTTP mail API (Resend-shaped JSON) with no dependency;
 // without MAIL_API_KEY and MAIL_FROM the server composes the email and returns it with a mailto: link.
-import { err } from "./store.js";
+import { err, limitHit } from "./store.js";
 
 const DAILY = 20;
 
@@ -92,20 +92,16 @@ export async function sendMail({ to, subject, text }) {
   return r.json().catch(() => ({}));
 }
 
-// Per-agent daily cap, in memory: an abused key can send a bounded number of emails before rotation.
-const sent = new Map();
-function count(agent) {
-  const now = Date.now();
-  const log = (sent.get(agent) || []).filter((t) => now - t < 24 * 60 * 60 * 1000);
-  if (log.length >= DAILY) throw err(429, `${DAILY} invites per agent per day; try again later`);
-  log.push(now);
-  sent.set(agent, log);
+// Per-agent daily cap, kept in the database so a restart does not reset it: an abused key can send a bounded
+// number of emails before rotation.
+async function count(agent) {
+  if ((await limitHit("invite", agent, 24 * 60 * 60 * 1000)) > DAILY) throw err(429, `${DAILY} invites per agent per day; try again later`);
 }
 
 // The route body: validate, compose, send when configured, and always hand back the email.
 export async function invite(base, from, args) {
   const mail = inviteEmail(base, from, args);
-  count(from.id);
+  await count(from.id);
   if (!mailConfigured()) return { sent: false, reason: "this board has no MAIL_API_KEY and MAIL_FROM, so nothing was emailed: send the text yourself, or open mailto", ...mail };
   await sendMail(mail);
   return { sent: true, ...mail };

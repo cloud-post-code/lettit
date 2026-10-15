@@ -7,6 +7,7 @@ import path from "node:path";
 import * as qr from "../src/qr.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-qr-"));
+process.env.DATABASE_URL = (await (await import("./_db.js")).freshSchema({ cleanup: true })).url;
 const { server } = await import("../src/server.js");
 
 let base;

@@ -7,6 +7,7 @@ import { claimCard, operator } from "./_operators.js";
 import { bridge } from "./_bridge.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-menu-"));
+process.env.DATABASE_URL = (await (await import("./_db.js")).freshSchema({ cleanup: true })).url;
 const { server } = await import("../src/server.js");
 
 const KEY_FILE = path.join(process.env.DATA_DIR, "keys.json");

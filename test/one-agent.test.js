@@ -22,7 +22,8 @@ const blake = { email: "blake@agenticnet.org", password: "blake-password-1" };
 const ann = { email: "ann@x.io", password: "ann-password-10" };
 const agent = (id, key, email, created, extra = {}) => ({ id, name: id, operator: email.split("@")[0], contact: "", description: `${id} desc`, posts: 1, created, updated: created, key_hash: hash(key), operator_email: email, ...extra });
 const post = (id, author, extra = {}) => ({ id, feed: "status", parent_id: null, thread_id: id, depth: 0, title: id, body: "b", author, tags: [], audience: "public", created: "2026-02-01T00:00:00.000Z", replies: 0, ...extra });
-fs.writeFileSync(FILE, JSON.stringify({
+const { freshSchema, sql } = await import("./_db.js");
+process.env.DATABASE_URL = (await freshSchema({ cleanup: true, board: {
   agents: {
     "blake-codex": agent("blake-codex", CODEX_KEY, blake.email, "2026-01-01T00:00:00.000Z", { visibility_types: { public: { builtin: true }, friend: { builtin: true }, colleague: { builtin: true }, client: { description: "paying" } } }),
     "blake-claude-code": agent("blake-claude-code", CLAUDE_KEY, blake.email, "2026-01-02T00:00:00.000Z", { contact: "https://claude.com/claude-code" }),
@@ -33,9 +34,10 @@ fs.writeFileSync(FILE, JSON.stringify({
   posts: { p1: post("p1", "blake-codex", { upvotes: { "blake-claude-code": "2026-02-02T00:00:00.000Z", ann: "2026-02-02T00:00:00.000Z" } }), p2: post("p2", "blake-claude-code"), p3: post("p3", "ann"), p4: post("p4", "ann-bot") },
   follows: { ann: { "blake-codex": "2026-01-03T00:00:00.000Z" }, "blake-claude-code": { ann: "2026-01-03T00:00:00.000Z", "blake-codex": "2026-01-03T00:00:00.000Z" } },
   connections: { "blake-codex": { ann: { types: ["colleague"], since: "2026-01-03T00:00:00.000Z" } }, "blake-claude-code": { ann: { types: ["friend"], since: "2026-01-04T00:00:00.000Z" } }, ann: { "blake-claude-code": { types: ["friend"], since: "2026-01-04T00:00:00.000Z" } } },
-  oauth: { clients: {}, codes: {}, tokens: { tok1: { id: "t1", client_id: "c", agent: "blake-claude-code", operator: blake.email, scope: "", created: "2026-01-05T00:00:00.000Z", last_used: null, refresh_hash: "r", expires: "2099-01-01T00:00:00.000Z", refresh_expires: "2099-01-01T00:00:00.000Z" } } },
+  oauth: { clients: { c: { client_id: "c", client_name: "ChatGPT", redirect_uris: ["https://chatgpt.com/cb"], token_endpoint_auth_method: "none", created: "2026-01-05T00:00:00.000Z" } }, codes: {}, tokens: { tok1: { id: "t1", client_id: "c", agent: "blake-claude-code", operator: blake.email, scope: "", created: "2026-01-05T00:00:00.000Z", last_used: null, refresh_hash: "r", expires: "2099-01-01T00:00:00.000Z", refresh_expires: "2099-01-01T00:00:00.000Z" } } },
   seeded: {}, migrated: { "operator-ids": "2026-01-01T00:00:00.000Z", "operator-emails": "2026-01-01T00:00:00.000Z" },
-}));
+} })).url;
+const dbq = await sql(process.env.DATABASE_URL);
 const { server } = await import("../src/server.js");
 
 let base;
@@ -50,25 +52,27 @@ const text = (p, cookie) => fetch(base + p, { headers: cookie ? { cookie } : {} 
 const s256 = (v) => crypto.createHash("sha256").update(v).digest("base64url");
 
 test("an operator's agents are merged into one named after the handle: posts, follows, connections, circles, tokens, key", async () => {
-  const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
-  assert.ok(raw.migrated["one-agent"]);
-  assert.deepEqual(Object.keys(raw.agents).sort(), ["ann", "blake", "board"]);
-  assert.deepEqual([raw.agents.ann.posts, raw.agents.ann.key_hash, raw.agents.ann.old_keys, raw.posts.p4.author], [2, hash(ANN_KEY), [hash(BOT_KEY)], "ann"], "any account with several agents keeps the one named after its handle");
+  const col = async (q, p) => (await dbq(q, p)).map((r) => Object.values(r)[0]);
+  assert.deepEqual(await col("select id from agents order by 1"), ["ann", "blake", "board"]);
+  const [ann_] = await dbq("select post_count from agents where id = 'ann'");
+  const annKeys = await dbq("select key_hash, current from agent_keys where agent_id = 'ann' order by current desc");
+  assert.deepEqual([ann_.post_count, annKeys.map((k) => [k.key_hash, k.current]), (await col("select author_id from posts where id = 'p4'"))[0]], [2, [[hash(ANN_KEY), true], [hash(BOT_KEY), false]], "ann"], "any account with several agents keeps the one named after its handle");
   assert.equal((await get("/api/agents/ann-bot"))[0], 404);
-  const b = raw.agents.blake;
-  assert.equal(b.key_hash, hash(CODEX_KEY), "the earliest agent's key is the main one");
-  assert.deepEqual(b.old_keys, [hash(CLAUDE_KEY)]);
+  const [b] = await dbq("select operator_email, post_count, contact from agents where id = 'blake'");
+  const blakeKeys = await dbq("select key_hash, current from agent_keys where agent_id = 'blake' order by current desc");
+  assert.deepEqual(blakeKeys.map((k) => [k.key_hash, k.current]), [[hash(CODEX_KEY), true], [hash(CLAUDE_KEY), false]], "the earliest agent's key is the main one; the other keeps working");
   assert.equal(b.operator_email, blake.email);
-  assert.equal(b.posts, 2);
+  assert.equal(b.post_count, 2);
   assert.equal(b.contact, "https://claude.com/claude-code", "an empty field takes the other card's value");
-  assert.ok(b.visibility_types.client, "custom circles are kept");
-  assert.deepEqual([raw.posts.p1.author, raw.posts.p2.author], ["blake", "blake"]);
-  assert.deepEqual(Object.keys(raw.posts.p1.upvotes), ["ann"], "a self upvote after the merge is dropped");
-  assert.equal(raw.feeds.status.created_by, "blake");
-  assert.deepEqual(raw.follows, { ann: { blake: "2026-01-03T00:00:00.000Z" }, blake: { ann: "2026-01-03T00:00:00.000Z" } }, "no self follow");
-  assert.deepEqual(raw.connections.blake, { ann: { types: ["colleague", "friend"], since: "2026-01-03T00:00:00.000Z" } }, "types are the union, since the earliest");
-  assert.deepEqual(Object.keys(raw.connections.ann), ["blake"]);
-  assert.equal(raw.oauth.tokens.tok1.agent, "blake");
+  assert.deepEqual(await col("select name from visibility_types where agent_id = 'blake' and not builtin"), ["client"], "custom circles are kept");
+  assert.deepEqual(await col("select author_id from posts where id in ('p1', 'p2')"), ["blake", "blake"]);
+  assert.deepEqual(await col("select agent_id from upvotes where post_id = 'p1'"), ["ann"], "a self upvote after the merge is dropped");
+  assert.deepEqual(await col("select created_by from feeds where id = 'status'"), ["blake"]);
+  assert.deepEqual(await dbq("select follower_id, followed_id, created from follows order by 1"), [{ follower_id: "ann", followed_id: "blake", created: "2026-01-03T00:00:00.000Z" }, { follower_id: "blake", followed_id: "ann", created: "2026-01-03T00:00:00.000Z" }], "no self follow");
+  assert.deepEqual(await dbq("select to_id, created from connections where from_id = 'blake'"), [{ to_id: "ann", created: "2026-01-03T00:00:00.000Z" }], "since the earliest");
+  assert.deepEqual(await col("select type from connection_types where from_id = 'blake' order by 1"), ["colleague", "friend"], "types are the union");
+  assert.deepEqual(await col("select to_id from connections where from_id = 'ann'"), ["blake"]);
+  assert.deepEqual(await col("select agent_id from oauth_tokens where access_hash = 'tok1'"), ["blake"]);
 
   const [s, t] = await api("/api/posts", { kind: "status", body: "still me" }, CODEX_KEY);
   assert.equal(s, 201, t.error);
