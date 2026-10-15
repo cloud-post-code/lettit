@@ -7,6 +7,9 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-accounts-"));
+const { freshSchema, sql } = await import("./_db.js");
+process.env.DATABASE_URL = (await freshSchema({ cleanup: true })).url;
+const dbq = await sql(process.env.DATABASE_URL);
 const FILE = path.join(process.env.DATA_DIR, "board.json");
 const { server } = await import("../src/server.js");
 
@@ -36,8 +39,8 @@ test("1. POST /api/operators creates an account once and never shows the passwor
   assert.equal(short, 400);
   assert.match(e.error, /10 to 200/);
   assert.equal((await get("/api/operators/ann@example.com"))[0], 404);
-  const raw = fs.readFileSync(FILE, "utf8");
-  assert.ok(!raw.includes(ann.password), "the password is not stored in clear");
+  const [row] = await dbq("select password_hash, salt from operators where email = $1", ["ann@example.com"]);
+  assert.ok(!`${row.password_hash} ${row.salt}`.includes(ann.password), "the password is not stored in clear");
 });
 
 let key;
@@ -137,16 +140,10 @@ test("5. /login takes email and password; the key field is refused; 10 failures 
 });
 
 test("6. an agent claimed by key alone can be attached by an account with no agent; not by one that has its agent", async () => {
-  // A pre-account agent: written straight into the store as the old claim path left it.
-  server.close();
-  const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
+  // A pre-account agent: written straight into the tables as the old claim path left it, key but no operator.
   const orphanKey = "lettit_" + crypto.randomBytes(20).toString("hex");
-  raw.agents["old-orphan"] = { id: "old-orphan", name: "orphan", operator: "old", contact: "", description: "", created: "2026-01-01T00:00:00.000Z", updated: "2026-01-01T00:00:00.000Z", posts: 0, key_hash: crypto.createHash("sha256").update(orphanKey).digest("hex") };
-  fs.writeFileSync(FILE, JSON.stringify(raw));
-  const { load } = await import("../src/store.js");
-  load();
-  await new Promise((r) => server.listen(server.address()?.port || 0, r));
-  base = `http://localhost:${server.address().port}`;
+  await dbq("insert into agents (id, name, operator, created, updated) values ('old-orphan', 'orphan', 'old', '2026-01-01', '2026-01-01')");
+  await dbq("insert into agent_keys (key_hash, agent_id) values ($1, 'old-orphan')", [crypto.createHash("sha256").update(orphanKey).digest("hex")]);
   const html = await page("/me", cookie).then((r) => r.text());
   csrf = csrfOf(html);
   const has = await form("/me/attach", { csrf, key: orphanKey }, cookie);
@@ -282,17 +279,13 @@ test("12. a scanned card carries a newcomer through signup and onboarding, and t
   assert.ok(!(await bogus.text()).includes("It now follows"));
 });
 
-test("11. a data file with an old key-based session loads with that session dropped; keys still work", async () => {
+test("11. sessions and keys live in the database: both survive a server restart, and a session row is only ever a hash", async () => {
   server.close();
-  const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
-  raw.sessions.deadbeef = { agents: ["ann"], current: "ann", csrf: "x", created: "2026-01-01T00:00:00.000Z", expires: "2999-01-01T00:00:00.000Z" };
-  fs.writeFileSync(FILE, JSON.stringify(raw));
-  const { load } = await import("../src/store.js");
-  load();
   await new Promise((r) => server.listen(server.address()?.port || 0, r));
   base = `http://localhost:${server.address().port}`;
-  assert.equal(JSON.parse(fs.readFileSync(FILE, "utf8")).sessions.deadbeef, undefined);
-  assert.equal((await page("/me", cookie)).status, 200, "operator sessions survive a reload");
+  const rows = await dbq("select token_hash, operator_email from sessions");
+  assert.ok(rows.length >= 1 && rows.every((r) => r.operator_email && !cookie.includes(r.token_hash)));
+  assert.equal((await page("/me", cookie)).status, 200, "operator sessions survive a restart");
   const [w] = await post("/api/posts", { kind: "status", title: "still keyed", body: "x" }, key);
   assert.equal(w, 201);
 });

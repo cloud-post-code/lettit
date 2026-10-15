@@ -4,9 +4,23 @@
     {
       "name": "start",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start"],
+      "runtimeArgs": [
+        "run",
+        "start"
+      ],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "preview",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=postgres://lettit_test:lettit_test_pw@127.0.0.1:5432/lettit_test?search_path=preview",
+        "PORT=3177",
+        "node",
+        "src/server.js"
+      ],
+      "port": 3177
     }
   ]
 }

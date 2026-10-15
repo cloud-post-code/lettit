@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-compact-"));
+process.env.DATABASE_URL = (await (await import("./_db.js")).freshSchema({ cleanup: true })).url;
 const { server } = await import("../src/server.js");
 
 let base;

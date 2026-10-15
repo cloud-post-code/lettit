@@ -7,16 +7,17 @@ import { spawn } from "node:child_process";
 import { claimCard } from "./_operators.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-noard-"));
-const FILE = path.join(process.env.DATA_DIR, "board.json");
+const { freshSchema, sql } = await import("./_db.js");
 // A pre-existing store from the ARD era: a resource record and a rated post.
-fs.writeFileSync(FILE, JSON.stringify({
+process.env.DATABASE_URL = (await freshSchema({ cleanup: true, board: {
   agents: { board: { id: "board", name: "board", posts: 1, created: "2026-01-01T00:00:00.000Z" } },
   feeds: { resources: { id: "resources", name: "resources", created_by: "board", created: "2026-01-01T00:00:00.000Z", posts: 1 } },
   posts: { abc: { id: "abc", feed: "resources", parent_id: null, thread_id: "abc", depth: 0, title: "t", body: "b", author: "board", tags: ["ard"], rating: 4, created: "2026-01-01T00:00:00.000Z", replies: 0, resource: "urn:air:x:y:z" } },
   resources: { "urn:air:x:y:z": { identifier: "urn:air:x:y:z", reviews: 1 } },
   follows: {},
   seeded: "2026-01-01T00:00:00.000Z",
-}));
+} })).url;
+const dbq = await sql(process.env.DATABASE_URL);
 const { server } = await import("../src/server.js");
 
 let base;
@@ -41,22 +42,22 @@ test("an old store loads without resources or ratings and is rewritten clean", a
   const [, tree] = await fetch(base + "/api/posts/abc").then(async (r) => [r.status, await r.json()]);
   assert.equal(tree.rating, undefined);
   assert.equal(tree.resource, undefined);
-  const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
-  assert.equal(raw.resources, undefined);
-  assert.equal(raw.posts.abc.rating, undefined);
-  assert.equal(typeof raw.seeded, "object");
+  const cols = (await dbq("select column_name from information_schema.columns where table_schema = current_schema() and table_name = 'posts'")).map((r) => r.column_name);
+  assert.ok(!cols.includes("rating") && !cols.includes("resource"));
+  assert.equal((await dbq("select to_regclass('resources') as t"))[0].t, null);
+  assert.deepEqual(await dbq("select count(*)::int as n from seeded"), [{ n: 0 }], "a malformed seeded field imports as nothing");
   const feeds = await fetch(base + "/api/feeds").then((r) => r.json());
   assert.ok(!feeds.some((f) => f.id === "resources") || true, "an existing resources feed is left alone; the seed just stops creating it");
 });
 
 test("the seed no longer creates the resources feed or thread on a fresh store", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-noard-fresh-"));
-  const child = spawn(process.execPath, ["src/seed.js"], { env: { ...process.env, DATA_DIR: dir } });
+  const fresh = await freshSchema({ cleanup: true });
+  const child = spawn(process.execPath, ["src/seed.js"], { env: { ...process.env, DATABASE_URL: fresh.url }, stdio: ["ignore", "ignore", "inherit"] });
   await new Promise((r) => child.on("exit", r));
-  const raw = JSON.parse(fs.readFileSync(path.join(dir, "board.json"), "utf8"));
-  assert.deepEqual(Object.keys(raw.feeds).sort(), ["feedback", "findings", "handoffs", "procedures", "questions", "status"]);
-  assert.ok(!Object.values(raw.posts).some((p) => p.tags.includes("ard")));
-  assert.ok(!Object.values(raw.agents).some((a) => JSON.stringify(a).includes("ARD")));
+  const q = await sql(fresh.url);
+  assert.deepEqual((await q("select id from feeds order by 1")).map((r) => r.id), ["feedback", "findings", "handoffs", "procedures", "questions", "status"]);
+  assert.deepEqual(await q("select count(*)::int as n from post_tags where tag = 'ard'"), [{ n: 0 }]);
+  assert.deepEqual(await q("select count(*)::int as n from agents where description like '%ARD%' or name like '%ARD%'"), [{ n: 0 }]);
 });
 
 test("package and both MCP transports are named lettit", async () => {
@@ -72,7 +73,7 @@ test("package and both MCP transports are named lettit", async () => {
 });
 
 test("no source, test, or doc still mentions ARD", () => {
-  const files = ["README.md", "AGENTS.md", "railway.json", "package.json", ...fs.readdirSync("src").map((f) => "src/" + f), ...fs.readdirSync("test").filter((f) => f !== "remove-ard.test.js").map((f) => "test/" + f), ...fs.readdirSync("agents").map((f) => "agents/" + f)];
+  const files = ["README.md", "AGENTS.md", "railway.json", "package.json", ...fs.readdirSync("src", { recursive: true }).map((f) => "src/" + f).filter((f) => fs.statSync(f).isFile()), ...fs.readdirSync("test").filter((f) => f !== "remove-ard.test.js").map((f) => "test/" + f), ...fs.readdirSync("agents").map((f) => "agents/" + f)];
   for (const f of files) {
     const text = fs.readFileSync(f, "utf8");
     assert.ok(!/\bARD\b|src\/ard\.js|urn:air|\bard_/.test(text), `${f} still mentions ARD`);

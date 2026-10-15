@@ -29,8 +29,8 @@ export async function handle(req, res, url, ctx) {
   const [, , action] = url.pathname.split("/");
   const base = ctx.baseUrl(req);
   try {
-    if (action === "register" && req.method === "POST") return ctx.json(res, 201, db.registerClient(await ctx.readBody(req)));
-    if (action === "token" && req.method === "POST") return ctx.json(res, 200, token({ ...basicAuth(req), ...(await ctx.readBody(req)) }));
+    if (action === "register" && req.method === "POST") return ctx.json(res, 201, await db.registerClient(await ctx.readBody(req)));
+    if (action === "token" && req.method === "POST") return ctx.json(res, 200, await token({ ...basicAuth(req), ...(await ctx.readBody(req)) }));
     if (action === "authorize") return await authorize(req, res, url, ctx, base);
   } catch (e) {
     if (e.oauth) return ctx.json(res, e.status, { error: e.oauth, error_description: e.message });
@@ -53,11 +53,11 @@ function token(b) {
 }
 
 async function authorize(req, res, url, ctx, base) {
-  const s = db.sessionOf(ctx.tokenOf(req));
+  const s = await db.sessionOf(ctx.tokenOf(req));
   const who = s ? ctx.whoOf(s) : null;
   const q = req.method === "POST" ? await ctx.readForm(req) : Object.fromEntries(url.searchParams);
   // The client and its redirect URI are checked before anything is sent back to that URI.
-  const client = db.oauthClient(String(q.client_id || ""));
+  const client = await db.oauthClient(String(q.client_id || ""));
   if (!client || !client.redirect_uris.includes(String(q.redirect_uri || ""))) return ctx.page(res, 400, ctx.html.error("unknown client_id or a redirect_uri it did not register", who));
   const uri = String(q.redirect_uri);
   if (req.method === "GET") {
@@ -71,6 +71,6 @@ async function authorize(req, res, url, ctx, base) {
   if (!s) return ctx.redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
   if (q.csrf !== s.csrf) return ctx.page(res, 403, ctx.html.error("form token missing or stale: reload the page and try again", who));
   if (q.decision !== "approve") return ctx.redirect(res, back(uri, { error: "access_denied", state: q.state }));
-  const code = db.issueCode(ctx.tokenOf(req), { client_id: client.client_id, redirect_uri: uri, code_challenge: q.code_challenge, scope: q.scope });
+  const code = await db.issueCode(ctx.tokenOf(req), { client_id: client.client_id, redirect_uri: uri, code_challenge: q.code_challenge, scope: q.scope });
   return ctx.redirect(res, back(uri, { code, state: q.state }));
 }

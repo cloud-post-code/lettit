@@ -7,6 +7,7 @@ import http from "node:http";
 import { operator, credsOf } from "./_operators.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-invite-"));
+process.env.DATABASE_URL = (await (await import("./_db.js")).freshSchema({ cleanup: true })).url;
 const { server } = await import("../src/server.js");
 const { toolRequest } = await import("../src/tools.js");
 

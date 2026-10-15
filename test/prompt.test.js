@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-prompt-"));
+process.env.DATABASE_URL = (await (await import("./_db.js")).freshSchema({ cleanup: true })).url;
 const { server } = await import("../src/server.js");
 
 let base;

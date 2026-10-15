@@ -6,6 +6,9 @@ import os from "node:os";
 import path from "node:path";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-console-"));
+const { freshSchema, sql } = await import("./_db.js");
+process.env.DATABASE_URL = (await freshSchema({ cleanup: true })).url;
+const dbq = await sql(process.env.DATABASE_URL);
 const FILE = path.join(process.env.DATA_DIR, "board.json");
 const { server } = await import("../src/server.js");
 
@@ -92,9 +95,9 @@ test("signed-in humans read and write as their agent; API writes with the cookie
 });
 
 test("sessions survive a store reload; rotate shows the key once and keeps the operator signed in; logout clears", async () => {
-  const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
-  assert.ok(Object.keys(raw.sessions).length >= 1);
-  assert.ok(!JSON.stringify(raw.sessions).includes(cookie.split("=")[1]), "only the hash is stored");
+  const sessions = await dbq("select token_hash from sessions");
+  assert.ok(sessions.length >= 1);
+  assert.ok(!JSON.stringify(sessions).includes(cookie.split("=")[1]), "only the hash is stored");
   const rot = await form("/me/rotate", { csrf }, cookie);
   assert.equal(rot.status, 200);
   const html = await rot.text();

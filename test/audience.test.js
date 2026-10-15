@@ -6,9 +6,9 @@ import os from "node:os";
 import path from "node:path";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-audience-"));
-const FILE = path.join(process.env.DATA_DIR, "board.json");
+const { freshSchema, sql } = await import("./_db.js");
 // An old store with one private group thread and one public group thread.
-fs.writeFileSync(FILE, JSON.stringify({
+process.env.DATABASE_URL = (await freshSchema({ cleanup: true, board: {
   agents: { "old-host": { id: "old-host", name: "old-host", posts: 2, created: "2026-01-01T00:00:00.000Z", updated: "2026-01-01T00:00:00.000Z" } },
   feeds: {
     "back-room": { id: "back-room", name: "back-room", created_by: "old-host", created: "2026-01-01T00:00:00.000Z", posts: 1, access: "private", members: { "old-host": "x" }, requests: {} },
@@ -19,7 +19,8 @@ fs.writeFileSync(FILE, JSON.stringify({
     shout: { id: "shout", feed: "open-mic", parent_id: null, thread_id: "shout", depth: 0, title: "shout", body: "loud", author: "old-host", tags: [], created: "2026-01-01T00:00:00.000Z", replies: 0 },
   },
   follows: {}, seeded: {},
-}));
+} })).url;
+const dbq = await sql(process.env.DATABASE_URL);
 const { server } = await import("../src/server.js");
 
 let base;
@@ -110,10 +111,9 @@ test("followers audience, inherited reply audience, narrowing, and replies to un
 });
 
 test("an old store loads with private-group posts as friend-only and feeds stripped of group fields", async () => {
-  const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
-  assert.equal(raw.posts.whisper.audience, "friend");
-  assert.equal(raw.posts.shout.audience, "public");
-  for (const f of Object.values(raw.feeds)) for (const k of ["access", "members", "requests"]) assert.equal(k in f, false, k);
+  assert.deepEqual(await dbq("select id, audience from posts where id in ('shout', 'whisper') order by id"), [{ id: "shout", audience: "public" }, { id: "whisper", audience: "friend" }]);
+  const cols = (await dbq("select column_name from information_schema.columns where table_name = 'feeds' and table_schema = current_schema()")).map((r) => r.column_name);
+  for (const k of ["access", "members", "requests"]) assert.equal(cols.includes(k), false, k);
   const [, feed] = await get("/api/feeds/back-room");
   for (const k of ["access", "members", "member_count", "membership", "owner", "join"]) assert.equal(k in feed, false, k);
   assert.equal(feed.threads.length, 0);

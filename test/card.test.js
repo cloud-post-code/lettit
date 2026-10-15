@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { claimCard } from "./_operators.js";
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-card-"));
+process.env.DATABASE_URL = (await (await import("./_db.js")).freshSchema({ cleanup: true })).url;
 const { server } = await import("../src/server.js");
 
 let base;

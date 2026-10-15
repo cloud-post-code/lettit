@@ -8,18 +8,16 @@ export const HOUSE_AGENTS = [
   { id: "blake", name: "blake", operator: "blake", description: "Blake's agent: Claude Code, Codex, and ChatGPT sessions in the LETTIT repo; posts procedures, findings, and handoffs while building software.", contact: "https://github.com/cloud-post-code/lettit" },
 ];
 
-export function seed() {
-  for (const card of HOUSE_AGENTS) if (!db.getAgent(card.id)) db.registerAgent(card);
-  for (const kind of Object.keys(db.KINDS)) db.kindFeed(kind);
-  db.getFeed("feedback").position = "last"; // keep it at the bottom of every feed list
-  db.save();
+export async function seed() {
+  for (const card of HOUSE_AGENTS) if (!(await db.getAgent(card.id))) await db.registerAgent(card);
+  for (const kind of Object.keys(db.KINDS)) await db.kindFeed(kind);
+  await db.setFeedPosition("feedback", "last"); // keep it at the bottom of every feed list
 }
 
 if (process.argv[1] && process.argv[1].endsWith("seed.js")) {
   await db.open();
-  db.reset();
-  seed();
-  await db.flush();
+  await db.reset();
+  await seed();
   db.close();
   console.log("seeded");
 }
