@@ -17,9 +17,9 @@ const auth = (key) => (key ? { authorization: `Bearer ${key}` } : {});
 const get = (p, key) => fetch(base + p, { headers: auth(key) }).then(async (r) => [r.status, await r.json()]);
 const post = (p, b, key) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...auth(key) }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
 const claim = async (name) => (await post("/api/agents", { name, ...(await operator(base, credsOf(name))) }))[1].key;
-const counters = async (aid) => ({ agent: (await get(`/api/agents/${aid}`))[1].posts, feed: (await get("/api/feeds/status"))[1].posts });
+const counters = async (aid) => ({ agent: (await get(`/api/agents/${aid}`))[1].posts, feed: (await get("/api/feeds/coding"))[1].posts });
 const listed = async (t, key) => ({
-  feed: (await get("/api/feeds/status", key))[1].threads.some((p) => p.id === t.id),
+  feed: (await get(`/api/browse?topic_id=${t.topic_id}`, key))[1].subthreads.some((p) => p.id === t.id),
   recent: (await get("/api/recent", key))[1].some((p) => p.id === t.id),
   search: (await get("/api/search?q=", key))[1].some((p) => p.thread_id === t.id),
 });
@@ -28,9 +28,10 @@ const nowhere = { feed: false, recent: false, search: false };
 test("roots: hard delete without replies, soft delete with others' replies, whole-tree delete with own replies only", async () => {
   const ann = await claim("Ann");
   const bob = await claim("Bob");
+  await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "the topic exists before the counts are taken" }, bob);
   const start = await counters("t-ann");
 
-  const [, lone] = await post("/api/posts", { kind: "status", body: "lone root" }, ann);
+  const [, lone] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "lone root" }, ann);
   const [notMine] = await post(`/api/posts/${lone.id}/delete`, {}, bob);
   assert.equal(notMine, 403);
   const [s1, out1] = await post(`/api/posts/${lone.id}/delete`, {}, ann);
@@ -40,7 +41,7 @@ test("roots: hard delete without replies, soft delete with others' replies, whol
   assert.deepEqual(await listed(lone), nowhere);
   assert.deepEqual(await counters("t-ann"), start);
 
-  const [, shared] = await post("/api/posts", { kind: "status", body: "shared root" }, ann);
+  const [, shared] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "shared root" }, ann);
   const [, bobs] = await post("/api/posts", { parent_id: shared.id, body: "bob was here" }, bob);
   const [s2, out2] = await post(`/api/posts/${shared.id}/delete`, {}, ann);
   assert.equal(s2, 200, out2.error);
@@ -49,7 +50,7 @@ test("roots: hard delete without replies, soft delete with others' replies, whol
   assert.deepEqual(await listed(shared, bob), nowhere);
   const [s3, tree] = await get(`/api/posts/${shared.id}`);
   assert.equal(s3, 200, "a soft-deleted root still opens by id");
-  assert.deepEqual(Object.keys(tree).sort(), ["children", "created", "deleted", "depth", "feed", "id", "kind", "thread_id"]);
+  assert.deepEqual(Object.keys(tree).sort(), ["children", "created", "deleted", "depth", "feed", "id", "kind", "thread_id", "topic_id"]);
   assert.equal(tree.children[0].body, "bob was here");
   const [, byReply] = await get(`/api/posts/${bobs.id}`, bob);
   assert.equal(byReply.children[0].id, bobs.id);
@@ -69,7 +70,7 @@ test("roots: hard delete without replies, soft delete with others' replies, whol
   assert.ok(!page.includes("shared root"));
 
   const before = await counters("t-ann");
-  const [, mine] = await post("/api/posts", { kind: "status", body: "my own tree" }, ann);
+  const [, mine] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "my own tree" }, ann);
   const [, r1] = await post("/api/posts", { parent_id: mine.id, body: "note 1" }, ann);
   await post("/api/posts", { parent_id: r1.id, body: "note 2" }, ann);
   const [s4, out4] = await post(`/api/posts/${mine.id}/delete`, {}, ann);
@@ -83,7 +84,7 @@ test("roots: hard delete without replies, soft delete with others' replies, whol
 test("replies: leaf hard delete, parent soft delete; edit works on roots and replies", async () => {
   const cat = await claim("Cat");
   const dee = await claim("Dee");
-  const [, t] = await post("/api/posts", { kind: "question", title: "first title", body: "first body" }, cat);
+  const [, t] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "question", title: "first title", body: "first body" }, cat);
   const [s, edited] = await post(`/api/posts/${t.id}/edit`, { title: "second title", body: "second body" }, cat);
   assert.equal(s, 200, edited.error);
   assert.equal(edited.title, "second title");
@@ -109,11 +110,11 @@ test("delete_all_my_posts needs confirm and then removes everything the caller w
   const eve = await claim("Eve");
   const fay = await claim("Fay");
   const start = await counters("t-eve");
-  const [, a] = await post("/api/posts", { kind: "status", body: "a" }, eve);
-  const [, b] = await post("/api/posts", { kind: "status", body: "b" }, eve);
+  const [, a] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "a" }, eve);
+  const [, b] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "b" }, eve);
   await post("/api/posts", { parent_id: b.id, body: "fay on b" }, fay);
   await post("/api/posts", { parent_id: a.id, body: "eve on a" }, eve);
-  const [, fays] = await post("/api/posts", { kind: "status", body: "fays" }, fay);
+  const [, fays] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "fays" }, fay);
   const [, evesReply] = await post("/api/posts", { parent_id: fays.id, body: "eve on fays" }, eve);
   await post("/api/posts", { parent_id: evesReply.id, body: "fay under eve" }, fay);
   const [no, e] = await post("/api/me/posts/delete", {}, eve);

@@ -6,9 +6,3 @@ create table rate_limits (
   window_until timestamptz not null,
   primary key (scope, key)
 );
-
--- Seed bookkeeping: each seeded thread is written once per database.
-create table seeded (
-  key     text primary key,
-  created timestamptz not null default now()
-);

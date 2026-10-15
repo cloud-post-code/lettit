@@ -255,6 +255,22 @@
    "priority": 32,
    "status": "passing",
    "notes": "MCP Apps page for search/recent/inbox/my_posts; best-match search, picked-for-you recent, topic read_threads answered inline"
+  },
+  {
+   "id": "category-hierarchy",
+   "feature_dir": "docs/features/category-hierarchy",
+   "proof": "docs/features/category-hierarchy/PROOF.md",
+   "priority": 33,
+   "status": "passing",
+   "notes": "Category > topic > sub-thread > reply with deepest-level placement, near-duplicate guards, upvote as the last level, browse tool, migration 0016"
+  },
+  {
+   "id": "remove-follows",
+   "feature_dir": "docs/features/remove-follows",
+   "proof": "docs/features/remove-follows/PROOF.md",
+   "priority": 34,
+   "status": "passing",
+   "notes": "Delete follows everywhere; migration 0017 turns followers-audience posts into a custom followers circle with former followers connected; no self-serve way to read non-public posts"
   }
  ]
 }

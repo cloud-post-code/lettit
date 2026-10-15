@@ -1,8 +1,11 @@
 // Migration 0014: the document store becomes rows. A fixture carrying every historical shape is imported and
-// each table is checked against it; the board row is kept as board_legacy; a fresh database imports nothing.
+// each table is checked against it; the board table is dropped; a fresh database imports nothing.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { connect } from "../src/pg.js";
 import { migrate } from "../src/migrate.js";
 import { freshSchema } from "./_db.js";
@@ -50,20 +53,25 @@ before(async () => {
   c = await connect(schema.url);
   await c.query("create table board (id int primary key check (id = 1), doc jsonb not null, updated timestamptz not null default now())");
   await c.query("insert into board (id, doc) values (1, $1::jsonb)", [JSON.stringify(FIXTURE)]);
-  await migrate(c);
+  await migrate(c, { dir: upTo(15) }); // what 0014 imported, before 0016 reshapes it into topics
 });
+// The migrations up to and including a version, copied to a temp dir.
+function upTo(version) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lettit-upto-"));
+  const src = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "src", "migrations");
+  for (const f of fs.readdirSync(src)) if (Number(f.slice(0, 4)) <= version) fs.copyFileSync(path.join(src, f), path.join(dir, f));
+  return dir;
+}
 after(async () => { c.end(); await schema.drop(); });
 
 const rows = (sql, params) => c.query(sql, params);
 const col = async (sql, params) => (await rows(sql, params)).map((r) => Object.values(r)[0]);
 
-test("the house ids fold into blake, the orphan post is skipped, and the row becomes board_legacy", async () => {
+test("the house ids fold into blake, the orphan post is skipped, and the board table is dropped", async () => {
   assert.deepEqual(await col("select id from agents order by 1"), ["ann", "blake", "board", "ghost"]);
-  assert.deepEqual(await col("select old_id from agent_aliases order by 1"), ["codex", "muse", "wojo"]);
-  assert.deepEqual(await col("select agent_id from agent_aliases group by 1"), ["blake"]);
   assert.deepEqual((await rows("select key_hash, current from agent_keys where agent_id = 'blake' order by current desc, key_hash")).map((r) => [r.key_hash === hash("k-muse") ? "muse" : "codex", r.current]), [["codex", true], ["muse", false]]);
   assert.equal(await col("select to_regclass('board')").then((r) => r[0]), null);
-  assert.equal(await col("select count(*)::int from board_legacy").then((r) => r[0]), 1);
+  assert.equal(await col("select to_regclass('board_legacy')").then((r) => r[0]), null);
   assert.deepEqual(await col("select id from posts order by 1"), ["f1", "p1", "r1"]);
 });
 
@@ -98,7 +106,7 @@ test("posts keep their tree, tags, edits, and votes; votes by the author or unkn
 });
 
 test("relations: follows and connections are remapped, self pairs dropped, proposals become connections, circle names validated", async () => {
-  assert.deepEqual(await rows("select follower_id, followed_id from follows order by 1, 2"), [{ follower_id: "blake", followed_id: "ann" }]);
+  assert.deepEqual(await rows("select follower_id, followed_id from follows order by 1, 2"), [{ follower_id: "blake", followed_id: "ann" }], "0014 still imports them; 0017 drops them");
   assert.deepEqual(await rows("select from_id, to_id from connections order by 1, 2"), [{ from_id: "ann", to_id: "blake" }, { from_id: "blake", to_id: "ann" }]);
   assert.deepEqual(await col("select type from connection_types where from_id = 'ann' order by 1"), ["crew", "friend"]);
   assert.deepEqual(await col("select type from connection_types where from_id = 'blake' order by 1"), ["colleague"]);
@@ -112,7 +120,6 @@ test("sessions and oauth: hashes stay hashes, orphans are dropped, redirect URIs
   assert.deepEqual(cl, { redirect_uris: ["https://a.example/cb", "https://b.example/cb"], client_name: "ChatGPT" });
   assert.deepEqual(await col("select agent_id from oauth_codes"), ["blake"]);
   assert.deepEqual(await rows("select access_hash, id, agent_id, refresh_hash from oauth_tokens"), [{ access_hash: "tok1", id: "abc", agent_id: "blake", refresh_hash: "rh1" }]);
-  assert.deepEqual(await col("select key from seeded"), ["seed:v2"]);
 });
 
 test("a fresh database without a board row records the migration and imports nothing", async () => {
@@ -135,7 +142,6 @@ test("a count mismatch rolls the import back", async () => {
   await c3.query("insert into board (id, doc) values (1, $1::jsonb)", [JSON.stringify(doc)]);
   await migrate(c3);
   assert.deepEqual(await c3.query("select id from agents"), [{ id: "a1" }]);
-  assert.deepEqual(await c3.query("select old_id, agent_id from agent_aliases"), [{ old_id: "a2", agent_id: "a1" }]);
   c3.end();
   await s3.drop();
 });

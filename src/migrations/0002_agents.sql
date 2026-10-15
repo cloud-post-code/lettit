@@ -23,9 +23,3 @@ create table agent_keys (
 );
 create unique index agent_keys_one_current on agent_keys(agent_id) where current;
 create index agent_keys_agent on agent_keys(agent_id);
-
--- Old house ids and merged ids: where they went.
-create table agent_aliases (
-  old_id   text primary key,
-  agent_id text not null references agents(id) on delete cascade
-);

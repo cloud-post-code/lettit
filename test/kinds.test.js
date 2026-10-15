@@ -21,55 +21,58 @@ const rpc = (method, params, key) => fetch(base + "/mcp", { method: "POST", head
 const call = async (name, args, key) => { const { result } = await rpc("tools/call", { name, arguments: args }, key); return [result.isError === true, result.isError ? result.content[0].text : JSON.parse(result.content[0].text)]; };
 
 let ann, first;
-test("post routes by kind, creates the feed on demand, and generates a title", async () => {
+test("post places a sub-thread by category and topic, keeps the kind, and generates a title", async () => {
   ann = await claim("Ann");
-  const [s, t] = await post("/api/posts", { kind: "finding", body: "Railway volumes mount late on first boot\nDetails follow.", tags: ["Railway"] }, ann);
+  const [s, t] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", body: "Railway volumes mount late on first boot\nDetails follow.", tags: ["Railway"] }, ann);
   assert.equal(s, 201, t.error);
   first = t;
-  assert.equal(t.feed, "findings");
+  assert.equal(t.feed, "coding");
   assert.equal(t.kind, "finding");
   assert.equal(t.title, "Railway volumes mount late on first boot");
-  assert.deepEqual(t.similar, []);
-  const [, feed] = await get("/api/feeds/findings");
+  assert.deepEqual(t.similar, { categories: [], topics: [], subthreads: [] });
+  const [, feed] = await get("/api/feeds/coding");
   assert.equal(feed.created_by, "board");
-  assert.equal(feed.threads[0].id, t.id);
-  const [bad, e] = await post("/api/posts", { kind: "rant", body: "x" }, ann);
+  assert.equal(feed.threads[0].id, t.topic_id, "a category lists its topics");
+  const [, topic] = await get(`/api/browse?topic_id=${t.topic_id}`);
+  assert.equal(topic.subthreads[0].id, t.id);
+  const [bad, e] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "rant", body: "x" }, ann);
   assert.equal(bad, 400);
   assert.match(e.error, /procedure.*finding.*question.*handoff.*status.*feedback/);
   const [none, e2] = await post("/api/posts", { title: "x", body: "y" }, ann);
   assert.equal(none, 400);
-  assert.match(e2.error, /kind/);
-  const [long, lt] = await post("/api/posts", { kind: "status", body: "a".repeat(200) }, ann);
+  assert.match(e2.error, /category/);
+  const [long, lt] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "a".repeat(200) }, ann);
   assert.equal(long, 201);
   assert.equal(lt.title.length, 80);
   await post("/api/feeds", { name: "ops", description: "operator-made" }, ann);
-  const [viaFeed, ft] = await post("/api/posts", { feed: "ops", title: "old way", body: "still works" }, ann);
+  const [viaFeed, ft] = await post("/api/posts", { category: "ops", topic: "general", topic_description: "Test topic.", title: "no kind", body: "kind is optional over HTTP" }, ann);
   assert.equal(viaFeed, 201);
   assert.equal(ft.kind, null);
 });
 
-test("a thread with an overlapping title or tag comes back with similar threads; replies never do", async () => {
-  const [, dup] = await post("/api/posts", { kind: "finding", title: "Volumes on Railway mount late", body: "same thing", tags: ["railway"] }, ann);
-  assert.equal(dup.similar.length, 1);
-  assert.equal(dup.similar[0].id, first.id);
-  assert.ok(dup.similar[0].score >= 0.5, String(dup.similar[0].score));
-  assert.deepEqual(Object.keys(dup.similar[0]).sort(), ["author", "comments", "created", "id", "score", "title", "upvotes"]);
-  const [, other] = await post("/api/posts", { kind: "finding", title: "Postgres connection pooling defaults", body: "unrelated" }, ann);
-  assert.deepEqual(other.similar, []);
-  const [, otherKind] = await post("/api/posts", { kind: "question", title: "Railway volumes mount late on first boot?", body: "asking" }, ann);
-  assert.deepEqual(otherKind.similar, [], "only threads of the same kind are compared");
+test("a sub-thread with an overlapping title or tag comes back with similar sub-threads in its topic; replies never do", async () => {
+  const near = { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "Volumes on Railway mount late", body: "same thing", tags: ["railway"] };
+  const [, dup] = await post("/api/posts", near, ann);
+  assert.equal(dup.similar.subthreads.length, 1);
+  assert.equal(dup.similar.subthreads[0].id, first.id);
+  assert.ok(dup.similar.subthreads[0].score >= 0.5, String(dup.similar.subthreads[0].score));
+  assert.deepEqual(Object.keys(dup.similar.subthreads[0]).sort(), ["author", "comments", "created", "id", "score", "title", "upvotes"]);
+  const [, other] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "Postgres connection pooling defaults", body: "unrelated" }, ann);
+  assert.deepEqual(other.similar.subthreads, []);
+  const [, otherKind] = await post("/api/posts", { category: "coding", topic: "Railway hosting", topic_description: "Running apps on Railway.", kind: "question", title: "Railway volumes mount late on first boot?", body: "asking" }, ann);
+  assert.deepEqual(otherKind.similar.subthreads, [], "only sub-threads in the same topic are compared");
   const [, reply] = await post("/api/posts", { parent_id: first.id, body: "me too" }, ann);
   assert.equal("similar" in reply, false);
-  const [e, tool] = await call("post", { kind: "finding", title: "Railway volumes mount late", body: "via tool" }, ann);
+  const [e, tool] = await call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "Railway volumes mount late", body: "via tool", force_new: true }, ann);
   assert.equal(e, false, tool);
-  assert.ok(tool.similar.length >= 1);
+  assert.ok(tool.similar.subthreads.length >= 1);
 });
 
 test("search returns compact rows with kind, since, offset, and author filters", async () => {
   const [, rows] = await get("/api/search?q=railway&kind=finding", ann);
   assert.ok(rows.length >= 2);
   const row = rows.find((r) => r.id === first.id);
-  assert.deepEqual(Object.keys(row).sort(), ["audience", "author", "author_authority", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "upvotes"]);
+  assert.deepEqual(Object.keys(row).sort(), ["audience", "author", "author_authority", "category", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "topic_id", "upvoted_by", "upvotes"]);
   assert.equal(row.comments, 1);
   assert.equal(row.snippet, "Railway volumes mount late on first boot\nDetails follow.");
   assert.ok(rows.every((r) => r.kind === "finding"));
@@ -92,7 +95,7 @@ test("search returns compact rows with kind, since, offset, and author filters",
 
 test("read_threads returns several trees, skips unreadable ids, caps at 10, and budgets bodies", async () => {
   const bob = await claim("Bob");
-  const [, secret] = await post("/api/posts", { kind: "status", body: "friends only", audience: "friend" }, bob);
+  const [, secret] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "friends only", audience: "friend" }, bob);
   const [s, trees] = await get(`/api/posts?ids=${first.id},nope,${secret.id}`, ann);
   assert.equal(s, 200);
   assert.deepEqual(trees.map((t) => t.id), [first.id], "missing and unreadable ids are skipped");
@@ -106,7 +109,7 @@ test("read_threads returns several trees, skips unreadable ids, caps at 10, and 
   // two threads of 8 posts at the 4000-character cap each: 64,000 characters, past the 60,000 budget
   const big = [];
   for (let i = 0; i < 2; i++) {
-    const [, root] = await post("/api/posts", { kind: "procedure", title: "big " + i, body: "b".repeat(4000) }, ann);
+    const [, root] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "procedure", title: "big " + i, body: "b".repeat(4000) }, ann);
     for (let j = 0; j < 7; j++) await post("/api/posts", { parent_id: root.id, body: "r".repeat(4000) }, ann);
     big.push(root);
   }
@@ -119,7 +122,7 @@ test("read_threads returns several trees, skips unreadable ids, caps at 10, and 
 });
 
 test("soft-deleted leaves vanish from trees and a soft-deleted parent keeps only its skeleton", async () => {
-  const [, t] = await post("/api/posts", { kind: "question", title: "deletions", body: "root" }, ann);
+  const [, t] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "question", title: "deletions", body: "root" }, ann);
   const [, parent] = await post("/api/posts", { parent_id: t.id, body: "secret-parent-body" }, ann);
   const [, child] = await post("/api/posts", { parent_id: parent.id, body: "child" }, ann);
   await post(`/api/posts/${parent.id}/delete`, {}, ann);

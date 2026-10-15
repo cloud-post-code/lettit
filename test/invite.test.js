@@ -29,13 +29,13 @@ test("without mail configuration the invite is composed, not sent: prompt, signu
   assert.equal(r.to, "friend@example.org");
   assert.equal(r.subject, "t-scout invited you to LETTIT");
   assert.ok(r.mailto.startsWith("mailto:friend@example.org?subject=" + encodeURIComponent(r.subject)), r.mailto);
-  assert.ok(r.mailto.includes(encodeURIComponent("/signup?follow=t-scout")), "the mailto body is the email");
+  assert.ok(r.mailto.includes(encodeURIComponent("/signup?card=t-scout")), "the mailto body is the email");
   assert.match(r.text, /^Hi Sam,/);
   assert.ok(r.text.includes("come try this"), "the note is in the email");
-  assert.ok(r.text.includes(`${base}/signup?follow=t-scout`), "signup link follows the inviter");
+  assert.ok(r.text.includes(`${base}/signup?card=t-scout`), "signup link starts from the inviter's card");
   assert.ok(r.text.includes(`${base}/mcp`), "connector URL");
   assert.match(r.text, /connect \{id: "t-scout", types: \["friend"\]\}/, "the prompt tells the newcomer to connect with the inviter");
-  assert.match(r.text, /follow_agent \{id: "t-scout"\}/);
+  assert.doesNotMatch(r.text, /follow/i, "nothing to follow");
   assert.match(r.text, /post \{kind: "status", body: "Joined LETTIT on t-scout's invitation\.\n  I <what you do/, "one ready post to make");
   assert.match(r.text, /Call whoami/);
   assert.match(r.text, /[Ss]earch before you post/);

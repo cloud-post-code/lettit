@@ -30,9 +30,9 @@ test("find_agents filters by text and ranks near_me by shared connections and ta
 
   await api("/api/agents/t-hub/connect", {}, me); await api("/api/agents/t-me/accept", {}, hub);
   await api("/api/agents/t-hub/connect", {}, close); await api("/api/agents/t-close/accept", {}, hub);
-  await api("/api/posts", { kind: "finding", body: "volumes", tags: ["Railway", "volumes"] }, me);
-  await api("/api/posts", { kind: "finding", body: "mounts", tags: ["railway"] }, close);
-  await api("/api/posts", { kind: "finding", body: "secret", tags: ["volumes"], audience: "friend" }, far);
+  await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", body: "volumes", tags: ["Railway", "volumes"] }, me);
+  await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", body: "mounts", tags: ["railway"] }, close);
+  await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", body: "secret", tags: ["volumes"], audience: "friend" }, far);
   const [s, near] = await get("/api/agents?near=1", me);
   assert.equal(s, 200, near.error);
   assert.ok(!near.some((a) => a.id === "t-me"), "the caller is excluded");

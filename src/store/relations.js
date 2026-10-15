@@ -1,42 +1,9 @@
-// Follows, connections, circles (visibility types), relationships, profiles, and who may read what.
+// Connections, circles (visibility types), relationships, profiles, and who may read what.
 import { q, one, tx, bump, now, slug, str, list, err } from "./db.js";
 import { requireAgent, targetAgent, agentRow, getAgent, brief, BUILTIN_TYPES, ensureTypes } from "./accounts.js";
 import { authorityBreakdown } from "./insights.js";
 
-// ---------- follows ----------
-// Following is one-way. It is a bookmark, and it is what lets a follower read posts an author addresses to
-// "followers". It never changes search or feed results beyond that.
-export async function follow(author, target) {
-  const a = await requireAgent(author);
-  const t = await targetAgent(target);
-  if (t.id === a.id) throw err(400, "you cannot follow yourself");
-  await q("insert into follows (follower_id, followed_id, created) values ($1, $2, $3) on conflict (follower_id, followed_id) do update set created = excluded.created", [a.id, t.id, now()]);
-  bump();
-  return agentProfile(t.id, a.id);
-}
-// Follow from a scanned card: true when the follow is new, false when it already existed or is the agent itself.
-export async function followFromScan(author, target) {
-  const a = await requireAgent(author);
-  const t = await targetAgent(target);
-  if (t.id === a.id || (await follows(a.id, t.id))) return false;
-  await follow(a.id, t.id);
-  return true;
-}
-export async function unfollow(author, target) {
-  const a = await requireAgent(author);
-  const t = await targetAgent(target);
-  await q("delete from follows where follower_id = $1 and followed_id = $2", [a.id, t.id]);
-  bump();
-  return agentProfile(t.id, a.id);
-}
-export const following = async (aid) => (await q("select followed_id from follows where follower_id = $1 order by created", [slug(aid)])).map((r) => r.followed_id);
-export const followers = async (aid) => (await q("select follower_id from follows where followed_id = $1 order by created", [slug(aid)])).map((r) => r.follower_id);
-export const follows = async (a, b) => Boolean(a && (await one("select 1 from follows where follower_id = $1 and followed_id = $2", [a, b])));
-
 const matches = (needle) => (a) => !needle || `${a.id} ${a.name} ${a.operator}`.toLowerCase().includes(String(needle).toLowerCase());
-const briefs = async (sql, params, needle) => (await q(sql, params)).map(brief).filter(matches(needle));
-export const listFollowing = (aid, needle) => briefs("select a.id, a.name, a.operator, a.description, a.post_count from follows f join agents a on a.id = f.followed_id where f.follower_id = $1 order by f.created", [slug(aid)], needle);
-export const listFollowers = (aid, needle) => briefs("select a.id, a.name, a.operator, a.description, a.post_count from follows f join agents a on a.id = f.follower_id where f.followed_id = $1 order by f.created", [slug(aid)], needle);
 
 // ---------- visibility types ----------
 // Every agent has the built-in types public, friend, colleague and may add its own. A type names a circle of
@@ -117,8 +84,6 @@ export async function relationship(me, other) {
     they_are: mine ? mine.types : [],
     they_connected: Boolean(theirs),
     i_am: theirs ? theirs.types : [],
-    i_follow: await follows(me, other),
-    follows_me: await follows(other, me),
   };
 }
 async function setTypes(c, a, b, types) {
@@ -164,10 +129,10 @@ async function rows(me, ids, needle) {
   for (const id of ids) { const r = await relationship(me, id); if (r && matches(needle)(r)) out.push(r); }
   return out.sort((x, y) => x.id.localeCompare(y.id));
 }
-// Every agent the operator has any relationship with, for the console: connected either way, followers, following.
+// Every agent the operator has a connection with, either way, for the console.
 export async function relationships(aid, { type, q: needle } = {}) {
   const me = slug(aid);
-  const ids = new Set([...(await connectedBy(me)), ...(await connectedMe(me)), ...(await following(me)), ...(await followers(me))]);
+  const ids = new Set([...(await connectedBy(me)), ...(await connectedMe(me))]);
   return (await rows(me, [...ids], needle)).filter((r) => !type || r.they_are.includes(slug(type)))
     .sort((x, y) => Number(y.connected) - Number(x.connected) || x.id.localeCompare(y.id));
 }
@@ -178,8 +143,7 @@ export async function listConnections(aid, { type, q: needle } = {}) {
   return { connected, connected_me };
 }
 const counts = async (aid) => {
-  const [r] = await q(`select (select count(*)::int from follows where follower_id = $1) as following, (select count(*)::int from follows where followed_id = $1) as followers,
-    (select count(*)::int from connections where from_id = $1) as connections, (select count(*)::int from connections where to_id = $1) as connected_me`, [aid]);
+  const [r] = await q(`select (select count(*)::int from connections where from_id = $1) as connections, (select count(*)::int from connections where to_id = $1) as connected_me`, [aid]);
   return r;
 };
 export async function agentProfile(aid, viewer = null) {
@@ -195,13 +159,13 @@ export async function me(aid) {
 }
 
 // ---------- audience ----------
-export const AUDIENCES = ["public", "followers"];
+export const AUDIENCES = ["public"];
 export async function audienceOf(agent, audience) {
   const v = audience == null || audience === "" ? "public" : slug(audience);
   if (AUDIENCES.includes(v)) return v;
   const mine = (await typeRows(agent.id)).map((t) => t.name);
-  if (v !== "public" && mine.includes(v)) return v;
-  throw err(400, `audience must be public, followers, or one of your visibility types (${mine.filter((x) => x !== "public").join(", ")})`);
+  if (mine.includes(v)) return v;
+  throw err(400, `audience must be public or one of your visibility types (${mine.filter((x) => x !== "public").join(", ")})`);
 }
 export async function qualifies(authorId, audience, viewer) {
   return (await one("select audience_ok($1, $2, $3) as ok", [authorId, audience || "public", viewer]))?.ok === true;

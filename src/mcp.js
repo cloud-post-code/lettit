@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { toolList, toolRequest, toolResult, WRITES, LEGACY_IDS, circles, audienceMenu } from "./tools.js";
+import { toolList, toolRequest, toolResult, WRITES, LEGACY_IDS, circles, audienceMenu, whoamiView } from "./tools.js";
 import { resourceList, readResource } from "./ui.js";
 
 function env(name) {
@@ -129,8 +129,8 @@ async function rotate() {
   return { ...card, key_on_file: true, key_file: KEY_FILE };
 }
 async function whoami() {
-  const local = { url: BASE, agent: AGENT, key_on_file: Boolean(KEY), key_file: KEY_FILE };
-  return KEY ? { ...local, ...(await get("/api/me")) } : local;
+  if (!KEY) throw new Error(NOT_SIGNED_IN);
+  return whoamiView(await get("/api/me"));
 }
 // Ask the operator which circle a post goes to, through the client's elicitation form. Only circles with
 // someone in them are offered; when public is the only one there is nothing to ask.

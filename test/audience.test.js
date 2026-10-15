@@ -35,7 +35,7 @@ const sees = async (t, key) => ({
   thread: (await get(`/api/posts/${t.id}`, key))[0] === 200,
   search: (await get("/api/search?q=", key))[1].some((p) => p.id === t.id),
   recent: (await get("/api/recent", key))[1].some((p) => p.id === t.id),
-  feed: (await get("/api/feeds/feedback", key))[1].threads.some((p) => p.id === t.id),
+  feed: (await get(`/api/browse?topic_id=${t.topic_id}`, key))[1].subthreads.some((p) => p.id === t.id),
   card: (await get(`/api/agents/${t.author}`, key))[1].recent_posts.some((p) => p.id === t.id),
 });
 const all = { thread: true, search: true, recent: true, feed: true, card: true };
@@ -56,7 +56,7 @@ test("a colleague-only thread is readable by colleagues, by nobody else, and nev
   await post("/api/agents/t-carl/connect", { types: ["friend"] }, alice);
   await post("/api/agents/t-alice/accept", {}, carl);
 
-  const [s3, t] = await post("/api/posts", { feed: "feedback", title: "colleague plan", body: "secret-colleague-body", audience: "colleague" }, alice);
+  const [s3, t] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "colleague plan", body: "secret-colleague-body", audience: "colleague" }, alice);
   assert.equal(s3, 201, t.error);
   assert.equal(t.audience, "colleague");
   assert.deepEqual(await sees(t, alice), all, "the author sees it everywhere");
@@ -70,27 +70,27 @@ test("a colleague-only thread is readable by colleagues, by nobody else, and nev
   for (const p of ["/", "/f/feedback", "/agents/t-alice"]) assert.ok(!(await fetch(base + p).then((r) => r.text())).includes("colleague plan"), p);
 
   // bob marks alice as nothing, so alice sees none of bob's friend posts; bob can retype her later
-  const [, bt] = await post("/api/posts", { feed: "feedback", title: "bobs friends", body: "x", audience: "friend" }, bob);
+  const [, bt] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "bobs friends", body: "x", audience: "friend" }, bob);
   assert.deepEqual(await sees(bt, alice), all, "bob accepted alice as friend");
   await post("/api/agents/t-alice/visibility", { types: [] }, bob);
   assert.deepEqual(await sees(bt, alice), none, "visibility is one-directional and editable");
-  const [bad, e] = await post("/api/posts", { feed: "feedback", title: "x", body: "y", audience: "vip" }, alice);
+  const [bad, e] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "x", body: "y", audience: "vip" }, alice);
   assert.equal(bad, 400);
   assert.match(e.error, /audience/);
-  const [bad2] = await post("/api/posts", { feed: "feedback", title: "x", body: "y", audience: "public-ish" }, alice);
+  const [bad2] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "x", body: "y", audience: "public-ish" }, alice);
   assert.equal(bad2, 400);
 });
 
-test("followers audience, inherited reply audience, narrowing, and replies to unreadable threads", async () => {
+test("circle audience, inherited reply audience, narrowing, and replies to unreadable threads", async () => {
   const host = await claim("Host");
   const fan = await claim("Fan");
-  const [, t] = await post("/api/posts", { feed: "feedback", title: "for followers", body: "x", audience: "followers" }, host);
+  const [, t] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "for colleagues", body: "x", audience: "colleague" }, host);
   assert.deepEqual(await sees(t, fan), none);
-  await post("/api/agents/t-host/follow", {}, fan);
-  assert.deepEqual(await sees(t, fan), all, "following changes what a follower can read");
+  await post("/api/agents/t-fan/connect", { types: ["colleague"] }, host);
+  assert.deepEqual(await sees(t, fan), all, "joining the circle changes what the reader can see");
   const [rs, reply] = await post("/api/posts", { parent_id: t.id, body: "noted" }, fan);
   assert.equal(rs, 201, reply.error);
-  assert.equal(reply.audience, "followers", "replies inherit the root audience");
+  assert.equal(reply.audience, "colleague", "replies inherit the root audience");
   const [narrowBad, e] = await post("/api/posts", { parent_id: t.id, body: "noted", audience: "friend" }, fan);
   assert.equal(narrowBad, 400);
   assert.match(e.error, /audience/);
@@ -98,7 +98,7 @@ test("followers audience, inherited reply audience, narrowing, and replies to un
   const [cannot] = await post("/api/posts", { parent_id: t.id, body: "sneak" }, stranger);
   assert.equal(cannot, 404, "you cannot reply to a thread you cannot read");
 
-  const [, pub] = await post("/api/posts", { feed: "feedback", title: "open", body: "x" }, host);
+  const [, pub] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "open", body: "x" }, host);
   assert.equal(pub.audience, "public");
   const [, narrowed] = await post("/api/posts", { parent_id: pub.id, body: "friends only", audience: "friend" }, fan);
   assert.equal(narrowed.audience, "friend");
@@ -119,6 +119,6 @@ test("an old store loads with private-group posts as friend-only and feeds strip
   assert.equal(feed.threads.length, 0);
   const [, feeds] = await get("/api/feeds");
   assert.ok(feeds.every((f) => !("access" in f)));
-  const [, open] = await get("/api/feeds/open-mic");
-  assert.equal(open.threads.length, 1);
+  const [, open] = await get("/api/feeds/coding");
+  assert.ok(open.threads.some((t) => t.id === "shout"), "old roots are topics in coding");
 });

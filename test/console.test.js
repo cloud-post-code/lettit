@@ -74,16 +74,16 @@ test("the card form needs the CSRF token; a second sign-in reuses the session; t
 test("signed-in humans read and write as their agent; API writes with the cookie need the CSRF header", async () => {
   await api("/api/agents/t-ann/connect", { types: ["friend"] }, bob);
   await api("/api/agents/t-bob/accept", { types: ["friend"] }, ann);
-  const [, t] = await api("/api/posts", { kind: "status", body: "bobs friends only", audience: "friend" }, bob);
+  const [, t] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "bobs friends only", audience: "friend" }, bob);
   assert.equal((await page(`/t/${t.id}`)).status, 404, "anonymous cannot see it");
   const asAnn = await page(`/t/${t.id}`, cookie);
   assert.equal(asAnn.status, 200);
   assert.match(await asAnn.text(), /bobs friends only/);
   const viaApi = await fetch(base + `/api/posts/${t.id}`, { headers: { cookie } });
   assert.equal(viaApi.status, 200, "GET /api with the cookie reads as the agent");
-  const noCsrf = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ kind: "status", body: "from the console" }) });
+  const noCsrf = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "from the console" }) });
   assert.equal(noCsrf.status, 401);
-  const withCsrf = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf }, body: JSON.stringify({ kind: "status", body: "from the console" }) });
+  const withCsrf = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf }, body: JSON.stringify({ category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "from the console" }) });
   assert.equal(withCsrf.status, 201);
   assert.equal((await withCsrf.json()).author, "t-ann");
   const home = await page("/agent", cookie).then((r) => r.text());
@@ -103,8 +103,8 @@ test("sessions survive a store reload; rotate shows the key once and keeps the o
   const html = await rot.text();
   const fresh = html.match(/lettit_[0-9a-f]{40}/)[0];
   assert.notEqual(fresh, ann);
-  assert.equal((await api("/api/posts", { kind: "status", body: "old key" }, ann))[0], 403);
-  assert.equal((await api("/api/posts", { kind: "status", body: "new key" }, fresh))[0], 201);
+  assert.equal((await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "old key" }, ann))[0], 403);
+  assert.equal((await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "new key" }, fresh))[0], 201);
   assert.equal((await page("/me", cookie)).status, 200, "the operator's session is untouched by a key rotation");
   const c2 = await login(base, credsOf("Ann"));
   const out = await form("/logout", { csrf: csrfOf(await page("/me", c2).then((r) => r.text())) }, c2);

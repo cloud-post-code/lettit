@@ -101,15 +101,14 @@ test("card QR, connect page, connector QR, and prompt QR", async () => {
 
   const anon = await page("/connect/t-ann");
   assert.equal(anon.status, 302, "a scan by a newcomer goes to signup");
-  assert.equal(anon.headers.get("location"), "/signup?follow=t-ann");
+  assert.equal(anon.headers.get("location"), "/signup?card=t-ann");
   assert.equal((await page("/connect/nobody")).status, 404);
   const login = await form("/login", { ...credsOf("Bob"), next: "/connect/t-ann" });
   assert.equal(login.headers.get("location"), "/connect/t-ann");
   const cookie = login.headers.get("set-cookie").split(";")[0];
   const signedIn = await text("/connect/t-ann", cookie);
   assert.match(signedIn, /value="connect"/);
-  assert.match(signedIn, /You now follow t-ann as t-bob/, "a scan by a signed-in operator follows at once");
-  assert.match(await text("/connect/t-ann", cookie), /You follow t-ann as t-bob/, "a second scan changes nothing");
+  assert.doesNotMatch(signedIn, /follow/i, "a scan does nothing until the operator chooses circles");
   const csrf = signedIn.match(/name="csrf" value="([^"]+)"/)[1];
   const connect = await form("/me/connections", { csrf, action: "connect", agent: "t-ann", types: "colleague" }, cookie);
   assert.equal(connect.status, 302);
@@ -134,8 +133,8 @@ test("card QR, connect page, connector QR, and prompt QR", async () => {
   assert.notEqual(key, bob);
   assert.equal(payloadOf(html), `${base}/mcp/${key}`);
   assert.match(html, /60/);
-  assert.equal((await api("/api/posts", { kind: "status", body: "new key works" }, key))[0], 201);
-  assert.equal((await api("/api/posts", { kind: "status", body: "old key" }, bob))[0], 403);
+  assert.equal((await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "new key works" }, key))[0], 201);
+  assert.equal((await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "old key" }, bob))[0], 403);
   assert.equal((await page("/me", cookie)).status, 200, "the current session stays signed in");
 
   const home = await text("/agent");

@@ -23,7 +23,7 @@ const feedPosts = async (id) => (await get(`/api/feeds/${id}`))[1].posts;
 test("an agent edits its own comment; others, anonymous callers, and thread roots are refused", async () => {
   const author = await claim("Editor");
   const other = await claim("Someone Else");
-  const [, thread] = await post("/api/posts", { feed: "feedback", title: "edit me", body: "root" }, author);
+  const [, thread] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "edit me", body: "root" }, author);
   const [, c] = await post("/api/posts", { parent_id: thread.id, body: "first draft" }, author);
 
   const [noKey, e1] = await post(`/api/posts/${c.id}/edit`, { body: "x" });
@@ -53,7 +53,7 @@ test("an agent edits its own comment; others, anonymous callers, and thread root
 test("deleting a leaf comment removes it and fixes the counters; a parent comment is soft-deleted", async () => {
   const author = await claim("Deleter");
   const other = await claim("Replier");
-  const [, thread] = await post("/api/posts", { feed: "feedback", title: "delete me", body: "root" }, author);
+  const [, thread] = await post("/api/posts", { category: "feedback", topic: "general", topic_description: "Test topic.", title: "delete me", body: "root" }, author);
   const [, leaf] = await post("/api/posts", { parent_id: thread.id, body: "throwaway remark" }, author);
   const before = { agent: await agentPosts("t-deleter"), feed: await feedPosts("feedback") };
 
@@ -100,7 +100,7 @@ test("edit and delete are MCP tools on the hosted endpoint", async () => {
   const { result } = await rpc("tools/list", {});
   const names = result.tools.map((t) => t.name);
   assert.ok(names.includes("edit") && names.includes("delete"), names.join(","));
-  const [, t] = await call("post", { kind: "status", title: "tooling", body: "root" });
+  const [, t] = await call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "tooling", body: "root" });
   const [, c] = await call("reply", { parent_id: t.id, body: "v1" });
   const [e1, edited] = await call("edit", { post_id: c.id, body: "v2" });
   assert.equal(e1, false, edited);

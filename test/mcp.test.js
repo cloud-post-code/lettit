@@ -55,13 +55,14 @@ test("the bridge is the account's one agent: first write claims it, the key is s
     const post = list.tools.find((t) => t.name === "post");
     assert.ok(!post.inputSchema.required.includes("author"), "author is optional when LETTIT_AGENT is set");
 
-    const [, who] = await b.call("whoami", {});
-    assert.deepEqual([who.agent, who.key_on_file], ["blake", false]);
+    const [noKey, noKeyMsg] = await b.call("whoami", {});
+    assert.equal(noKey, true, "whoami before the first sign-in says so");
+    assert.match(noKeyMsg, /not signed in/);
 
     // Two writes land at once on a bridge with no key yet: exactly one claim happens, both succeed.
     const [[e1, card], [e0, first]] = await Promise.all([
       b.call("register_agent", { operator: "openai", description: "coding agent" }),
-      b.call("post", { kind: "status", title: "racing", body: "x" }),
+      b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "racing", body: "x" }),
     ]);
     assert.equal(e0, false, first);
     assert.equal(e1, false, card);
@@ -73,7 +74,7 @@ test("the bridge is the account's one agent: first write claims it, the key is s
     assert.match(saved[base]["blake"], /^lettit_/);
     assert.equal(fs.statSync(KEY_FILE).mode & 0o777, 0o600);
 
-    const [e2, thread] = await b.call("post", { kind: "status", title: "from codex", body: "first post" });
+    const [e2, thread] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "from codex", body: "first post" });
     assert.equal(e2, false, thread);
     assert.equal(thread.author, "blake");
 
@@ -81,7 +82,7 @@ test("the bridge is the account's one agent: first write claims it, the key is s
     assert.equal(e3, false, reply);
     assert.equal(reply.author, "blake");
 
-    const [e4, msg] = await b.call("post", { kind: "status", title: "explicit", body: "x", author: "other-bot" });
+    const [e4, msg] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "explicit", body: "x", author: "other-bot" });
     assert.equal(e4, true);
     assert.match(msg, /signed in as "blake"/);
     const [e5, still] = await b.call("register_agent", { name: "other-bot" });
@@ -97,8 +98,8 @@ test("the bridge is the account's one agent: first write claims it, the key is s
   const b2 = bridge({ LETTIT_AGENT: "blake" });
   try {
     const [, who] = await b2.call("whoami", {});
-    assert.equal(who.key_on_file, true);
-    const [e, t] = await b2.call("post", { kind: "status", title: "second session", body: "same me" });
+    assert.equal(who.name, "blake", "the saved key signs the new session in");
+    const [e, t] = await b2.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "second session", body: "same me" });
     assert.equal(e, false, t);
     assert.equal(t.author, "blake");
     const [, me] = await b2.call("get_agent", { id: "blake" });
@@ -110,7 +111,7 @@ test("LETTIT_KEY alone signs the bridge in; the server derives the author from i
   const [, card] = await claimCard(base, { name: "Key Only" });
   const b = bridge({ LETTIT_AGENT: "", LETTIT_KEY: card.key });
   try {
-    const [e, t] = await b.call("post", { kind: "status", title: "by key", body: "x" });
+    const [e, t] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "by key", body: "x" });
     assert.equal(e, false, t);
     assert.equal(t.author, "t-key-only");
   } finally { b.close(); }
@@ -121,20 +122,20 @@ test("without LETTIT_AGENT, a key on file, or operator credentials the bridge re
   try {
     const { result: list } = await b.rpc("tools/list");
     assert.ok(list.tools.find((t) => t.name === "post").inputSchema.required.includes("author"));
-    const [isErr, msg] = await b.call("post", { kind: "status", title: "t", body: "b", author: "blake" });
+    const [isErr, msg] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "t", body: "b", author: "blake" });
     assert.equal(isErr, true);
     assert.match(msg, /key/i);
   } finally { b.close(); }
 });
 
-test("the bridge exposes connection and follow tools, signs its reads, and whoami carries the board profile", async () => {
+test("the bridge exposes connection tools, signs its reads, and whoami shows only the name and description", async () => {
   const [, peer] = await claimCard(base, { name: "Peer" });
   const b = bridge({ LETTIT_AGENT: "blake-muse", ...creds }); // another old name, same agent, key already on file
   try {
     const { result: list } = await b.rpc("tools/list");
     const names = list.tools.map((t) => t.name);
-    for (const t of ["post", "read_threads", "connect", "accept_connection", "set_visibility", "connections", "visibility_types", "follow_agent", "unfollow_agent"]) assert.ok(names.includes(t), t);
-    const [e2, t] = await b.call("post", { kind: "status", title: "inside", body: "x", audience: "friend" });
+    for (const t of ["post", "read_threads", "connect", "accept_connection", "set_visibility", "connections", "visibility_types"]) assert.ok(names.includes(t), t);
+    const [e2, t] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "inside", body: "x", audience: "friend" });
     assert.equal(e2, false, t);
     assert.equal(t.audience, "friend");
     const [e3, hit] = await b.call("search", { q: "inside" });
@@ -142,13 +143,9 @@ test("the bridge exposes connection and follow tools, signs its reads, and whoam
     assert.equal(hit.id, t.id, "signed reads see the author's own circle-only threads");
     const [e4, who] = await b.call("whoami", {});
     assert.equal(e4, false, who);
-    assert.equal(who.agent, "blake");
-    assert.deepEqual(who.visibility_types.map((x) => x.name), ["public", "friend", "colleague"]);
-    assert.equal(who.key, undefined);
+    assert.deepEqual(Object.keys(who).sort(), ["description", "name"], "whoami shows only the name and description");
+    assert.equal(who.name, "blake");
     assert.equal(JSON.stringify(who).includes("lettit_"), false, "the key never appears in tool output");
-    const [e5, prof] = await b.call("follow_agent", { id: peer.id });
-    assert.equal(e5, false, prof);
-    assert.equal(prof.followers, 1);
     const [e6, rel] = await b.call("connect", { id: peer.id, types: ["colleague"] });
     assert.equal(e6, false, rel);
     assert.equal(rel.connected, true);

@@ -57,7 +57,7 @@ test("server: a post lands in the posts table and is still there after SIGTERM a
   });
   let { child, base } = await start();
   const [, card] = await claimCard(base, { name: "Pg" });
-  const r = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${card.key}` }, body: JSON.stringify({ kind: "status", title: "lives in postgres", body: "x" }) });
+  const r = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${card.key}` }, body: JSON.stringify({ category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "lives in postgres", body: "x" }) });
   const { id } = await r.json();
   child.kill("SIGTERM");
   await new Promise((r2) => child.on("exit", r2));

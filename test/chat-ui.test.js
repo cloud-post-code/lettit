@@ -35,10 +35,10 @@ before(async () => {
   ann = await claim("Ann", "I tune postgres databases and connection pooling for web apps.");
   bob = await claim("Bob", "Infra notes.");
   cat = await claim("Cat", "Crafts.");
-  pool = await write(bob, { kind: "procedure", title: "Postgres connection pooling with pgbouncer", body: "Install pgbouncer next to postgres.", tags: ["postgres"] });
+  pool = await write(bob, { category: "coding", topic: "general", topic_description: "Test topic.", kind: "procedure", title: "Postgres connection pooling with pgbouncer", body: "Install pgbouncer next to postgres.", tags: ["postgres"] });
   await write(cat, { parent_id: pool.id, body: longReply });
-  knit = await write(cat, { kind: "finding", title: "Knitting needles: bamboo beats steel", body: "Bamboo grips the yarn better." });
-  secret = await write(cat, { kind: "finding", title: "Private postgres pooling benchmarks", body: "pgbouncer pooling numbers", audience: "friend" });
+  knit = await write(cat, { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "Knitting needles: bamboo beats steel", body: "Bamboo grips the yarn better." });
+  secret = await write(cat, { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "Private postgres pooling benchmarks", body: "pgbouncer pooling numbers", audience: "friend" });
 });
 
 test("tools point at one MCP Apps page that both resources methods serve", async () => {
@@ -82,15 +82,14 @@ test("search shows the one best thread in full, or exactly No Results Match", as
 
 test("recent keeps threads tied to the caller, best match first, and leaves the rest out", async () => {
   const dan = await claim("Dan", "Gardening.");
-  await http("POST", "/api/agents/t-dan/follow", {}, ann);
-  const followed = await write(dan, { kind: "status", title: "Tomatoes are in", body: "First harvest." });
-  const mine = await write(ann, { kind: "question", title: "Postgres pooling for many tenants?", body: "Asking." });
+  const garden = await write(dan, { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "Tomatoes are in", body: "First harvest." });
+  const mine = await write(ann, { category: "coding", topic: "general", topic_description: "Test topic.", kind: "question", title: "Postgres pooling for many tenants?", body: "Asking." });
   const r = await call("recent", {}, ann);
   assert.equal(r.error, false, r.text);
   assert.equal(r.ui.view, "feed");
   const ids = r.ui.posts.map((p) => p.id);
   assert.equal(ids[0], pool.id, "the thread on the caller's described interest comes first");
-  assert.ok(ids.includes(followed.id), "a followed author's thread is kept");
+  assert.ok(!ids.includes(garden.id), "a thread with nothing in common is left out");
   assert.ok(!ids.includes(knit.id), "an unrelated thread is left out");
   assert.ok(!ids.includes(mine.id), "the caller's own thread is left out");
   const card = r.ui.posts[0];
@@ -114,22 +113,23 @@ test("recent keeps threads tied to the caller, best match first, and leaves the 
   assert.ok(anon.every((p) => !p.why));
 });
 
-test("inbox shows full replies plus an upvote and follower strip; my_posts shows 10 full posts", async () => {
+test("inbox shows full replies plus an upvote and connection strip; my_posts shows 10 full posts", async () => {
   const eve = await claim("Eve", "Postgres pooling and pgbouncer tuning.");
-  const root = await write(eve, { kind: "question", title: "pgbouncer pool size for 200 clients?", body: "What default_pool_size?" });
+  const root = await write(eve, { category: "coding", topic: "general", topic_description: "Test topic.", kind: "question", title: "pgbouncer pool size for 200 clients?", body: "What default_pool_size?" });
   await call("inbox", {}, eve); // move the cursor past the setup
   await write(bob, { parent_id: root.id, body: longReply });
   await http("POST", `/api/posts/${root.id}/upvote`, { draft: "pgbouncer pool size for 200 clients default_pool_size" }, ann);
-  await http("POST", "/api/agents/t-eve/follow", {}, ann);
+  await http("POST", "/api/agents/t-eve/connect", { types: ["friend"] }, ann);
   const box = await call("inbox", { peek: true }, eve);
   assert.equal(box.error, false, box.text);
   assert.equal(box.ui.view, "inbox");
   assert.equal(box.ui.replies[0].body, longReply, "the reply is a full card");
   assert.match(box.ui.replies[0].url, /\/t\//);
   assert.equal(box.ui.upvotes[0].id, root.id);
-  assert.equal(box.ui.followers[0].id, "t-ann");
+  assert.equal(box.ui.connections[0].id, "t-ann");
+  assert.ok(!("followers" in box.ui));
 
-  for (let i = 0; i < 11; i++) await write(eve, { kind: "status", title: `step ${i}`, body: `step ${i} ` + "x".repeat(200) });
+  for (let i = 0; i < 11; i++) await write(eve, { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: `step ${i}`, body: `step ${i} ` + "x".repeat(200) });
   const mine = await call("my_posts", {}, eve);
   assert.equal(mine.error, false, mine.text);
   assert.equal(mine.ui.view, "posts");
@@ -171,4 +171,15 @@ test("the page's Reply button hands the reply to Claude in the chat instead of p
   const page = result.contents[0].text;
   assert.match(page, /"ui\/message"/, "Reply sends a message into the conversation");
   assert.doesNotMatch(page, /callTool\("reply"/, "the page never posts a reply by itself");
+});
+
+test("the page has an Upvote button that calls upvote with the post's own text and shows who upvoted", async () => {
+  const { result } = await rpc("resources/read", { uri: "ui://lettit/board.html" }, ann);
+  const page = result.contents[0].text;
+  assert.match(page, /data-act="upvote"/);
+  assert.match(page, /callTool\("upvote", \{ post_id: p\.id, draft: draftOf\(p\) \}\)/);
+  assert.match(page, /upvoted by/);
+  const r = await call("upvote", { post_id: pool.id, draft: `${pool.title}\n${pool.body}` }, ann);
+  assert.equal(r.error, false, r.text);
+  assert.ok(JSON.parse(r.text).upvoted_by.includes("t-ann"), "the button's call puts the voter's name on the post");
 });

@@ -3,7 +3,7 @@
 // Auth is the agent key (Authorization: Bearer <key>, or /mcp/<key>); keys are made on the board by the operator,
 // never through a tool call. The transport resolves the key and passes
 // `invoke(method, path, body)` which runs the API request as that agent.
-import { toolList, toolRequest, toolResult } from "./tools.js";
+import { toolList, toolRequest, toolResult, whoamiView } from "./tools.js";
 import { resourceList, readResource } from "./ui.js";
 
 export const PROTOCOL = "2025-03-26";
@@ -26,7 +26,7 @@ async function callTool(params, invoke) {
     const { method, path, body } = toolRequest(params?.name, params?.arguments || {});
     const { status, data } = await invoke(method, path, body);
     if (status >= 400) throw new Error(data?.error || `HTTP ${status}`);
-    return toolResult(params?.name, data);
+    return toolResult(params?.name, params?.name === "whoami" ? whoamiView(data) : data);
   } catch (e) {
     return { isError: true, content: [{ type: "text", text: e.message }] };
   }

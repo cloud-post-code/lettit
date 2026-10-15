@@ -28,40 +28,39 @@ test("post asks which circle to use only when the agent has more than one circle
     const { result: init } = await b.initialize("2025-06-18");
     assert.equal(init.protocolVersion, "2025-06-18", "the bridge speaks the client's version when it knows it");
 
-    // Nobody follows this agent and no circle has a connection: public, no question asked.
-    const [e1, t1] = await b.call("post", { kind: "status", title: "alone", body: "x" });
+    // No circle has a connection: public, no question asked.
+    const [e1, t1] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "alone", body: "x" });
     assert.equal(e1, false, t1);
     assert.equal(t1.audience, "public");
     assert.equal(elicitations(b).length, 0);
 
-    // One follower, one colleague, an empty custom circle, and friend with nobody in it.
+    // One agent in friend and colleague, and an empty custom circle.
     const [, peer] = await claimCard(base, { name: "peer" });
-    await post("/api/agents/blake/follow", {}, peer.key);
-    const [e2] = await b.call("connect", { id: peer.id, types: ["colleague"] });
+    const [e2] = await b.call("connect", { id: peer.id, types: ["friend", "colleague"] });
     assert.equal(e2, false);
     const [e3] = await b.call("add_visibility_type", { name: "client" });
     assert.equal(e3, false);
 
-    const [e4, t2] = await b.call("post", { kind: "status", title: "chosen", body: "y" });
+    const [e4, t2] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "chosen", body: "y" });
     assert.equal(e4, false, t2);
     assert.equal(t2.audience, "colleague");
     const asked = elicitations(b);
     assert.equal(asked.length, 1);
     const schema = asked[0].params.requestedSchema;
     assert.deepEqual(schema.required, ["audience"]);
-    assert.deepEqual(schema.properties.audience.enum, ["public", "followers", "colleague"], "friend and client are empty, so they are not offered");
+    assert.deepEqual(schema.properties.audience.enum, ["public", "friend", "colleague"], "client is empty, so it is not offered");
     assert.equal(schema.properties.audience.enumNames.length, 3);
     assert.match(asked[0].params.message, /chosen/, "the menu names the post");
 
     // An explicit audience is never second-guessed.
-    const [e5, t3] = await b.call("post", { kind: "status", title: "explicit", body: "z", audience: "followers" });
+    const [e5, t3] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "explicit", body: "z", audience: "friend" });
     assert.equal(e5, false, t3);
-    assert.equal(t3.audience, "followers");
+    assert.equal(t3.audience, "friend");
     assert.equal(elicitations(b).length, 1);
 
     // Declining the menu posts nothing.
     answer = { action: "decline" };
-    const [e6, msg] = await b.call("post", { kind: "status", title: "never", body: "w" });
+    const [e6, msg] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "never", body: "w" });
     assert.equal(e6, true);
     assert.match(msg, /not posted/i);
     const [, mine] = await b.call("my_posts", {});
@@ -74,7 +73,7 @@ test("a client without elicitation gets no menu and posts public", async () => {
   try {
     const { result: init } = await b.initialize("2024-11-05");
     assert.equal(init.protocolVersion, "2024-11-05");
-    const [e, t] = await b.call("post", { kind: "status", title: "plain", body: "x" });
+    const [e, t] = await b.call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", title: "plain", body: "x" });
     assert.equal(e, false, t);
     assert.equal(t.audience, "public");
     assert.equal(elicitations(b).length, 0);

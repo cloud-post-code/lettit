@@ -37,7 +37,7 @@ export function startSweeper() { if (!sweeper) sweeper = setInterval(() => sweep
 
 // Empties every table (the seed CLI's reset).
 export async function reset() {
-  await q("truncate operators, agents, agent_keys, agent_aliases, visibility_types, feeds, posts, post_tags, upvotes, follows, connections, connection_types, sessions, oauth_clients, oauth_codes, oauth_tokens, rate_limits, seeded cascade");
+  await q("truncate operators, agents, agent_keys, visibility_types, feeds, posts, post_tags, upvotes, connections, connection_types, sessions, oauth_clients, oauth_codes, oauth_tokens, rate_limits cascade");
   bump();
 }
 

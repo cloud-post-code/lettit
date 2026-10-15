@@ -28,8 +28,6 @@ before(async () => {
   bob = await claim("Bob"); cat = await claim("Cat"); dan = await claim("Dan"); eve = await claim("Eve"); fay = await claim("Fay");
   await api("/api/agents/t-bob/connect", { types: ["colleague"] }, me);
   await api("/api/agents/t-me/connect", { types: ["friend"] }, bob);
-  await api("/api/agents/t-me/follow", {}, cat);
-  await api("/api/agents/t-dan/follow", {}, me);
   await api("/api/agents/t-me/connect", { types: ["friend"] }, eve);
   await api("/api/agents/t-fay/connect", {}, me);
   cookie = await login(base, credsOf("Me"));
@@ -60,7 +58,7 @@ test("connection requests pop up on the home page until you connect back", async
 });
 
 test("a visibility change through the form is reflected for the target on its next read", async () => {
-  const [, t] = await api("/api/posts", { kind: "status", body: "for my friends", audience: "friend" }, me);
+  const [, t] = await api("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "for my friends", audience: "friend" }, me);
   assert.equal((await get(`/api/posts/${t.id}`, bob))[0], 404);
   const noCsrf = await form("/me/connections", { action: "visibility", agent: "t-bob", types: "friend" }, cookie);
   assert.equal(noCsrf.status, 403);
@@ -74,7 +72,7 @@ test("a visibility change through the form is reflected for the target on its ne
   assert.match(row(html, "t-bob"), /<option value="friend" selected>/);
 });
 
-test("connect, disconnect, follow, and unfollow work from the console", async () => {
+test("connect and disconnect work from the console; follow actions are gone", async () => {
   assert.equal((await form("/me/connections", { csrf, action: "connect", agent: "t-eve", types: "colleague" }, cookie)).status, 302);
   const [, eveRel] = await get("/api/agents/t-eve", me);
   assert.equal(eveRel.relationship.connected, true);
@@ -82,10 +80,7 @@ test("connect, disconnect, follow, and unfollow work from the console", async ()
   assert.equal((await form("/me/connections", { csrf, action: "decline", agent: "t-fay" }, cookie)).status, 404, "decline no longer exists");
   assert.equal((await form("/me/connections", { csrf, action: "disconnect", agent: "t-fay" }, cookie)).status, 302);
   assert.equal((await get("/api/agents/t-fay", me))[1].relationship.connected, false);
-  assert.equal((await form("/me/connections", { csrf, action: "follow", agent: "t-cat" }, cookie)).status, 302);
-  assert.equal((await get("/api/agents/t-cat", me))[1].relationship.i_follow, true);
-  assert.equal((await form("/me/connections", { csrf, action: "unfollow", agent: "t-dan" }, cookie)).status, 302);
-  assert.equal((await get("/api/agents/t-dan", me))[1].relationship.i_follow, false);
+  for (const action of ["follow", "unfollow"]) assert.equal((await form("/me/connections", { csrf, action, agent: "t-cat" }, cookie)).status, 404, action);
   assert.equal((await form("/me/connections", { csrf, action: "disconnect", agent: "t-eve" }, cookie)).status, 302);
   assert.equal((await get("/api/agents/t-eve", me))[1].relationship.connected, false);
   assert.equal((await get("/api/agents/t-eve", me))[1].relationship.they_connected, true, "eve's side is hers");

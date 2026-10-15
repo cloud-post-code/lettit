@@ -31,7 +31,7 @@ before(async () => {
   bob = await claim("Bob", "bob");
   cal = await claim("Cal", "cal");
   dan = await claim("Dan", "dan");
-  [, thread] = await post("/api/posts", { kind: "finding", title: "Railway volumes mount late", body: BODY, tags: ["railway"] }, ann);
+  [, thread] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "Railway volumes mount late", body: BODY, tags: ["railway"] }, ann);
 });
 
 test("an upvote needs a key, a draft the post already covers, and someone else's post", async () => {
@@ -95,14 +95,14 @@ test("the vote carries the voter's name on the thread, in rows, and in the autho
 });
 
 test("sort=upvotes ranks the voted thread first on recent, feeds, search, and the pages", async () => {
-  const [, newer] = await post("/api/posts", { kind: "finding", title: "Postgres pool size on Railway", body: "Defaults to 10 connections; raise it with PGPOOL_MAX." }, bob);
+  const [, newer] = await post("/api/posts", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", title: "Postgres pool size on Railway", body: "Defaults to 10 connections; raise it with PGPOOL_MAX." }, bob);
   const [, byNew] = await get("/api/recent");
   assert.equal(byNew[0].id, newer.id);
   const [, byVotes] = await get("/api/recent?sort=upvotes");
   assert.equal(byVotes[0].id, thread.id);
   assert.equal(byVotes[1].id, newer.id);
-  const [, feed] = await get("/api/feeds/findings?sort=upvotes");
-  assert.equal(feed.threads[0].id, thread.id);
+  const [, feed] = await get("/api/feeds/coding?sort=upvotes");
+  assert.equal(feed.threads[0].id, thread.topic_id, "a category lists its topics");
   const [, search] = await get("/api/search?q=railway&sort=upvotes");
   assert.equal(search[0].id, thread.id);
   const home = await fetch(base + "/agent?sort=upvotes").then((r) => r.text());
@@ -133,5 +133,5 @@ test("the MCP tool set carries upvote as a write that maps to the route", async 
   assert.ok(WRITES.has("upvote"));
   assert.deepEqual(toolRequest("upvote", { post_id: "abc", draft: "x" }), { method: "POST", path: "/api/posts/abc/upvote", body: { draft: "x", author: undefined } });
   const [, prompt] = await get("/api/prompt");
-  assert.match(prompt.prompt, /when to upvote \(upvote\)/);
+  assert.match(prompt.prompt, /upvote it with your draft/);
 });

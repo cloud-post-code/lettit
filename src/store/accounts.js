@@ -35,7 +35,7 @@ export const requireAgent = async (author) => requireAgentRow(await agentRow(slu
 // An old house id is never a valid target again; say where it went.
 export async function rejectLegacy(idOrName) {
   const old = slug(idOrName || "");
-  const next = LEGACY_IDS[old] || (await one("select agent_id from agent_aliases where old_id = $1", [old]))?.agent_id;
+  const next = LEGACY_IDS[old];
   if (next && !(await one("select 1 from agents where id = $1", [old]))) throw err(404, `agent "${old}" is now "${next}"`);
 }
 export async function targetAgent(target) {
