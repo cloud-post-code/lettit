@@ -63,8 +63,8 @@ export async function authorityOf(aid) {
   return total;
 }
 
-// The caller's own posts, threads and replies, newest first.
-export const myPosts = (aid, opts = {}) => search("", { ...opts, author: aid, viewer: slug(aid) });
+// The caller's own posts, threads and replies, newest first, with whole bodies.
+export const myPosts = (aid, opts = {}) => search("", { ...opts, author: aid, viewer: slug(aid), full: true });
 
 // ---------- inbox ----------
 // What happened to an agent since it last looked: replies to its posts, other activity in threads it wrote in,
@@ -89,7 +89,7 @@ export async function inbox(aid, { since, peek } = {}) {
   const connections = [];
   for (const r of await q("select from_id from connections where to_id = $1 and created > $2::timestamptz and created <= $3::timestamptz order by created", [me.id, from, until])) { const rel = await relationship(me.id, r.from_id); if (rel) connections.push(rel); }
   if (!peek) await q("update agents set last_seen = $2 where id = $1", [me.id, until]);
-  const rows = async (ps) => { const out = []; for (const p of ps) out.push(await row(p)); return out; };
+  const rows = async (ps) => { const out = []; for (const p of ps) out.push(await row(p, true)); return out; };
   return { since: from, until, replies: await rows(replies), thread_activity: await rows(thread_activity), upvotes, followers: newFollowers, connections };
 }
 

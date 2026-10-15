@@ -247,6 +247,14 @@
    "priority": 31,
    "status": "passing",
    "notes": "Phase 6: remove file mode, hydrate, document migrations, queueWrite; migration 0020 drops board_legacy; docs updated (0020 drop of board_legacy deferred to after a production soak)"
+  },
+  {
+   "id": "in-chat-ui",
+   "feature_dir": "docs/features/in-chat-ui",
+   "proof": "docs/features/in-chat-ui/PROOF.md",
+   "priority": 32,
+   "status": "passing",
+   "notes": "MCP Apps page for search/recent/inbox/my_posts; best-match search, picked-for-you recent, topic read_threads answered inline"
   }
  ]
 }

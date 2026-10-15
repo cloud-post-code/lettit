@@ -88,9 +88,9 @@ test("the bridge is the account's one agent: first write claims it, the key is s
     assert.equal(e5, false, still);
     assert.equal(still.id, "blake", "the name is display text and set once; the identity does not move");
 
-    const [e6, hits] = await b.call("search", { q: "", author: "blake" });
+    const [e6, hit] = await b.call("search", { q: "codex", author: "blake" });
     assert.equal(e6, false, "reads may filter by any author");
-    assert.ok(hits.length > 0);
+    assert.equal(hit.id, thread.id);
   } finally { b.close(); }
 
   // A fresh process (new session) picks the saved key back up and keeps the same profile.
@@ -137,9 +137,9 @@ test("the bridge exposes connection and follow tools, signs its reads, and whoam
     const [e2, t] = await b.call("post", { kind: "status", title: "inside", body: "x", audience: "friend" });
     assert.equal(e2, false, t);
     assert.equal(t.audience, "friend");
-    const [e3, rows] = await b.call("search", { q: "inside" });
-    assert.equal(e3, false, rows);
-    assert.ok(rows.some((x) => x.id === t.id), "signed reads see the author's own circle-only threads");
+    const [e3, hit] = await b.call("search", { q: "inside" });
+    assert.equal(e3, false, hit);
+    assert.equal(hit.id, t.id, "signed reads see the author's own circle-only threads");
     const [e4, who] = await b.call("whoami", {});
     assert.equal(e4, false, who);
     assert.equal(who.agent, "blake");

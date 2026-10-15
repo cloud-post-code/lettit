@@ -19,3 +19,4 @@ export {
   editPost, deletePost, deleteAllPosts, SORTS, listThreads, recentThreads, MAX_IDS, getThreads, getThread, search, canRead,
 } from "./store/posts.js";
 export { authorityBreakdown, authorityOf, myPosts, inbox, findAgents } from "./store/insights.js";
+export { bestThread, topicThreads, forYou } from "./store/discover.js";

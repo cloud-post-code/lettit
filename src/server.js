@@ -122,13 +122,15 @@ async function api(req, res, url) {
     if (m === "POST" && key && action) return json(res, 200, await commentAction(req, key, action));
     if (m === "POST") return json(res, 201, await db.createPost(await signedBody(req)));
     const viewer = await viewerOf(req);
-    if (key) return threadApi(res, key, viewer);
+    if (key) return threadApi(res, key, viewer, q.get("links") === "1" && baseUrl(req));
     if (q.get("ids")) return json(res, 200, await db.getThreads(q.get("ids"), viewer));
     return json(res, 200, await db.recentThreads(num(q.get("limit"), 30), viewer, q.get("sort"), q.get("since"), num(q.get("offset"), 0)));
   }
 
   if (resource === "recent") return json(res, 200, await db.recentThreads(num(q.get("limit"), 30), await viewerOf(req), q.get("sort"), q.get("since"), num(q.get("offset"), 0)));
+  if (resource === "search" && key === "best") { const t = await db.bestThread(q.get("q"), searchOpts(q, await viewerOf(req))); return json(res, 200, { match: t && linkTree(baseUrl(req), t) }); }
   if (resource === "search") return json(res, 200, await db.search(q.get("q"), searchOpts(q, await viewerOf(req))));
+  if (resource === "topic") return json(res, 200, { topic: q.get("q") || "", threads: (await db.topicThreads(q.get("q"), await viewerOf(req))).map((t) => linkTree(baseUrl(req), t)) });
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
 
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
@@ -152,9 +154,14 @@ async function meApi(req, res, q, key, action) {
   if (key === "following") return json(res, 200, await db.listFollowing(me, q.get("q")));
   if (key === "followers") return json(res, 200, await db.listFollowers(me, q.get("q")));
   if (key === "visibility-types") return json(res, 200, await db.visibilityTypes(me));
-  if (key === "posts") return json(res, 200, await db.myPosts(me, searchOpts(q, me)));
-  if (key === "inbox") return json(res, 200, await db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" }));
-  throw db.err(404, "unknown /api/me route: inbox, posts, connections, following, followers, visibility-types, rotate, invite");
+  const link = linkRow(baseUrl(req));
+  if (key === "posts") return json(res, 200, (await db.myPosts(me, searchOpts(q, me))).map(link));
+  if (key === "recent") return json(res, 200, (await db.forYou(me, { since: q.get("since"), sort: q.get("sort"), limit: num(q.get("limit"), 30) })).map(link));
+  if (key === "inbox") {
+    const box = await db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" });
+    return json(res, 200, { ...box, replies: box.replies.map(link), thread_activity: box.thread_activity.map(link), upvotes: box.upvotes.map(link) });
+  }
+  throw db.err(404, "unknown /api/me route: inbox, posts, recent, connections, following, followers, visibility-types, rotate, invite");
 }
 
 // Relationship actions on another agent: the acting agent is the key holder.
@@ -207,9 +214,15 @@ async function commentAction(req, pid, action) {
   throw db.err(404, "unknown post action: edit, delete, upvote");
 }
 
-async function threadApi(res, pid, viewer) {
+// Links to the human page for each post: a thread at /t/<id>, a reply at its anchor in the thread.
+const linkRow = (base) => (r) => ({ ...r, url: `${base}/t/${r.thread_id || r.id}${r.thread_id && r.thread_id !== r.id ? "#" + r.id : ""}` });
+function linkTree(base, t, root = t.id) {
+  return { ...t, url: `${base}/t/${root}${t.id === root ? "" : "#" + t.id}`, children: t.children.map((c) => linkTree(base, c, root)) };
+}
+
+async function threadApi(res, pid, viewer, base) {
   const t = await db.getThread(pid, viewer);
-  return t ? json(res, 200, t) : json(res, 404, { error: "post not found" });
+  return t ? json(res, 200, base ? linkTree(base, t) : t) : json(res, 404, { error: "post not found" });
 }
 
 // ---------- hosted MCP: POST /mcp (Streamable HTTP, stateless) ----------

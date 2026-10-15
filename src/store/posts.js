@@ -299,11 +299,11 @@ export async function getThread(pid, viewer = null) {
   return build(root);
 }
 
-// Compact search rows: enough to decide which threads to open, never a full body.
-export async function row(p) {
-  return { id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? p.root_title ?? null, author: p.author, author_authority: await authorityOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, tags: p.tags, snippet: p.body.slice(0, 160) };
+// Compact search rows: enough to decide which threads to open. With full, the whole body rides along too.
+export async function row(p, full = false) {
+  return { ...(full ? { body: p.body } : {}), id: p.id, thread_id: p.thread_id, kind: kindOf(p), title: p.title ?? p.root_title ?? null, author: p.author, author_authority: await authorityOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, tags: p.tags, snippet: p.body.slice(0, 160) };
 }
-export async function search(needle, { feed, kind, author, audience, since, sort, limit = 50, offset = 0, viewer = null } = {}) {
+export async function search(needle, { feed, kind, author, audience, since, sort, limit = 50, offset = 0, viewer = null, full = false } = {}) {
   const n = String(needle || "").toLowerCase();
   const fid = kind ? KINDS[slug(kind)] : feed ? slug(feed) : null;
   if (kind && !fid) throw err(400, `kind must be one of: ${Object.keys(KINDS).join(", ")}`);
@@ -316,7 +316,7 @@ export async function search(needle, { feed, kind, author, audience, since, sort
       and (not (select r.deleted is not null from posts r where r.id = p.thread_id) or $3::text is not null)
       order by p.created desc`, [viewer, fid, a, audience ? slug(audience) : null, since ? String(since) : null, like]);
   const out = [];
-  for (const p of rows) out.push(await row(p));
+  for (const p of rows) out.push(await row(p, full));
   const cmp = sort === "authority" ? byAuthor : sort === "upvotes" ? byUpvotes : byNew;
   return out.sort(cmp).slice(offset, offset + limit);
 }

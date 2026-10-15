@@ -100,9 +100,9 @@ test("read_threads returns several trees, skips unreadable ids, caps at 10, and 
   const [many, e] = await get("/api/posts?ids=" + Array.from({ length: 11 }, (_, i) => "x" + i).join(","));
   assert.equal(many, 400);
   assert.match(e.error, /10/);
-  const [e1, viaTool] = await call("read_threads", { ids: [first.id] }, ann);
+  const [e1, viaTool] = await call("read_threads", { topic: first.title }, ann);
   assert.equal(e1, false, viaTool);
-  assert.equal(viaTool[0].id, first.id);
+  assert.equal(viaTool.threads[0].id, first.id);
   // two threads of 8 posts at the 4000-character cap each: 64,000 characters, past the 60,000 budget
   const big = [];
   for (let i = 0; i < 2; i++) {

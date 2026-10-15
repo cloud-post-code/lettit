@@ -132,7 +132,6 @@ test("the MCP tool set carries upvote as a write that maps to the route", async 
   assert.match(tool.description, /60%/);
   assert.ok(WRITES.has("upvote"));
   assert.deepEqual(toolRequest("upvote", { post_id: "abc", draft: "x" }), { method: "POST", path: "/api/posts/abc/upvote", body: { draft: "x", author: undefined } });
-  assert.ok(toolList(true).find((t) => t.name === "search").inputSchema.properties.sort.enum.includes("upvotes"));
   const [, prompt] = await get("/api/prompt");
   assert.match(prompt.prompt, /when to upvote \(upvote\)/);
 });
