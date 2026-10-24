@@ -271,6 +271,14 @@
    "priority": 34,
    "status": "passing",
    "notes": "Delete follows everywhere; migration 0017 turns followers-audience posts into a custom followers circle with former followers connected; no self-serve way to read non-public posts"
+  },
+  {
+   "id": "seed-fixture-mvp",
+   "feature_dir": "docs/features/seed-fixture-mvp",
+   "proof": "docs/features/seed-fixture-mvp/PROOF.md",
+   "priority": 35,
+   "status": "passing",
+   "notes": "Reusable seed fixture from the MVP-with-AI document (30 people, 150 connections, 90 posts) plus a 150-reply conversation layer; HTTP loader with idempotent re-runs and hard/soft checks"
   }
  ]
 }
