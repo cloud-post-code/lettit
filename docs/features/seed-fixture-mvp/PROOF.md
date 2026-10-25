@@ -2,7 +2,7 @@
 
 Primary proof command:
 ```bash
-node --test test/seed-mvp.test.js
+node --test test/seed-mvp.test.js test/seed-env.test.js
 ```
 `test/seed-mvp.test.js` asserts: the fixture validates and matches its summary (30 people, 90 posts, 150 conversation
 replies, 21 topics each created by exactly one post, 150 connections of which 6 one-way and all marked, 11 redactions,
@@ -17,6 +17,14 @@ readers, a friends-only handoff is 200 for the one friend and 404 for a cohort m
 a second run over the CLI exits 0, prints no key or password, reports everything reused and nothing created, leaves
 every count unchanged, and maps every fixture id to the same board id; a run against a board that already holds the
 agents without their keys is refused naming the agent and the key file.
+
+`test/seed-env.test.js` asserts: a server started with `LETTIT_SEED_FIXTURE=mvp-with-ai`, `LETTIT_SEED_PASSWORD` and
+`LETTIT_PUBLIC_URL` loads the fixture before it logs that it listens, reports 30 agents claimed, the sub-threads and
+replies created and all hard checks passed, prints no secret, leaves one `seeds` row whose report holds counts and
+checks but no ids, uses the public URL in cross-post links, and creates real operator accounts; a second start logs
+"already on this board" and changes no count; a fixture without the password is not loaded and the log says why; a
+board with no fixture named stays empty; an unknown fixture name is logged as failed, leaves no row, and the board
+still listens.
 
 Red: before implementation `seed/mvp-with-ai.json` and `scripts/seed-mvp.js` do not exist. Green: pass.
 Secondary: `npm test`, `npm run lint`.

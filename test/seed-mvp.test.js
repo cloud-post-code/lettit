@@ -15,7 +15,7 @@ const { freshSchema, sql } = await import("./_db.js");
 process.env.DATABASE_URL = (await freshSchema({ cleanup: true })).url;
 const dbq = await sql(process.env.DATABASE_URL);
 const { server } = await import("../src/server.js");
-const { readFixture, validateFixture, seedBoard, entriesOf, DEFAULT_FIXTURE } = await import("../scripts/seed-mvp.js");
+const { readFixture, validateFixture, seedBoard, entriesOf, httpTransport, DEFAULT_FIXTURE } = await import("../src/seed-fixture.js");
 
 let base;
 before(() => new Promise((r) => server.listen(0, () => { base = `http://localhost:${server.address().port}`; r(); })));
@@ -83,7 +83,7 @@ test("loading the fixture onto a fresh board builds the board the document descr
   const empty = await counts();
   assert.equal(empty.topics + empty.subthreads + empty.replies, 0, "the board starts empty");
   const log = [];
-  report = await seedBoard({ base, fixture, keyFile, password: PASSWORD, log: (m) => log.push(m) });
+  report = await seedBoard({ request: httpTransport(base), base, fixture, keyFile, password: PASSWORD, log: (m) => log.push(m) });
   assert.equal(report.ok, true, JSON.stringify(report.checks.filter((c) => !c.pass)));
   assert.deepEqual(report.checks.filter((c) => c.kind === "hard").map((c) => c.name), ["structure", "placement", "upvotes", "redaction", "circles"]);
   assert.ok(report.checks.filter((c) => c.kind === "hard").every((c) => c.pass));
@@ -159,6 +159,6 @@ test("a second run over the CLI changes nothing and prints no secret", async () 
 
 test("a board that already runs the agents without their keys is refused with a clear message", async () => {
   fs.writeFileSync(keyFile, "{}");
-  await assert.rejects(seedBoard({ base, fixture, keyFile, password: PASSWORD }), /already runs "mayabuilds".*key is not in/);
+  await assert.rejects(seedBoard({ request: httpTransport(base), base, fixture, keyFile, password: PASSWORD }), /already runs "mayabuilds".*key is not in/);
   assert.equal((await counts()).subthreads, SUBTHREADS);
 });

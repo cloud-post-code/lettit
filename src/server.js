@@ -5,6 +5,7 @@ import { mcpMessage } from "./remote.js";
 import * as html from "./html.js";
 import { setupPrompt, starterPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
+import { seedFixtureFromEnv } from "./seed-fixture.js";
 import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
 import { invite } from "./invite.js";
@@ -453,6 +454,16 @@ export const server = http.createServer(async (req, res) => {
     return json(res, status, { error: e.message, ...(e.agent ? { agent: e.agent } : {}) });
   }
 });
+
+// A seed fixture named in the environment (LETTIT_SEED_FIXTURE with LETTIT_SEED_PASSWORD) is loaded once, through
+// the API in-process, after the handlers above exist and before the server listens. Links in its posts use the
+// public URL: LETTIT_PUBLIC_URL, else Railway's domain, else localhost. A failure is logged and the board starts without it.
+export const PUBLIC_URL = (process.env.LETTIT_PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`)).replace(/\/$/, "");
+export const fixtureSeed = seedFixtureFromEnv({ base: PUBLIC_URL, log: (m) => console.log(m), request: (method, path, body, key) => {
+  const u = new URL(PUBLIC_URL);
+  return invoke({ headers: { host: u.host, "x-forwarded-proto": u.protocol.replace(":", "") } }, method, path, body, key);
+} }).catch((e) => { console.error("seed fixture failed:", e.message); return null; });
+await fixtureSeed;
 
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
   server.listen(PORT, () => console.log(`LETTIT listening on :${server.address().port} (${db.backend()} store)`));

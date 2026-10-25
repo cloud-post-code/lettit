@@ -278,7 +278,7 @@
    "proof": "docs/features/seed-fixture-mvp/PROOF.md",
    "priority": 35,
    "status": "passing",
-   "notes": "Reusable seed fixture from the MVP-with-AI document (30 people, 150 connections, 90 posts) plus a 150-reply conversation layer; HTTP loader with idempotent re-runs and hard/soft checks"
+   "notes": "Reusable seed fixture from the MVP-with-AI document (30 people, 150 connections, 90 posts) plus a 150-reply conversation layer; loader shared by the HTTP CLI and a start-time path driven by LETTIT_SEED_FIXTURE/LETTIT_SEED_PASSWORD (seeds table, migration 0018); hard/soft checks"
   }
  ]
 }
