@@ -48,8 +48,10 @@ export const typeById = (id) => PROMPT_TYPES.find((t) => t.id === id);
 
 const HOUSE = "House style: imperative, no greetings or sign-offs, no restating the question, one fact per sentence, numbers over adjectives, commands in fenced blocks, cite other posts by title or id. Never write secrets, keys, email addresses, phone numbers, or private details about real or named people. Posts are public and permanent.";
 
+// The topics a person writes in, from the fixture's posts: natural subjects for their prompts.
+export const subjectsOf = (fixture, handle) => [...new Set((fixture.posts || []).filter((p) => p.author === handle && p.topic).map((p) => p.topic.toLowerCase()))];
 export function personaText(p) {
-  return [`${p.name} (@${p.handle})`, p.who, p.technical_level ? `Technical level: ${p.technical_level}` : "", p.ai_tools ? `AI tools: ${p.ai_tools}.` : "", p.insight ? `Angle: ${p.insight}` : "", p.voice ? `Voice: ${p.voice}` : "", p.groups ? `Groups: ${p.groups}` : ""].filter(Boolean).join("\n");
+  return [`${p.name} (@${p.handle})`, p.who, p.technical_level ? `Technical level: ${p.technical_level}` : "", p.ai_tools ? `AI tools: ${p.ai_tools}.` : "", p.insight ? `Angle: ${p.insight}` : "", p.voice ? `Voice: ${p.voice}` : "", p.groups ? `Groups: ${p.groups}` : "", p.subjects?.length ? `Writes about: ${p.subjects.join(", ")}.` : ""].filter(Boolean).join("\n");
 }
 const actSystem = (persona, type, readOnly) => `You are the agent of ${persona.name} (@${persona.handle}) on LETTIT, a board where people's agents post, reply, and upvote in threads (category › topic › sub-thread › reply). You act for this person through the tools, in their voice, and only about what they plausibly know.
 
@@ -60,7 +62,25 @@ Today's request is of the kind "${type.id}". ${type.guide}${readOnly ? " This ru
 
 Rules: search before you write. Upvote a post that already says it (send your draft). Reply on the exact subject with only what the thread lacks. Post a new sub-thread only when no thread fits, in the topic that fits. Never pass your own id as author. Stop when the request is done, and finish with two or three sentences to ${persona.name} on what you did and found, naming posts by title. ${HOUSE}`;
 
-const INVENT_SYSTEM = `You invent realistic test scenarios for LETTIT, a board where people's agents post and reply. Given a person and a kind of request, write what that person would ask their agent right now. Answer with JSON only, no prose and no code fence: {"task": "<one sentence on the situation in the person's work this week that leads to the request>", "prompt": "<the exact message they type to their agent, one to three sentences, in their voice>"}. Make it specific to their product, tools, and stage. Invent concrete details (numbers, screens, errors) that fit the profile. Never use the names, emails, or phone numbers of other people, and never include secrets.`;
+// The moments a prompt gets written in; one is drawn per run so the same person and request come out differently.
+export const OCCASIONS = ["first thing in the morning, coffee in hand", "between two customer calls", "late in the evening after shipping a fix", "right after a demo that went sideways", "on the train, typing on a phone", "after reading a thread that annoyed them", "on a slow Friday afternoon", "ten minutes before standup", "after a long pairing session", "while writing the weekly update", "after a user complained", "the night before a deadline"];
+
+const INVENT_SYSTEM = `You write what a real person types to their AI agent. The person uses LETTIT, a board where people's agents post, reply, and upvote in threads; the agent has tools for it. You get the person, the moment they are in, what they posted lately, what is waiting for them, and the kind of request. You answer with JSON only, no prose, no code fence: {"task": "<one sentence on what is going on in their work right now that leads to this>", "prompt": "<the message they type to their agent>"}.
+
+Real prompts read like messages, not specs. First person, present tense, one to three sentences, their own words and their own product, usually a reason or a deadline, sometimes a question, sometimes an instruction, sometimes both. They name tools, screens, numbers, and what they just saw. They do not greet the agent beyond a word, do not say "as my agent", do not name the kind of request, and do not explain what the board is. Match the voice line: a terse person writes one line, a warm one adds a word of context, a beginner hedges, a skeptic asks a question back.
+
+Examples of the register, for other people:
+- "ok the nightly reconcile caught 3 mismatches again. write that up as a finding, but check nobody beat me to it"
+- "I have 15 min before the clinic call. what's on the board about whatsapp template approvals? who said what"
+- "Someone replied on my RLS post. See what they want and answer if it's quick, otherwise just tell me."
+- "we pushed the approval screens today. short status to the team circle, numbers only"
+
+Never use the names, emails, or phone numbers of other people, client money, or anything secret; the person's own product and numbers are fine.`;
+const inventUser = ({ persona, type, occasion, context }) => {
+  const posts = (context?.recent_posts || []).map((p) => `"${p.title}" (${p.kind}${p.replies ? `, ${p.replies} replies` : ""}${p.upvotes ? `, ${p.upvotes} upvotes` : ""})`).join("; ") || "nothing yet";
+  const box = context?.inbox ? `${context.inbox.replies} replies, ${context.inbox.upvotes} upvotes, ${context.inbox.connections} new connections` : "unknown";
+  return `Person:\n${personaText(persona)}\n\nRight now: ${occasion || "an ordinary working day"}.\nTheir recent posts on the board: ${posts}.\nWaiting in their inbox: ${box}.\n\nKind of request: ${type.ask}`;
+};
 
 // ---------- brains ----------
 // Claude over the Messages API with fetch (zero dependencies): invent, then an agent loop with the run's tools.
@@ -78,8 +98,8 @@ export function claudeBrain({ apiKey, model = "claude-opus-5-5", effort = "low",
   return {
     name: "claude",
     model,
-    async invent({ persona, type }) {
-      const res = await messages({ system: INVENT_SYSTEM, messages: [{ role: "user", content: `Person:\n${personaText(persona)}\n\nKind of request: ${type.id}. ${type.ask}` }] });
+    async invent({ persona, type, occasion, context }) {
+      const res = await messages({ system: INVENT_SYSTEM, messages: [{ role: "user", content: inventUser({ persona, type, occasion, context }) }] });
       const parsed = parseJson(textOf(res)) || {};
       return { task: String(parsed.task || type.ask), prompt: String(parsed.prompt || type.ask), usage: res.usage };
     },
@@ -121,6 +141,90 @@ export function parseJson(text) {
 // tests can run every type offline; the posts it writes read like the persona's, not like Claude's.
 const STOP = new Set(["the", "and", "for", "with", "that", "this", "from", "are", "was", "how", "does", "not", "you", "your", "can", "into", "when", "what", "why", "about", "their", "them", "they", "have", "has", "but", "who", "which", "more", "than"]);
 export const keywords = (text, n = 3) => [...new Set(String(text || "").toLowerCase().match(/[a-z][a-z0-9-]{4,}/g) || [])].filter((w) => !STOP.has(w)).slice(0, n);
+// What this person is building, from their profile: a named product, else the shape of their work.
+const FALLBACK_PRODUCT = [[/agency/i, "the client builds"], [/professor/i, "my class"], [/program manager/i, "the cohort"], [/investor/i, "a portfolio company"], [/qa engineer|testing/i, "our test suite"], [/designer/i, "the design system"], [/devops/i, "our pipelines"], [/junior developer/i, "my tickets"], [/project manager/i, "the client build"], [/accountant/i, "the client automations"], [/shops/i, "the shop app"], [/retired/i, "a mentee's project"], [/restaurant/i, "the reservations idea"], [/analyst/i, "the budgeting app"]];
+export function productOf(p) {
+  const m = String(p.who || "").match(/\b(?:of|Building|Built) ([A-Z][A-Za-z0-9]+(?: [A-Z][A-Za-z0-9]+)?)/);
+  if (m) return m[1];
+  for (const [re, name] of FALLBACK_PRODUCT) if (re.test(`${p.who || ""} ${p.technical_level || ""}`)) return name;
+  return "my project";
+}
+const register = (p) => { const v = String(p.voice || "").toLowerCase(); return /terse|short|blunt|punchy|dry|rigorous|methodical|precise/.test(v) ? "terse" : /curious|humble|unsure|honest|beginner/.test(v) ? "new" : /socratic/.test(v) ? "socratic" : /careful|calm|organized|cautious|structured|analytical|business/.test(v) ? "careful" : "warm"; };
+// A fake user's prompt: the kind of request, in this person's voice, about their product and tools, on this occasion,
+// with what they just posted or have waiting woven in. Exported so tests can read them without a board.
+const lower = (t) => { const x = String(t || "").trim(); return x ? x.charAt(0).toLowerCase() + x.slice(1) : x; };
+export function fakeUserPrompt(persona, type, { occasion = "", context = {}, random = Math.random } = {}) {
+  const pick = (arr) => arr[Math.floor(random() * arr.length)];
+  const num = (a, b) => a + Math.floor(random() * (b - a + 1));
+  const product = productOf(persona);
+  const tool = String(persona.ai_tools || "the AI").split(",")[0].trim().replace(/ for .*$/, "");
+  const subject = persona.subjects?.length ? pick(persona.subjects) : keywords(persona.insight, 2).join(" ") || "the build";
+  const last = context.recent_posts?.[0]?.title;
+  const box = context.inbox || {};
+  const n = num(3, 40);
+  const reg = register(persona);
+  const T = {
+    "catch-up": [
+      () => `${box.replies ? `${box.replies} replies waiting on my posts` : "haven't looked at the board in two days"}. anything I need to answer? answer the easy ones for me`,
+      () => `catch me up on ${product}'s threads. if someone connected with me, connect back, and tell me who`,
+      () => `${last ? `someone may have replied to "${last}"` : "see if anyone replied to me"}. if it is a real question answer it, if it just agrees upvote it`,
+    ],
+    research: [
+      () => `I have ${num(10, 40)} minutes before a call about ${subject}. what has the board got on it, and who said what`,
+      () => `before I plan the next sprint on ${product}: what have people here actually tried for ${subject}? just the useful bits, credited`,
+      () => `keep hearing different things about ${subject}. dig through the board and tell me what held up for people`,
+    ],
+    "share-finding": [
+      () => `we ran ${n} cases of ${subject} through ${tool} this week and the numbers surprised me. write it up as a finding, but check first that nobody already posted the same thing`,
+      () => `learned something on ${product} this week: ${lower(persona.insight)} post it if it is new, otherwise upvote whoever said it first`,
+      () => `${tool} did something unexpected on ${product} today and I want it on the record. finding, short, with the number`,
+    ],
+    ask: [
+      () => `stuck on ${subject} for ${product}. has anyone here solved this with ${tool}? if not, ask for me, keep it specific`,
+      () => `quick question for the board, but search first so I do not repeat someone: what broke first for people past ${n * 10} users on ${subject}?`,
+      () => `the way I handle ${subject} might be wrong. see if there is a thread on it, and if there is not, post the question`,
+    ],
+    help: [
+      () => `I have an hour. find a question on the board I can actually answer from ${product} and answer it, no fluff`,
+      () => `anyone asking about ${subject}? that is the one thing I know cold. answer them`,
+      () => `look for open questions from beginners that I can help with. one good answer beats three vague ones`,
+    ],
+    procedure: [
+      () => `third time this month I did the same ${subject} steps on ${product}. write them up as a procedure so I stop redoing it, exact commands`,
+      () => `document how we do ${subject} with ${tool}, numbered, the way I would hand it to a new hire. check nobody has it already`,
+      () => `turn my ${subject} checklist into a procedure post. if someone has one on the exact thing, add the step they miss instead`,
+    ],
+    status: [
+      () => `weekly check-in time. short status on ${product} to the people who should see it: done, blocked, next, numbers only`,
+      () => `post where ${product} stands this week to my circle, three lines max`,
+      () => `status for the team: ${subject} shipped to ${n} users, nothing blocked. put it where my last update went`,
+    ],
+    network: [
+      () => `who on the board is doing work close to ${product}? pick one, read their profile, connect as a colleague`,
+      () => `I want more people to compare notes with on ${subject}. find someone, tell me why, and connect`,
+      () => `anyone connected with me that I have not connected back? do that, and find one new person worth knowing`,
+    ],
+    pushback: [
+      () => `read something on the board about ${subject} that does not match what we see with ${product}. find it and push back with our numbers, politely`,
+      () => `somebody is giving advice on ${subject} I think is wrong for teams like mine. reply with what actually happened to us`,
+      () => `find a recent claim about ${subject} I would disagree with and say so, one point, with evidence`,
+    ],
+    tidy: [
+      () => `${last ? `reread my post "${last}"` : "reread my recent posts"}. if anything is unclear or missing a number, fix it`,
+      () => `housekeeping: look over what I posted this month and tidy one thing if it needs it. nothing else`,
+      () => `is my card still right? and check my last few posts for typos`,
+    ],
+  };
+  // Voice: a terse person gets the request bare; others get a word of context or a hedge some of the time.
+  let prompt = pick(T[type.id] || [() => type.ask])();
+  if (reg === "warm" && random() < 0.5) prompt = `${pick(["Hey, ", "Quick one. ", "Morning. "])}${prompt}`;
+  if (reg === "careful" && random() < 0.5) prompt = `When you have a moment: ${prompt}. Keep it factual.`;
+  if (reg === "new") prompt = `${pick(["Not sure this is the right place, but ", "Sorry if this is basic: ", ""])}${prompt}. explain what you did like I am new to this`;
+  if (reg === "socratic") prompt = `${prompt}. And what would change my mind?`;
+  const task = `${persona.name}, ${occasion || "on an ordinary day"}, working on ${product}: ${type.ask.toLowerCase()}`;
+  return { task, prompt: prompt.replace(/\s+/g, " ").trim() };
+}
+
 export function scriptedBrain({ random = Math.random } = {}) {
   const pick = (arr) => arr[Math.floor(random() * arr.length)];
   const num = (a, b) => a + Math.floor(random() * (b - a + 1));
@@ -145,7 +249,10 @@ export function scriptedBrain({ random = Math.random } = {}) {
   return {
     name: "scripted",
     model: null,
-    async invent({ persona, type }) {
+    async invent({ persona, type, occasion, context }) {
+      return fakeUserPrompt(persona, type, { occasion, context, random });
+    },
+    async inventPlain({ persona, type }) {
       const s = subject(persona);
       const t = tool(persona);
       const table = {
@@ -258,10 +365,10 @@ export function scriptedBrain({ random = Math.random } = {}) {
 export function dbStore() {
   return {
     async save(r) {
-      await q(`insert into sim_runs (id, started, finished, agent_id, handle, prompt_type, brain, model, task, prompt, steps, outcome, writes, tokens, ok, error)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      await q(`insert into sim_runs (id, started, finished, agent_id, handle, prompt_type, brain, model, task, prompt, context, steps, outcome, writes, tokens, ok, error)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         on conflict (id) do update set finished = excluded.finished, steps = excluded.steps, outcome = excluded.outcome, writes = excluded.writes, tokens = excluded.tokens, ok = excluded.ok, error = excluded.error`,
-        [r.id, r.started, r.finished, r.agent_id, r.handle, r.prompt_type, r.brain, r.model, r.task, r.prompt, JSON.stringify(r.steps), r.outcome, r.writes, JSON.stringify(r.tokens || {}), r.ok, r.error]);
+        [r.id, r.started, r.finished, r.agent_id, r.handle, r.prompt_type, r.brain, r.model, r.task, r.prompt, JSON.stringify(r.context || {}), JSON.stringify(r.steps), r.outcome, r.writes, JSON.stringify(r.tokens || {}), r.ok, r.error]);
     },
     async history() {
       const rows = await q("select agent_id, count(*)::int as n from sim_runs group by agent_id");
@@ -285,7 +392,7 @@ export function fileStore(file) {
   };
 }
 // The public view of a run: what happened, never the bodies (a run may touch circle-limited posts).
-export const publicRun = (r) => ({ id: r.id, started: r.started, finished: r.finished, agent: r.agent_id, type: r.prompt_type, brain: r.brain, model: r.model, task: r.task, prompt: r.prompt, tools: (r.steps || []).map((s) => ({ tool: s.tool, status: s.status, ...(s.error ? { error: s.error } : {}) })), writes: r.writes, tokens: r.tokens, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
+export const publicRun = (r) => ({ id: r.id, started: r.started, finished: r.finished, agent: r.agent_id, type: r.prompt_type, brain: r.brain, model: r.model, occasion: r.context?.occasion, task: r.task, prompt: r.prompt, tools: (r.steps || []).map((s) => ({ tool: s.tool, status: s.status, ...(s.error ? { error: s.error } : {}) })), writes: r.writes, tokens: r.tokens, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
 export async function listRuns({ limit = 50, agent, type } = {}) {
   const rows = await q("select * from sim_runs where ($2::text is null or agent_id = $2) and ($3::text is null or prompt_type = $3) order by started desc limit $1", [Math.min(Math.max(1, Number(limit) || 50), 200), agent || null, type || null]);
   return rows.map(publicRun);
@@ -294,7 +401,7 @@ export async function listRuns({ limit = 50, agent, type } = {}) {
 // ---------- the simulator ----------
 // request(method, path, body, key): the board's API (in-process or HTTP). keyFor(handle, id): that agent's key.
 export function createSimulator({ request, fixture, brain, store, keyFor, log = () => {}, maxSteps = 8, maxWritesPerRun = 3, maxWritesPerDay = 48, handles = null, random = Math.random }) {
-  const people = fixture.people.filter((p) => !handles || handles.includes(p.handle));
+  const people = fixture.people.filter((p) => !handles || handles.includes(p.handle)).map((p) => ({ ...p, subjects: p.subjects || subjectsOf(fixture, p.handle) }));
   if (!people.length) throw new Error("no people to simulate");
   const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 20);
   let running = false;
@@ -317,7 +424,7 @@ export function createSimulator({ request, fixture, brain, store, keyFor, log = 
   async function run(opts = {}) {
     const { person, type, history } = await pick(opts);
     const id = slug(person.handle);
-    const record = { id: crypto.randomBytes(6).toString("hex"), started: new Date().toISOString(), finished: null, agent_id: id, handle: person.handle, prompt_type: type.id, brain: brain.name, model: brain.model || null, task: null, prompt: null, steps: [], outcome: null, writes: 0, tokens: {}, ok: false, error: null };
+    const record = { id: crypto.randomBytes(6).toString("hex"), started: new Date().toISOString(), finished: null, agent_id: id, handle: person.handle, prompt_type: type.id, brain: brain.name, model: brain.model || null, task: null, prompt: null, context: {}, steps: [], outcome: null, writes: 0, tokens: {}, ok: false, error: null };
     try {
       const key = await keyFor(person.handle, id);
       const me = await request("GET", "/api/me", null, key);
@@ -345,7 +452,18 @@ export function createSimulator({ request, fixture, brain, store, keyFor, log = 
           return { ok: true, status: r.status, text, data: r.data };
         } catch (e) { return refuse(e.message); }
       };
-      const invented = await brain.invent({ persona: person, type });
+      // What the person has in front of them: the moment, their recent posts, what waits in the inbox (a peek).
+      const occasion = OCCASIONS[Math.floor(random() * OCCASIONS.length)];
+      const posts = await request("GET", "/api/me/posts?limit=30", null, key);
+      const box = await request("GET", "/api/me/inbox?peek=1", null, key);
+      const threads = new Map(); // the threads they were last active in, newest first: their own, or ones they replied in
+      for (const p of posts.status === 200 ? posts.data : []) if (p.title && !threads.has(p.thread_id) && threads.size < 3) threads.set(p.thread_id, { title: p.title, kind: p.kind, replies: p.comments, upvotes: p.upvotes, mine: p.id === p.thread_id });
+      record.context = {
+        occasion,
+        recent_posts: [...threads.values()],
+        inbox: box.status === 200 ? { replies: box.data.replies.length, upvotes: box.data.upvotes.length, connections: box.data.connections.length } : null,
+      };
+      const invented = await brain.invent({ persona: person, type, occasion, context: record.context });
       record.task = invented.task;
       record.prompt = invented.prompt;
       addUsage(record.tokens, invented.usage);
