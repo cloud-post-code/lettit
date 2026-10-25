@@ -49,8 +49,8 @@ test("the calendar covers the year: 52 weeks, every month, a beat per persona pe
 
 let state;
 test("a short year: seed into week one, runs at simulated moments, writes backdated, memory grows, pause and resume", async () => {
-  const sim = createSimulator({ request: httpTransport(base), fixture, brain: scriptedBrain({ random: seeded(3) }), store: dbStore(), keyFor: async (h) => keys[h].key, random: seeded(5), weights: calendar.weights, maxWritesPerDay: Number.MAX_SAFE_INTEGER });
   const logs = [];
+  const sim = createSimulator({ request: httpTransport(base), fixture, brain: scriptedBrain({ random: seeded(3) }), store: dbStore(), keyFor: async (h) => keys[h].key, random: seeded(5), weights: calendar.weights, maxWritesPerDay: Number.MAX_SAFE_INTEGER, log: (m) => logs.push(m) });
   const start = weekStart(calendar, 0).toISOString(), week2 = weekStart(calendar, 1).toISOString(), week3 = weekStart(calendar, 2).toISOString();
   // Pause as soon as the second week begins.
   let stop = false;
@@ -78,14 +78,25 @@ test("a short year: seed into week one, runs at simulated moments, writes backda
   const again = await runBackfill({ sim, store: dbStore(), calendar, log: (m) => logs.push(m), weeks: 2, postsPerWeek: 6 });
   assert.equal(again.done, true);
   assert.match(logs.at(-1), /already complete/);
+  // Asked for a third week, the finished year continues from week three instead of stopping.
+  const extended = await runBackfill({ sim, store: dbStore(), calendar, log: (m) => logs.push(m), weeks: 3, postsPerWeek: 4 });
+  assert.equal(extended.done, true);
+  assert.equal(extended.week, 3);
+  assert.ok(logs.some((m) => /extending from week 3 to 3 weeks/.test(m)));
+  assert.ok(logs.some((m) => /week 3\/3 done/.test(m)));
+  const week4 = weekStart(calendar, 3).toISOString();
+  const [{ n: third }] = await dbq("select count(*)::int as n from sim_runs where week = 3 and sim_at >= $1 and sim_at < $2", [week3, week4]);
+  assert.ok(third >= 2);
+  assert.ok(logs.some((m) => /^sim \S+ as \S+: ok .* · "[^"]+/.test(m)), "the run line carries the prompt");
   // Every run carries its simulated moment inside its week, and what it wrote is dated there.
   const runs = await dbq("select id, week, sim_at, steps, prompt, context, ok, agent_id, writes from sim_runs where sim_at is not null order by sim_at");
   assert.ok(runs.length >= 6, String(runs.length));
   let dated = 0;
   for (const r of runs) {
-    assert.ok([1, 2].includes(r.week));
+    assert.ok([1, 2, 3].includes(r.week));
     const at = new Date(r.sim_at).toISOString();
-    assert.ok(at >= (r.week === 1 ? start : week2) && at < (r.week === 1 ? week2 : week3), `${r.week} ${at}`);
+    const bounds = [[start, week2], [week2, week3], [week3, weekStart(calendar, 3).toISOString()]][r.week - 1];
+    assert.ok(at >= bounds[0] && at < bounds[1], `${r.week} ${at}`);
     assert.ok(!r.prompt.includes('"'), `no quoted title in: ${r.prompt}`);
     assert.ok(r.context.beat, "the quarter's beat rode along");
     for (const step of r.steps) if ((step.tool === "post" || step.tool === "reply") && step.status === 201) {
@@ -96,8 +107,8 @@ test("a short year: seed into week one, runs at simulated moments, writes backda
       assert.ok(diff < 15 * 60_000, `post dated within its run's moment (${diff} ms)`);
     }
   }
-  const [{ n: posted }] = await dbq("select count(*)::int as n from posts where author_id = any($1::text[]) and created >= $2 and created < $3", [seedIds, start, week3]);
-  assert.ok(posted >= 12, `the two weeks hold at least 12 new posts (${posted})`);
+  const [{ n: posted }] = await dbq("select count(*)::int as n from posts where author_id = any($1::text[]) and created >= $2 and created < $3", [seedIds, start, weekStart(calendar, 3).toISOString()]);
+  assert.ok(posted >= 16, `the three weeks hold at least 16 new posts (${posted})`);
   // People got to know each other: memories name others with how and when.
   const personas = await dbq("select handle, agent_id, memory from sim_personas");
   assert.ok(personas.length >= 3);
@@ -108,6 +119,7 @@ test("a short year: seed into week one, runs at simulated moments, writes backda
   const status = await fetch(`${base}/api/sim/backfill`).then((r) => r.json());
   assert.equal(status.years[0].name, "year-2025-2026");
   assert.equal(status.years[0].done, true);
+  assert.equal(status.years[0].week, 3);
   assert.equal(status.years[0].config.seed_shifted, true);
   assert.ok(status.totals.runs >= runs.length && status.totals.first_sim_at);
   const week1 = await fetch(`${base}/api/sim/runs?week=1&limit=100`).then((r) => r.json());

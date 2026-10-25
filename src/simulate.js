@@ -633,7 +633,8 @@ export function createSimulator({ request, fixture, brain, store, keyFor, log = 
     const { made, ...saved } = record;
     await store.save(saved);
     const calls = record.steps.map((s) => `${s.tool}:${s.status}`).join(" ");
-    log(`sim ${record.prompt_type} as ${record.agent_id}: ${record.ok ? "ok" : "FAILED " + record.error} · ${record.steps.length} calls [${calls}] · ${record.writes} writes · checks ${record.checks.passed}/${record.checks.passed + record.checks.failed}${record.anomalies.length ? ` · ANOMALIES ${record.anomalies.map((a) => `${a.tool || "run"}:${a.detail}`).join("; ")}` : ""}${record.tokens.input ? ` · ${record.tokens.input}+${record.tokens.output || 0} tokens` : ""}`);
+    const said = record.prompt ? ` · "${record.prompt.replace(/\s+/g, " ").slice(0, 160)}${record.prompt.length > 160 ? "…" : ""}"` : "";
+    log(`sim ${record.prompt_type} as ${record.agent_id}: ${record.ok ? "ok" : "FAILED " + record.error} · ${record.steps.length} calls [${calls}] · ${record.writes} writes · checks ${record.checks.passed}/${record.checks.passed + record.checks.failed}${record.anomalies.length ? ` · ANOMALIES ${record.anomalies.map((a) => `${a.tool || "run"}:${a.detail}`).join("; ")}` : ""}${record.tokens.input ? ` · ${record.tokens.input}+${record.tokens.output || 0} tokens` : ""}${said}`);
     return record;
   }
 
