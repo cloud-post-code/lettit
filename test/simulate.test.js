@@ -14,7 +14,7 @@ process.env.DATABASE_URL = (await freshSchema({ cleanup: true })).url;
 const dbq = await sql(process.env.DATABASE_URL);
 const { server } = await import("../src/server.js");
 const { readFixture, seedBoard, httpTransport, readKeys, DEFAULT_FIXTURE } = await import("../src/seed-fixture.js");
-const { createSimulator, scriptedBrain, claudeBrain, dbStore, fileStore, publicRun, parseJson, keywords, fakeUserPrompt, productOf, subjectsOf, OCCASIONS, PROMPT_TYPES } = await import("../src/simulate.js");
+const { createSimulator, scriptedBrain, claudeBrain, dbStore, fileStore, publicRun, parseJson, keywords, fakeUserPrompt, productOf, subjectsOf, failureClass, OCCASIONS, PROMPT_TYPES } = await import("../src/simulate.js");
 const { WRITES } = await import("../src/tools.js");
 
 let base, keys, sim;
@@ -57,7 +57,19 @@ test("ten runs play every prompt type in rotation, each by a different least-run
     }
     assert.equal(r.writes, r.steps.filter((s) => WRITES.has(s.tool) && s.status >= 200 && s.status < 300).length, "writes counted");
     assert.ok(r.writes <= 3);
+    // Every call the board accepted was read back and found as sent; nothing failed on the board's side.
+    for (const s of r.steps.filter((x) => x.status >= 200 && x.status < 300)) assert.equal(s.check?.ok, true, `${r.prompt_type}/${s.tool}: ${s.check?.detail}`);
+    for (const s of r.steps.filter((x) => x.status >= 400 || x.status === 0)) assert.ok(["etiquette", "model", "harness"].includes(s.failure), `${s.tool} ${s.status} ${s.error} classed ${s.failure}`);
+    assert.equal(r.checks.passed, r.steps.filter((x) => x.check?.ok).length);
+    assert.equal(r.checks.failed, 0);
+    assert.deepEqual(r.anomalies, [], `${r.prompt_type}: ${JSON.stringify(r.anomalies)}`);
   }
+  const verifiedWrites = runs.flatMap((r) => r.steps).filter((s) => WRITES.has(s.tool) && s.check?.ok);
+  const kinds = new Set(verifiedWrites.map((s) => s.tool));
+  assert.ok(kinds.has("register_agent") && (kinds.has("post") || kinds.has("reply")) && kinds.size >= 3, `verified writes of several kinds: ${[...kinds].join(",")}`);
+  const posted = verifiedWrites.find((s) => s.tool === "post" || s.tool === "reply");
+  assert.match(posted.check.detail, /reads back/);
+  assert.ok(logs.some((m) => / checks \d+\/\d+/.test(m)) && !logs.some((m) => /ANOMALIES/.test(m)));
   const writes = runs.reduce((n, r) => n + r.writes, 0);
   assert.ok(writes >= 5, `the cycle wrote to the board (${writes} writes)`);
   assert.ok(runs.find((r) => r.prompt_type === "research").writes === 0, "research is read-only");
@@ -84,6 +96,39 @@ test("the log lands in sim_runs with steps, and the public view carries no bodie
   assert.equal(one[0].type, "tidy");
   const bad = await fetch(`${base}/api/sim/runs?limit=abc`).then((r) => r.status);
   assert.equal(bad, 200);
+  assert.ok(rows.every((r) => r.checks && Array.isArray(r.anomalies) && r.tools.every((t) => t.status < 200 || t.status >= 300 || t.check === true)));
+});
+
+test("the tool-call report: every tool exercised by the cycle, verified, no board errors, coverage named", async () => {
+  const report = await fetch(`${base}/api/sim/report`).then((r) => r.json());
+  assert.equal(report.healthy, true, JSON.stringify(report.anomalies));
+  assert.equal(report.runs.runs, PROMPT_TYPES.length);
+  assert.equal(report.runs.failed, 0);
+  assert.equal(report.runs.checks_failed, 0);
+  assert.ok(report.runs.checks_passed > 20);
+  assert.equal(report.runs.anomalies, 0);
+  const byTool = Object.fromEntries(report.tools.map((r) => [r.tool, r]));
+  // Tools every cycle reaches whatever the board holds; the rest depend on what search and the inbox turn up.
+  const ALWAYS = ["inbox", "connections", "search", "read_threads", "visibility_types", "my_posts", "find_agents", "whoami", "register_agent", "recent"];
+  const STATE = ["browse", "post", "reply", "upvote", "edit", "get_agent", "connect", "accept_connection", "set_visibility"];
+  for (const name of ALWAYS) {
+    assert.ok(byTool[name], `${name} was called`);
+    assert.equal(byTool[name].board, 0, name);
+    assert.equal(byTool[name].failed_checks, 0, name);
+    assert.ok(byTool[name].verified >= 1 || byTool[name].ok === 0, `${name} verified when it succeeded`);
+    assert.ok(typeof byTool[name].avg_ms === "number");
+  }
+  assert.ok(report.uncovered.every((t) => STATE.includes(t)), `only state-dependent tools may be uncovered after one cycle: ${report.uncovered}`);
+  for (const r of report.tools) { assert.equal(r.board, 0, r.tool); assert.equal(r.failed_checks, 0, r.tool); assert.ok(r.ok === 0 || r.verified >= 1, `${r.tool} verified when it succeeded`); }
+  assert.ok(Array.isArray(report.errors) && report.errors.every((e) => e.failure !== "board"));
+  const week = await fetch(`${base}/api/sim/report?week=99`).then((r) => r.json());
+  assert.equal(week.runs.runs, 0);
+  assert.deepEqual(failureClass(0), "harness");
+  assert.deepEqual(failureClass(503), "board");
+  assert.deepEqual(failureClass(409, "already upvoted"), "etiquette");
+  assert.deepEqual(failureClass(400, "draft overlaps post x by 20%; an upvote needs 60%. Your draft adds something: reply to it instead"), "etiquette");
+  assert.deepEqual(failureClass(404, "post not found"), "model");
+  assert.deepEqual(failureClass(400, "body required"), "model");
 });
 
 test("a spent daily write budget makes a run read-only, and a write beyond the per-run cap is refused", async () => {
@@ -140,7 +185,7 @@ test("the Claude brain speaks the Messages API: invents from JSON, runs the tool
   assert.equal("thinking" in invent.body, false, "thinking is left to the model's default");
   assert.match(invent.body.system, /JSON only/);
   assert.match(invent.body.system, /Real prompts read like messages/);
-  assert.match(invent.body.messages[0].content, /Right now: .+\.\nTheir recent posts on the board: "/);
+  assert.match(invent.body.messages[0].content, /Right now: .+\.\nWhat they have on the board lately, for your orientation only \(the person remembers these loosely and would never quote a title\): "/);
   assert.match(invent.body.messages[0].content, /Waiting in their inbox: \d+ replies, \d+ upvotes, \d+ new connections/);
   assert.match(invent.body.messages[0].content, /Writes about: .*client projects/);
   assert.match(invent.body.messages[0].content, /Kind of request: Find out what the board knows/);
@@ -160,6 +205,9 @@ test("the Claude brain speaks the Messages API: invents from JSON, runs the tool
   assert.equal(results[1].is_error, true, "post is not a research tool");
   assert.match(results[1].content, /not available in this run/);
   assert.deepEqual(r.steps.map((s) => [s.tool, s.status]), [["search", 200], ["post", 0]]);
+  assert.equal(r.steps[0].check.ok, true);
+  assert.equal(r.steps[1].failure, "harness");
+  assert.deepEqual(r.checks, { passed: 1, failed: 0 });
   const logged = fs.readFileSync(path.join(process.env.DATA_DIR, "runs.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
   assert.equal(logged.length, 1);
   assert.equal(logged[0].id, r.id);
@@ -169,6 +217,7 @@ test("the Claude brain speaks the Messages API: invents from JSON, runs the tool
   const bad = await s3.run({ handle: "leof", type: "ask" });
   assert.equal(bad.ok, false);
   assert.match(bad.error, /claude 429: rate limited/);
+  assert.deepEqual(bad.anomalies, [], "an API outage is a failed run, not a board anomaly");
 });
 
 test("scripted prompts read like the person: their product, their subjects, their voice, varied across runs", () => {
@@ -198,7 +247,13 @@ test("scripted prompts read like the person: their product, their subjects, thei
   const skeptic = fakeUserPrompt(person("prof.rossi"), type("pushback"), { context: ctx, random: seeded(3) }).prompt;
   assert.match(skeptic, /what would change my mind\?$/);
   const catchUp = fakeUserPrompt(person("jessmakes"), type("catch-up"), { context: ctx, random: seeded(4) }).prompt;
-  assert.ok(/2 replies waiting|Make Stripe webhook handlers idempotent|GroomBook/.test(catchUp), catchUp);
+  assert.ok(/2 replies waiting|my post about stripe webhook|GroomBook/.test(catchUp), catchUp);
+  assert.ok(!catchUp.includes('"'), "no thread title is quoted");
+  const tidy = fakeUserPrompt(person("cnovak"), type("tidy"), { context: ctx, random: seeded(6) }).prompt;
+  assert.ok(!tidy.includes('"'), tidy);
+  // This quarter's work shows up in what they ask for.
+  const withBeat = fakeUserPrompt(person("mayabuilds"), type("status"), { context: ctx, random: seeded(7), beat: "Pilot live on 2 hospital units; building charge-nurse approval with Pixelfold." }).prompt;
+  assert.ok(/pilot live on 2 hospital units|ShiftSwap/.test(withBeat), withBeat);
   // Every type has a prompt for every persona.
   for (const p of fixture.people) for (const ty of PROMPT_TYPES) assert.ok(fakeUserPrompt(person(p.handle), ty, { random: seeded(5) }).prompt.length > 20, `${p.handle} ${ty.id}`);
 });

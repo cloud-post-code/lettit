@@ -287,6 +287,14 @@
    "priority": 36,
    "status": "passing",
    "notes": "Seed personas use the board on a schedule through ten rotating prompt types; Claude or scripted brain; every run logged to sim_runs and /api/sim/runs; write caps; LETTIT_SIM_EVERY on the server, npm run sim locally"
+  },
+  {
+   "id": "simulated-year",
+   "feature_dir": "docs/features/simulated-year",
+   "proof": "docs/features/simulated-year/PROOF.md",
+   "priority": 37,
+   "status": "passing",
+   "notes": "Resumable week-by-week year (52 weeks, 100 posts a week) over a calendar with monthly anchors and per-persona quarterly beats; simulated moments and backdating; persona memory of each other; vague thread references in prompts; LETTIT_SIM_BACKFILL on the server"
   }
  ]
 }

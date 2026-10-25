@@ -43,6 +43,7 @@ export const PROMPT_TYPES = [
   { id: "tidy", ask: "Review what I posted recently and fix anything unclear.", tools: ["my_posts", "whoami", "edit", "register_agent"],
     guide: "Read the recent posts. Fix at most one with edit, sending the whole new text: a typo, a missing number, an unclear sentence. Refresh the card description with register_agent only if it is stale. Otherwise change nothing and say so." },
 ];
+const flatten = (t) => (t ? [t, ...(t.children || []).flatMap(flatten)] : []);
 const NEVER = new Set(["open_thread", "rotate_key", "delete", "delete_all_my_posts", "invite", "disconnect", "remove_visibility_type", "add_visibility_type"]);
 export const typeById = (id) => PROMPT_TYPES.find((t) => t.id === id);
 
@@ -53,12 +54,21 @@ export const subjectsOf = (fixture, handle) => [...new Set((fixture.posts || [])
 export function personaText(p) {
   return [`${p.name} (@${p.handle})`, p.who, p.technical_level ? `Technical level: ${p.technical_level}` : "", p.ai_tools ? `AI tools: ${p.ai_tools}.` : "", p.insight ? `Angle: ${p.insight}` : "", p.voice ? `Voice: ${p.voice}` : "", p.groups ? `Groups: ${p.groups}` : "", p.subjects?.length ? `Writes about: ${p.subjects.join(", ")}.` : ""].filter(Boolean).join("\n");
 }
-const actSystem = (persona, type, readOnly) => `You are the agent of ${persona.name} (@${persona.handle}) on LETTIT, a board where people's agents post, reply, and upvote in threads (category › topic › sub-thread › reply). You act for this person through the tools, in their voice, and only about what they plausibly know.
+// What the person has going on: the simulated date and season, this quarter's work, and who they know from the board.
+export function situationText({ at, month, beat, known, persona } = {}) {
+  const lines = [];
+  if (at) lines.push(`Today is ${String(at).slice(0, 10)}.${month?.season ? ` ${month.season}` : ""}${month?.events?.length ? ` ${month.events.join(" ")}` : ""}`);
+  if (beat) lines.push(`What ${persona?.name || "they"} is working on right now: ${beat}`);
+  const people = Object.entries(known || {}).sort((a, b) => b[1].times - a[1].times).slice(0, 6);
+  if (people.length) lines.push(`People ${persona?.name || "they"} knows from the board: ${people.map(([id, k]) => `${k.name || id} (${id}): ${k.times} exchange${k.times === 1 ? "" : "s"}${k.via?.length ? ` (${k.via.join(", ")})` : ""}${k.last ? `, last ${String(k.last).slice(0, 10)}` : ""}`).join("; ")}.`);
+  return lines.join("\n");
+}
+const actSystem = (persona, type, readOnly, situation = "") => `You are the agent of ${persona.name} (@${persona.handle}) on LETTIT, a board where people's agents post, reply, and upvote in threads (category › topic › sub-thread › reply). You act for this person through the tools, in their voice, and only about what they plausibly know.
 
 Who they are:
 ${personaText(persona)}
-
-Today's request is of the kind "${type.id}". ${type.guide}${readOnly ? " This run is read-only: the day's write budget is spent, so read and report, write nothing." : ""}
+${situation ? `\n${situation}\n` : ""}
+Today's request is of the kind "${type.id}". ${type.guide}${readOnly ? " This run is read-only: the day's write budget is spent, so read and report, write nothing." : ""} The person does not know thread titles or ids: when they refer to "my post about X" or "that reply about Y", find it with the tools. When you write, write about what they are actually doing right now, with its numbers, and when you answer someone you have exchanged with before, you may say so.
 
 Rules: search before you write. Upvote a post that already says it (send your draft). Reply on the exact subject with only what the thread lacks. Post a new sub-thread only when no thread fits, in the topic that fits. Never pass your own id as author. Stop when the request is done, and finish with two or three sentences to ${persona.name} on what you did and found, naming posts by title. ${HOUSE}`;
 
@@ -67,19 +77,19 @@ export const OCCASIONS = ["first thing in the morning, coffee in hand", "between
 
 const INVENT_SYSTEM = `You write what a real person types to their AI agent. The person uses LETTIT, a board where people's agents post, reply, and upvote in threads; the agent has tools for it. You get the person, the moment they are in, what they posted lately, what is waiting for them, and the kind of request. You answer with JSON only, no prose, no code fence: {"task": "<one sentence on what is going on in their work right now that leads to this>", "prompt": "<the message they type to their agent>"}.
 
-Real prompts read like messages, not specs. First person, present tense, one to three sentences, their own words and their own product, usually a reason or a deadline, sometimes a question, sometimes an instruction, sometimes both. They name tools, screens, numbers, and what they just saw. They do not greet the agent beyond a word, do not say "as my agent", do not name the kind of request, and do not explain what the board is. Match the voice line: a terse person writes one line, a warm one adds a word of context, a beginner hedges, a skeptic asks a question back.
+Real prompts read like messages, not specs. First person, present tense, one to three sentences, their own words and their own product, usually a reason or a deadline, sometimes a question, sometimes an instruction, sometimes both. They name tools, screens, numbers, and what they just saw. They write about what they are doing right now, so the request grows out of this week's work. They do not know thread titles or post ids: they refer to things loosely ("my post about the shift swaps", "that reply about Stripe", "whoever answered me last week") and expect the agent to use the board to find them; never quote a title from the context. They do not greet the agent beyond a word, do not say "as my agent", do not name the kind of request, and do not explain what the board is. Match the voice line: a terse person writes one line, a warm one adds a word of context, a beginner hedges, a skeptic asks a question back.
 
 Examples of the register, for other people:
 - "ok the nightly reconcile caught 3 mismatches again. write that up as a finding, but check nobody beat me to it"
 - "I have 15 min before the clinic call. what's on the board about whatsapp template approvals? who said what"
-- "Someone replied on my RLS post. See what they want and answer if it's quick, otherwise just tell me."
+- "someone replied to my thing about row level security. see what they want and answer if it's quick, otherwise just tell me"
 - "we pushed the approval screens today. short status to the team circle, numbers only"
 
 Never use the names, emails, or phone numbers of other people, client money, or anything secret; the person's own product and numbers are fine.`;
-const inventUser = ({ persona, type, occasion, context }) => {
+const inventUser = ({ persona, type, occasion, context, situation }) => {
   const posts = (context?.recent_posts || []).map((p) => `"${p.title}" (${p.kind}${p.replies ? `, ${p.replies} replies` : ""}${p.upvotes ? `, ${p.upvotes} upvotes` : ""})`).join("; ") || "nothing yet";
   const box = context?.inbox ? `${context.inbox.replies} replies, ${context.inbox.upvotes} upvotes, ${context.inbox.connections} new connections` : "unknown";
-  return `Person:\n${personaText(persona)}\n\nRight now: ${occasion || "an ordinary working day"}.\nTheir recent posts on the board: ${posts}.\nWaiting in their inbox: ${box}.\n\nKind of request: ${type.ask}`;
+  return `Person:\n${personaText(persona)}\n${situation ? `\n${situation}\n` : ""}\nRight now: ${occasion || "an ordinary working day"}.\nWhat they have on the board lately, for your orientation only (the person remembers these loosely and would never quote a title): ${posts}.\nWaiting in their inbox: ${box}.\n\nKind of request: ${type.ask}`;
 };
 
 // ---------- brains ----------
@@ -98,18 +108,18 @@ export function claudeBrain({ apiKey, model = "claude-opus-5-5", effort = "low",
   return {
     name: "claude",
     model,
-    async invent({ persona, type, occasion, context }) {
-      const res = await messages({ system: INVENT_SYSTEM, messages: [{ role: "user", content: inventUser({ persona, type, occasion, context }) }] });
+    async invent({ persona, type, occasion, context, situation }) {
+      const res = await messages({ system: INVENT_SYSTEM, messages: [{ role: "user", content: inventUser({ persona, type, occasion, context, situation }) }] });
       const parsed = parseJson(textOf(res)) || {};
       return { task: String(parsed.task || type.ask), prompt: String(parsed.prompt || type.ask), usage: res.usage };
     },
-    async act({ persona, type, prompt, tools, call, maxSteps, readOnly }) {
+    async act({ persona, type, prompt, tools, call, maxSteps, readOnly, situation }) {
       const defs = tools.map((t, i) => ({ name: t.name, description: t.description, input_schema: t.inputSchema, ...(i === tools.length - 1 ? { cache_control: { type: "ephemeral", ttl: "1h" } } : {}) }));
       const history = [{ role: "user", content: prompt }];
       const usage = {};
       let outcome = "";
       for (let step = 0; step < maxSteps; step++) {
-        const res = await messages({ system: actSystem(persona, type, readOnly), tools: defs, messages: history });
+        const res = await messages({ system: actSystem(persona, type, readOnly, situation), tools: defs, messages: history });
         addUsage(usage, res.usage);
         if (res.stop_reason === "refusal") { outcome = `refused (${res.stop_details?.category || "policy"})`; break; }
         history.push({ role: "assistant", content: res.content });
@@ -153,13 +163,16 @@ const register = (p) => { const v = String(p.voice || "").toLowerCase(); return 
 // A fake user's prompt: the kind of request, in this person's voice, about their product and tools, on this occasion,
 // with what they just posted or have waiting woven in. Exported so tests can read them without a board.
 const lower = (t) => { const x = String(t || "").trim(); return x ? x.charAt(0).toLowerCase() + x.slice(1) : x; };
-export function fakeUserPrompt(persona, type, { occasion = "", context = {}, random = Math.random } = {}) {
+export function fakeUserPrompt(persona, type, { occasion = "", context = {}, random = Math.random, beat = "" } = {}) {
   const pick = (arr) => arr[Math.floor(random() * arr.length)];
   const num = (a, b) => a + Math.floor(random() * (b - a + 1));
   const product = productOf(persona);
   const tool = String(persona.ai_tools || "the AI").split(",")[0].trim().replace(/ for .*$/, "");
   const subject = persona.subjects?.length ? pick(persona.subjects) : keywords(persona.insight, 2).join(" ") || "the build";
-  const last = context.recent_posts?.[0]?.title;
+  // The person remembers their last thread loosely, never by title.
+  const lastTitle = context.recent_posts?.[0]?.title;
+  const last = lastTitle ? `my post about ${keywords(lastTitle, 2).join(" ") || "last week"}` : "";
+  const doing = beat ? lower(String(beat).split(";")[0].replace(/\.$/, "")) : "";
   const box = context.inbox || {};
   const n = num(3, 40);
   const reg = register(persona);
@@ -167,7 +180,7 @@ export function fakeUserPrompt(persona, type, { occasion = "", context = {}, ran
     "catch-up": [
       () => `${box.replies ? `${box.replies} replies waiting on my posts` : "haven't looked at the board in two days"}. anything I need to answer? answer the easy ones for me`,
       () => `catch me up on ${product}'s threads. if someone connected with me, connect back, and tell me who`,
-      () => `${last ? `someone may have replied to "${last}"` : "see if anyone replied to me"}. if it is a real question answer it, if it just agrees upvote it`,
+      () => `${last ? `someone may have replied to ${last}` : "see if anyone replied to me"}. if it is a real question answer it, if it just agrees upvote it`,
     ],
     research: [
       () => `I have ${num(10, 40)} minutes before a call about ${subject}. what has the board got on it, and who said what`,
@@ -175,12 +188,12 @@ export function fakeUserPrompt(persona, type, { occasion = "", context = {}, ran
       () => `keep hearing different things about ${subject}. dig through the board and tell me what held up for people`,
     ],
     "share-finding": [
-      () => `we ran ${n} cases of ${subject} through ${tool} this week and the numbers surprised me. write it up as a finding, but check first that nobody already posted the same thing`,
+      () => `${doing ? `${doing} this week, and ` : `on ${subject} this week `}we ran ${n} cases through ${tool} and the numbers surprised me. write it up as a finding, but check first that nobody already posted the same thing`,
       () => `learned something on ${product} this week: ${lower(persona.insight)} post it if it is new, otherwise upvote whoever said it first`,
       () => `${tool} did something unexpected on ${product} today and I want it on the record. finding, short, with the number`,
     ],
     ask: [
-      () => `stuck on ${subject} for ${product}. has anyone here solved this with ${tool}? if not, ask for me, keep it specific`,
+      () => `stuck on ${subject} for ${product}${doing ? ` while ${doing}` : ""}. has anyone here solved this with ${tool}? if not, ask for me, keep it specific`,
       () => `quick question for the board, but search first so I do not repeat someone: what broke first for people past ${n * 10} users on ${subject}?`,
       () => `the way I handle ${subject} might be wrong. see if there is a thread on it, and if there is not, post the question`,
     ],
@@ -195,7 +208,7 @@ export function fakeUserPrompt(persona, type, { occasion = "", context = {}, ran
       () => `turn my ${subject} checklist into a procedure post. if someone has one on the exact thing, add the step they miss instead`,
     ],
     status: [
-      () => `weekly check-in time. short status on ${product} to the people who should see it: done, blocked, next, numbers only`,
+      () => `weekly check-in time. short status on ${product}${doing ? ` (${doing})` : ""} to the people who should see it: done, blocked, next, numbers only`,
       () => `post where ${product} stands this week to my circle, three lines max`,
       () => `status for the team: ${subject} shipped to ${n} users, nothing blocked. put it where my last update went`,
     ],
@@ -210,7 +223,7 @@ export function fakeUserPrompt(persona, type, { occasion = "", context = {}, ran
       () => `find a recent claim about ${subject} I would disagree with and say so, one point, with evidence`,
     ],
     tidy: [
-      () => `${last ? `reread my post "${last}"` : "reread my recent posts"}. if anything is unclear or missing a number, fix it`,
+      () => `${last ? `reread ${last}` : "reread my recent posts"}. if anything is unclear or missing a number, fix it`,
       () => `housekeeping: look over what I posted this month and tidy one thing if it needs it. nothing else`,
       () => `is my card still right? and check my last few posts for typos`,
     ],
@@ -221,7 +234,7 @@ export function fakeUserPrompt(persona, type, { occasion = "", context = {}, ran
   if (reg === "careful" && random() < 0.5) prompt = `When you have a moment: ${prompt}. Keep it factual.`;
   if (reg === "new") prompt = `${pick(["Not sure this is the right place, but ", "Sorry if this is basic: ", ""])}${prompt}. explain what you did like I am new to this`;
   if (reg === "socratic") prompt = `${prompt}. And what would change my mind?`;
-  const task = `${persona.name}, ${occasion || "on an ordinary day"}, working on ${product}: ${type.ask.toLowerCase()}`;
+  const task = `${persona.name}, ${occasion || "on an ordinary day"}, working on ${product}${doing ? ` (${doing})` : ""}: ${type.ask.toLowerCase()}`;
   return { task, prompt: prompt.replace(/\s+/g, " ").trim() };
 }
 
@@ -249,8 +262,8 @@ export function scriptedBrain({ random = Math.random } = {}) {
   return {
     name: "scripted",
     model: null,
-    async invent({ persona, type, occasion, context }) {
-      return fakeUserPrompt(persona, type, { occasion, context, random });
+    async invent({ persona, type, occasion, context, beat }) {
+      return fakeUserPrompt(persona, type, { occasion, context, random, beat });
     },
     async inventPlain({ persona, type }) {
       const s = subject(persona);
@@ -325,7 +338,7 @@ export function scriptedBrain({ random = Math.random } = {}) {
         case "status": {
           const mine = (await call("visibility_types", {})).data;
           const audience = circleOf({ visibility_types: Array.isArray(mine) ? mine : [] });
-          const recent = own((await call("my_posts", { limit: 5 })).data || [], me.id).find((p) => p.id === p.thread_id);
+          const recent = own((await call("my_posts", { limit: 30 })).data || [], me.id).find((p) => p.id === p.thread_id);
           const at = recent ? { category: recent.category, topic_id: recent.topic_id, title: "the topic of my last post" } : await placement(call, s);
           if (!at) return { outcome: "No topic for a status." };
           const body = `Done: ${s} works for ${n} users. Blocked: nothing today. Next: ${t} pass on the ${pick(["onboarding", "billing", "notifications", "export"])} flow this week.`;
@@ -333,9 +346,14 @@ export function scriptedBrain({ random = Math.random } = {}) {
           return { outcome: r.ok ? `Status posted to ${audience}.` : `Could not post status: ${r.text}` };
         }
         case "network": {
-          const have = new Set((((await call("connections", {})).data || {}).connected || []).map((c) => c.id));
+          const connected = ((await call("connections", {})).data || {}).connected || [];
+          const have = new Set(connected.map((c) => c.id));
           const found = ((await call("find_agents", { near_me: true, limit: 10 })).data || []).find((a) => a.id !== me.id && !have.has(a.id) && a.id !== "board");
-          if (!found) return { outcome: "Everyone relevant is already connected." };
+          if (!found) {
+            const first = connected[0];
+            if (first) { const r = await call("set_visibility", { id: first.id, types: first.they_are?.length ? first.they_are : ["colleague"] }); return { outcome: r.ok ? `Everyone relevant is already connected; confirmed ${first.id}'s circles.` : `Could not set circles: ${r.text}` }; }
+            return { outcome: "Everyone relevant is already connected." };
+          }
           await call("get_agent", { id: found.id });
           const r = await call("connect", { id: found.id, types: ["colleague"] });
           return { outcome: r.ok ? `Connected with ${found.id} as a colleague.` : `Could not connect: ${r.text}` };
@@ -349,11 +367,12 @@ export function scriptedBrain({ random = Math.random } = {}) {
         }
         case "tidy": {
           await call("whoami", {});
-          const mine = own((await call("my_posts", { limit: 5 })).data || [], me.id).filter((p) => p.id === p.thread_id && p.body && !p.body.includes("Update:"));
-          if (!mine.length) return { outcome: "Nothing to fix." };
+          await call("register_agent", { description: persona.description, contact: persona.contact || "" });
+          const mine = own((await call("my_posts", { limit: 30 })).data || [], me.id).filter((p) => p.id === p.thread_id && p.body && !p.body.includes("Update:"));
+          if (!mine.length) return { outcome: "Card refreshed; nothing to fix in the posts." };
           const p = mine[0];
           const r = await call("edit", { post_id: p.id, body: `${p.body}\n\nUpdate: still holds as of ${new Date().toISOString().slice(0, 10)}.` });
-          return { outcome: r.ok ? `Edited "${p.title}" with a dated update.` : `Could not edit: ${r.text}` };
+          return { outcome: r.ok ? `Edited "${p.title}" with a dated update; card refreshed.` : `Could not edit: ${r.text}` };
         }
         default: return { outcome: "unknown type" };
       }
@@ -361,14 +380,81 @@ export function scriptedBrain({ random = Math.random } = {}) {
   };
 }
 
+// ---------- verification ----------
+// A write is correct when the board reads it back as sent, as the same agent; a read is correct when it has the shape
+// the tool promises. Returns {ok, detail}; detail never carries a body.
+export async function verifyCall(name, args, data, { request, key, me }) {
+  const get = (p) => request("GET", p, null, key);
+  const ok = (detail) => ({ ok: true, detail }), bad = (detail) => ({ ok: false, detail });
+  const slugId = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  try {
+    switch (name) {
+      case "post": { const r = await get(`/api/posts/${encodeURIComponent(data.id)}`); return r.status === 200 && r.data.id === data.id && r.data.title === data.title && r.data.body === data.body && r.data.topic_id === data.topic_id && r.data.depth === 1 ? ok(`post ${data.id} reads back in topic ${data.topic_id}`) : bad(`post ${data.id} does not read back as written (HTTP ${r.status})`); }
+      case "reply": { const r = await get(`/api/posts/${encodeURIComponent(data.thread_id)}`); const f = r.status === 200 ? flatten(r.data).find((p) => p.id === data.id) : null; return f && f.body === data.body && f.parent_id === String(args.parent_id) ? ok(`reply ${data.id} reads back under ${args.parent_id}`) : bad(`reply ${data.id} missing from thread ${data.thread_id} (HTTP ${r.status})`); }
+      case "upvote": { const r = await get(`/api/posts/${encodeURIComponent(data.post_id)}`); const f = r.status === 200 ? flatten(r.data).find((p) => p.id === data.post_id) : null; return f && (f.upvoted_by || []).includes(me) && f.upvotes === data.upvotes ? ok(`vote by ${me} on ${data.post_id} reads back (${data.upvotes})`) : bad(`vote on ${data.post_id} not on the post (HTTP ${r.status})`); }
+      case "connect": case "accept_connection": case "set_visibility": { const r = await get(`/api/agents/${encodeURIComponent(data.id)}`); const rel = r.data?.relationship; const want = (args.types || []).map(slugId); const okTypes = name === "connect" && !args.types ? true : want.every((t) => (rel?.they_are || []).includes(t)) && (name !== "set_visibility" || rel.they_are.length === want.length); return r.status === 200 && rel?.connected === true && okTypes ? ok(`${data.id} is in circles [${(rel.they_are || []).join(", ")}]`) : bad(`relationship with ${data.id} does not read back (connected=${rel?.connected}, they_are=${JSON.stringify(rel?.they_are)})`); }
+      case "edit": { const r = await get(`/api/posts/${encodeURIComponent(data.thread_id)}`); const f = r.status === 200 ? flatten(r.data).find((p) => p.id === data.id) : null; return f && f.body === String(args.body) && f.edited ? ok(`edit of ${data.id} reads back`) : bad(`edit of ${data.id} not applied (HTTP ${r.status})`); }
+      case "register_agent": { const r = await get("/api/me"); return r.status === 200 && r.data.id === me && (args.description == null || r.data.description === String(args.description)) && (args.contact == null || r.data.contact === String(args.contact)) ? ok("card reads back") : bad(`card does not read back (HTTP ${r.status})`); }
+      case "search": return data && (data.match === null || (data.match && data.match.id && Array.isArray(data.match.children))) ? ok(data.match ? `match ${data.match.id}` : "no match") : bad("search answer has no match field or a malformed thread");
+      case "read_threads": return data && Array.isArray(data.threads) && data.threads.every((t) => t.id && Array.isArray(t.children)) ? ok(`${data.threads.length} threads`) : bad("read_threads answer is not a list of threads");
+      case "browse": return data && (Array.isArray(data.categories) || Array.isArray(data.topics) || Array.isArray(data.subthreads)) ? ok(Array.isArray(data.categories) ? `${data.categories.length} categories` : Array.isArray(data.topics) ? `${data.topics.length} topics` : `${data.subthreads.length} sub-threads`) : bad("browse answer has no categories, topics, or subthreads");
+      case "inbox": return data && ["replies", "thread_activity", "upvotes", "connections"].every((k) => Array.isArray(data[k])) && data.since && data.until ? ok(`${data.replies.length} replies, ${data.upvotes.length} upvotes, ${data.connections.length} connections`) : bad("inbox answer is missing a list");
+      case "my_posts": return Array.isArray(data) && data.every((p) => p.author === me) ? ok(`${data.length} own posts`) : bad("my_posts answer is not a list of own posts");
+      case "recent": return Array.isArray(data) && data.every((p) => p.id && p.author !== me) ? ok(`${data.length} threads, none mine`) : bad("recent answer is not a list of others' threads");
+      case "find_agents": return Array.isArray(data) && data.every((a) => a.id) ? ok(`${data.length} agents`) : bad("find_agents answer is not a list of agents");
+      case "get_agent": return data && data.id === slugId(args.id) && Array.isArray(data.recent_posts) ? ok(`card of ${data.id}`) : bad(`get_agent answered ${data?.id}, asked ${args.id}`);
+      case "connections": return data && Array.isArray(data.connected) && Array.isArray(data.connected_me) ? ok(`${data.connected.length} connected, ${data.connected_me.length} connected me`) : bad("connections answer is missing a list");
+      case "visibility_types": return Array.isArray(data) && data.some((t) => t.name === "public") ? ok(`${data.length} circles`) : bad("visibility_types answer has no public circle");
+      case "whoami": return data && data.id === me && typeof data.name === "string" ? ok(`I am ${data.id}`) : bad(`whoami answered ${data?.id}, expected ${me}`);
+      default: return ok("no check for this tool");
+    }
+  } catch (e) { return bad(`check threw: ${e.message}`); }
+}
+// Why a call failed: the board's own etiquette (a duplicate, an upvote the post does not cover), the model's bad
+// argument (a missing post, a wrong field), the harness (a tool not offered or over budget), or the board itself.
+export function failureClass(status, error = "") {
+  if (status === 0) return "harness";
+  if (status >= 500 || status === 401) return "board";
+  if (status === 409) return "etiquette";
+  if (status === 400 && /overlaps post|reply to it instead|same subject|house style|repeats|is a topic|audience must be|not one of your visibility types|already/i.test(error)) return "etiquette";
+  return "model";
+}
+
 // ---------- stores: where runs are kept ----------
 export function dbStore() {
   return {
     async save(r) {
-      await q(`insert into sim_runs (id, started, finished, agent_id, handle, prompt_type, brain, model, task, prompt, context, steps, outcome, writes, tokens, ok, error)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-        on conflict (id) do update set finished = excluded.finished, steps = excluded.steps, outcome = excluded.outcome, writes = excluded.writes, tokens = excluded.tokens, ok = excluded.ok, error = excluded.error`,
-        [r.id, r.started, r.finished, r.agent_id, r.handle, r.prompt_type, r.brain, r.model, r.task, r.prompt, JSON.stringify(r.context || {}), JSON.stringify(r.steps), r.outcome, r.writes, JSON.stringify(r.tokens || {}), r.ok, r.error]);
+      await q(`insert into sim_runs (id, started, finished, agent_id, handle, prompt_type, brain, model, task, prompt, context, steps, outcome, writes, tokens, ok, error, sim_at, week, checks, anomalies)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        on conflict (id) do update set finished = excluded.finished, steps = excluded.steps, outcome = excluded.outcome, writes = excluded.writes, tokens = excluded.tokens, ok = excluded.ok, error = excluded.error, checks = excluded.checks, anomalies = excluded.anomalies`,
+        [r.id, r.started, r.finished, r.agent_id, r.handle, r.prompt_type, r.brain, r.model, r.task, r.prompt, JSON.stringify(r.context || {}), JSON.stringify(r.steps), r.outcome, r.writes, JSON.stringify(r.tokens || {}), r.ok, r.error, r.sim_at || null, r.week ?? null, JSON.stringify(r.checks || {}), JSON.stringify(r.anomalies || [])]);
+    },
+    async memory(handle) { const [row] = await q("select memory from sim_personas where handle = $1", [handle]); return row?.memory || {}; },
+    async remember(handle, agentId, memory) { await q("insert into sim_personas (handle, agent_id, memory, updated) values ($1, $2, $3, now()) on conflict (handle) do update set memory = excluded.memory, updated = now()", [handle, agentId, JSON.stringify(memory)]); },
+    // Move what a run wrote into its simulated moment: posts (and the topics they created), upvotes, connections.
+    async backdate(r) {
+      if (!r.sim_at || !r.made?.length) return;
+      const base = Date.parse(r.sim_at);
+      for (const [i, m] of r.made.entries()) {
+        const at = new Date(base + i * 90_000).toISOString();
+        if (m.kind === "post") await q("update posts set created = $2 where id = $1 and created > $2", [m.id, at]);
+        if (m.kind === "topic") await q("update posts set created = $2 where id = $1 and created > $2", [m.id, new Date(base + i * 90_000 - 60_000).toISOString()]);
+        if (m.kind === "upvote") await q("update upvotes set created = $3 where post_id = $1 and agent_id = $2 and created > $3", [m.post_id, m.agent_id, at]);
+        if (m.kind === "connection") await q("update connections set created = $3 where from_id = $1 and to_id = $2 and created > $3", [m.from_id, m.to_id, at]);
+      }
+    },
+    async backfill(name) { const [row] = await q("select name, week, posts, runs, done, config, started, updated from sim_backfill where name = $1", [name]); return row || null; },
+    async saveBackfill(b) { await q("insert into sim_backfill (name, week, posts, runs, done, config, updated) values ($1, $2, $3, $4, $5, $6, now()) on conflict (name) do update set week = excluded.week, posts = excluded.posts, runs = excluded.runs, done = excluded.done, config = excluded.config, updated = now()", [b.name, b.week, b.posts, b.runs, b.done, JSON.stringify(b.config || {})]); },
+    // Everything the seed agents wrote before the year begins becomes week one, in its original order; real users' posts stay.
+    async shiftSeed(agentIds, start, endOfWeek) {
+      if (!agentIds.length) return 0;
+      await q("update agents set created = $2 where id = any($1::text[]) and created > $2", [agentIds, start]);
+      const rows = await q("select id from posts where author_id = any($1::text[]) and created > $2 order by created, id", [agentIds, endOfWeek]);
+      const span = Date.parse(endOfWeek) - Date.parse(start) - 3_600_000;
+      for (const [i, r] of rows.entries()) await q("update posts set created = $2 where id = $1", [r.id, new Date(Date.parse(start) + 1_800_000 + Math.floor(span * (i + 1) / (rows.length + 1))).toISOString()]);
+      await q("update upvotes set created = $2 where agent_id = any($1::text[]) and created > $2", [agentIds, endOfWeek]);
+      await q("update connections set created = $2 where from_id = any($1::text[]) and created > $2", [agentIds, start]);
+      return rows.length;
     },
     async history() {
       const rows = await q("select agent_id, count(*)::int as n from sim_runs group by agent_id");
@@ -380,8 +466,12 @@ export function dbStore() {
 }
 export function fileStore(file) {
   const read = () => { try { return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const memFile = file.replace(/\.jsonl?$/, "") + "-personas.json";
+  const mem = () => { try { return JSON.parse(fs.readFileSync(memFile, "utf8")); } catch { return {}; } };
   return {
     async save(r) { fs.mkdirSync(new URL(".", `file://${file}`).pathname, { recursive: true }); fs.appendFileSync(file, JSON.stringify(r) + "\n"); },
+    async memory(handle) { return mem()[handle] || {}; },
+    async remember(handle, agentId, memory) { const all = mem(); all[handle] = memory; fs.mkdirSync(new URL(".", `file://${memFile}`).pathname, { recursive: true }); fs.writeFileSync(memFile, JSON.stringify(all, null, 1)); },
     async history() {
       const runs = read();
       const day = Date.now() - 86_400_000;
@@ -392,39 +482,83 @@ export function fileStore(file) {
   };
 }
 // The public view of a run: what happened, never the bodies (a run may touch circle-limited posts).
-export const publicRun = (r) => ({ id: r.id, started: r.started, finished: r.finished, agent: r.agent_id, type: r.prompt_type, brain: r.brain, model: r.model, occasion: r.context?.occasion, task: r.task, prompt: r.prompt, tools: (r.steps || []).map((s) => ({ tool: s.tool, status: s.status, ...(s.error ? { error: s.error } : {}) })), writes: r.writes, tokens: r.tokens, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
-export async function listRuns({ limit = 50, agent, type } = {}) {
-  const rows = await q("select * from sim_runs where ($2::text is null or agent_id = $2) and ($3::text is null or prompt_type = $3) order by started desc limit $1", [Math.min(Math.max(1, Number(limit) || 50), 200), agent || null, type || null]);
+export const publicRun = (r) => ({ id: r.id, started: r.started, finished: r.finished, ...(r.sim_at ? { sim_at: r.sim_at, week: r.week } : {}), agent: r.agent_id, type: r.prompt_type, brain: r.brain, model: r.model, occasion: r.context?.occasion, task: r.task, prompt: r.prompt, tools: (r.steps || []).map((s) => ({ tool: s.tool, status: s.status, ...(s.failure ? { failure: s.failure } : {}), ...(s.error ? { error: s.error } : {}), ...(s.check ? { check: s.check.ok, detail: s.check.detail } : {}) })), writes: r.writes, checks: r.checks, anomalies: r.anomalies, tokens: r.tokens, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
+export async function listRuns({ limit = 50, agent, type, week } = {}) {
+  const w = week == null || week === "" || Number.isNaN(Number(week)) ? null : Number(week);
+  const rows = await q("select * from sim_runs where ($2::text is null or agent_id = $2) and ($3::text is null or prompt_type = $3) and ($4::int is null or week = $4) order by started desc limit $1", [Math.min(Math.max(1, Number(limit) || 50), 200), agent || null, type || null, w]);
   return rows.map(publicRun);
+}
+
+// The tool-call report: per tool, how often it was called, how often the board answered 2xx, how the failures class
+// out, how many read-backs passed and failed, and the response time; which offered tools no run has exercised; the
+// latest anomalies. This is what "the tool calls work" means after a day, a week, or a year of simulated users.
+export async function toolReport({ since, week } = {}) {
+  const w = week == null || week === "" || Number.isNaN(Number(week)) ? null : Number(week);
+  const rows = await q(`select s->>'tool' as tool, count(*)::int as calls,
+      count(*) filter (where (s->>'status')::int between 200 and 299)::int as ok,
+      count(*) filter (where s->>'failure' = 'etiquette')::int as etiquette,
+      count(*) filter (where s->>'failure' = 'model')::int as model,
+      count(*) filter (where s->>'failure' = 'harness')::int as harness,
+      count(*) filter (where s->>'failure' = 'board')::int as board,
+      count(*) filter (where s->'check'->>'ok' = 'true')::int as verified,
+      count(*) filter (where s->'check'->>'ok' = 'false')::int as failed_checks,
+      round(avg((s->>'ms')::numeric))::int as avg_ms, max((s->>'ms')::int)::int as max_ms
+    from sim_runs r, jsonb_array_elements(r.steps) s
+    where ($1::timestamptz is null or r.started > $1) and ($2::int is null or r.week = $2)
+    group by 1 order by 1`, [since || null, w]);
+  const [runs] = await q(`select count(*)::int as runs, count(*) filter (where ok)::int as completed, count(*) filter (where not ok)::int as failed,
+      coalesce(sum((checks->>'passed')::int), 0)::int as checks_passed, coalesce(sum((checks->>'failed')::int), 0)::int as checks_failed,
+      coalesce(sum(jsonb_array_length(anomalies)), 0)::int as anomalies, coalesce(sum(writes), 0)::int as writes
+    from sim_runs where ($1::timestamptz is null or started > $1) and ($2::int is null or week = $2)`, [since || null, w]);
+  const latest = await q(`select r.id, r.started, r.sim_at, r.agent_id, r.prompt_type, a from sim_runs r, jsonb_array_elements(r.anomalies) a
+    where ($1::timestamptz is null or r.started > $1) and ($2::int is null or r.week = $2) order by r.started desc limit 20`, [since || null, w]);
+  const errors = await q(`select s->>'tool' as tool, s->>'failure' as failure, left(s->>'error', 160) as error, count(*)::int as n from sim_runs r, jsonb_array_elements(r.steps) s
+    where s->>'error' is not null and ($1::timestamptz is null or r.started > $1) and ($2::int is null or r.week = $2) group by 1, 2, 3 order by n desc limit 20`, [since || null, w]);
+  const offered = PROMPT_TYPES.flatMap((t) => t.tools).filter((t) => !NEVER.has(t));
+  const called = new Set(rows.map((r) => r.tool));
+  const healthy = runs.anomalies === 0 && rows.every((r) => r.board === 0 && r.failed_checks === 0);
+  return { healthy, runs, tools: rows, uncovered: [...new Set(offered)].filter((t) => !called.has(t)).sort(), errors, anomalies: latest.map((x) => ({ run: x.id, started: x.started, sim_at: x.sim_at, agent: x.agent_id, type: x.prompt_type, ...x.a })) };
 }
 
 // ---------- the simulator ----------
 // request(method, path, body, key): the board's API (in-process or HTTP). keyFor(handle, id): that agent's key.
-export function createSimulator({ request, fixture, brain, store, keyFor, log = () => {}, maxSteps = 8, maxWritesPerRun = 3, maxWritesPerDay = 48, handles = null, random = Math.random }) {
+export function createSimulator({ request, fixture, brain, store, keyFor, log = () => {}, maxSteps = 8, maxWritesPerRun = 3, maxWritesPerDay = 48, handles = null, random = Math.random, weights = null }) {
   const people = fixture.people.filter((p) => !handles || handles.includes(p.handle)).map((p) => ({ ...p, subjects: p.subjects || subjectsOf(fixture, p.handle) }));
   if (!people.length) throw new Error("no people to simulate");
   const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 20);
   let running = false;
   let timer = null;
+  const busy = new Set(); // handles with a run in flight, so parallel runs pick different people
 
+  const nameOf = new Map(fixture.people.map((p) => [slug(p.handle), p.name]));
+  // Weighted choice when weights are given (the year favours posting about one's work), else the fixed rotation.
+  const weighted = () => { const all = PROMPT_TYPES.filter((t) => (weights[t.id] || 0) > 0); let r = random() * all.reduce((n, t) => n + weights[t.id], 0); for (const t of all) { r -= weights[t.id]; if (r <= 0) return t; } return all[all.length - 1]; };
   async function pick({ handle, type } = {}) {
     const h = await store.history();
-    const t = type ? typeById(type) : PROMPT_TYPES[h.total % PROMPT_TYPES.length];
+    const t = type ? typeById(type) : weights ? weighted() : PROMPT_TYPES[h.total % PROMPT_TYPES.length];
     if (!t) throw new Error(`unknown prompt type ${type}`);
     let person = handle ? people.find((p) => p.handle === handle) : null;
     if (handle && !person) throw new Error(`unknown handle ${handle}`);
     if (!person) {
-      const least = Math.min(...people.map((p) => h.byAgent.get(slug(p.handle)) || 0));
-      const pool = people.filter((p) => (h.byAgent.get(slug(p.handle)) || 0) === least);
+      const free = people.filter((p) => !busy.has(p.handle));
+      const cast = free.length ? free : people;
+      const least = Math.min(...cast.map((p) => h.byAgent.get(slug(p.handle)) || 0));
+      const pool = cast.filter((p) => (h.byAgent.get(slug(p.handle)) || 0) === least);
       person = pool[Math.floor(random() * pool.length)];
     }
     return { person, type: t, history: h };
   }
 
+  // opts: handle, type, and for the simulated year: at (ISO moment), week, beat (this quarter's work), month ({season, events}).
   async function run(opts = {}) {
     const { person, type, history } = await pick(opts);
     const id = slug(person.handle);
-    const record = { id: crypto.randomBytes(6).toString("hex"), started: new Date().toISOString(), finished: null, agent_id: id, handle: person.handle, prompt_type: type.id, brain: brain.name, model: brain.model || null, task: null, prompt: null, context: {}, steps: [], outcome: null, writes: 0, tokens: {}, ok: false, error: null };
+    const record = { id: crypto.randomBytes(6).toString("hex"), started: new Date().toISOString(), finished: null, agent_id: id, handle: person.handle, prompt_type: type.id, brain: brain.name, model: brain.model || null, task: null, prompt: null, context: {}, steps: [], outcome: null, writes: 0, tokens: {}, ok: false, error: null, checks: { passed: 0, failed: 0 }, anomalies: [], ...(opts.at ? { sim_at: opts.at, week: opts.week ?? null } : {}), made: [] };
+    busy.add(person.handle);
+    const beat = opts.beat ?? (opts.beatBy ? opts.beatBy(person.handle) : "");
+    const memory = store.memory ? await store.memory(person.handle) : {};
+    memory.known ||= {};
+    const meet = (other, via) => { if (!other || other === id || other === "board") return; const k = (memory.known[other] ||= { times: 0, via: [] }); k.times++; k.name = nameOf.get(other) || k.name; k.last = opts.at || new Date().toISOString(); if (!k.via.includes(via)) k.via.push(via); };
     try {
       const key = await keyFor(person.handle, id);
       const me = await request("GET", "/api/me", null, key);
@@ -437,7 +571,7 @@ export function createSimulator({ request, fixture, brain, store, keyFor, log = 
         const t0 = Date.now();
         const step = { n: record.steps.length + 1, tool: name, args };
         record.steps.push(step);
-        const refuse = (why) => { step.status = 0; step.error = why; step.ms = Date.now() - t0; return { ok: false, status: 0, text: why, data: null }; };
+        const refuse = (why) => { step.status = 0; step.error = why; step.failure = "harness"; step.ms = Date.now() - t0; return { ok: false, status: 0, text: why, data: null }; };
         if (!allowed.has(name)) return refuse(`the tool ${name} is not available in this run`);
         if (WRITES.has(name) && record.writes >= maxWritesPerRun) return refuse(`write budget for this run is spent (${maxWritesPerRun}); read and report instead`);
         try {
@@ -445,10 +579,22 @@ export function createSimulator({ request, fixture, brain, store, keyFor, log = 
           const r = await request(method, path, body, key);
           step.status = r.status;
           step.ms = Date.now() - t0;
-          if (r.status >= 400) { step.error = r.data?.error || `HTTP ${r.status}`; return { ok: false, status: r.status, text: step.error, data: r.data }; }
+          if (r.status >= 400) { step.error = r.data?.error || `HTTP ${r.status}`; step.failure = failureClass(r.status, step.error); if (step.failure === "board") record.anomalies.push({ tool: name, status: r.status, kind: "error", detail: step.error }); return { ok: false, status: r.status, text: step.error, data: r.data }; }
           if (WRITES.has(name)) record.writes++;
           const text = toolResult(name, name === "whoami" ? whoamiView(r.data) : r.data).content[0].text;
           step.result = text.length > 600 ? text.slice(0, 600) + "…" : text;
+          try {
+            // What this run made, for backdating, and whom the person met, for their memory of the board.
+            if (name === "post" || name === "reply") { record.made.push({ kind: "post", id: r.data.id }); if (r.data.topic?.created) record.made.push({ kind: "topic", id: r.data.topic.id }); }
+            if (name === "reply" && args.parent_id) { const parent = await request("GET", `/api/posts/${encodeURIComponent(args.parent_id)}`, null, key); if (parent.status === 200) { const p = flatten(parent.data).find((x) => x.id === String(args.parent_id)); meet(p?.author, "reply"); } }
+            if (name === "upvote") { record.made.push({ kind: "upvote", post_id: r.data.post_id, agent_id: id }); meet(r.data.author, "upvote"); }
+            if (name === "connect" || name === "accept_connection") { record.made.push({ kind: "connection", from_id: id, to_id: r.data.id }); meet(r.data.id, "connect"); }
+            if (name === "inbox") for (const p of r.data.replies || []) meet(p.author, "replied to me");
+            // Did the board do what the call said? Read it back.
+            step.check = await verifyCall(name, args, r.data, { request, key, me: id });
+          } catch (e) { step.check = { ok: false, detail: `check threw: ${e.message}` }; }
+          record.checks[step.check.ok ? "passed" : "failed"]++;
+          if (!step.check.ok) record.anomalies.push({ tool: name, status: r.status, kind: "check", detail: step.check.detail });
           return { ok: true, status: r.status, text, data: r.data };
         } catch (e) { return refuse(e.message); }
       };
@@ -463,21 +609,28 @@ export function createSimulator({ request, fixture, brain, store, keyFor, log = 
         recent_posts: [...threads.values()],
         inbox: box.status === 200 ? { replies: box.data.replies.length, upvotes: box.data.upvotes.length, connections: box.data.connections.length } : null,
       };
-      const invented = await brain.invent({ persona: person, type, occasion, context: record.context });
+      const situation = situationText({ at: opts.at, month: opts.month, beat, known: memory.known, persona: person });
+      if (beat) record.context.beat = beat;
+      const invented = await brain.invent({ persona: person, type, occasion, context: record.context, situation, beat });
       record.task = invented.task;
       record.prompt = invented.prompt;
       addUsage(record.tokens, invented.usage);
-      const acted = await brain.act({ persona: person, type, prompt: invented.prompt, tools: offered, call, maxSteps, readOnly, me: me.data });
+      const acted = await brain.act({ persona: person, type, prompt: invented.prompt, tools: offered, call, maxSteps, readOnly, me: me.data, situation });
       record.outcome = acted.outcome || "";
       for (const [k, v] of Object.entries(acted.usage || {})) record.tokens[k] = (record.tokens[k] || 0) + v;
       record.ok = true;
     } catch (e) {
       record.error = e.message;
+      if (!/^cannot sign in|^claude \d+/.test(e.message)) record.anomalies.push({ tool: null, status: null, kind: "exception", detail: e.message });
     }
     record.finished = new Date().toISOString();
-    await store.save(record);
+    busy.delete(person.handle);
+    if (store.remember) await store.remember(person.handle, id, memory);
+    if (store.backdate) await store.backdate(record);
+    const { made, ...saved } = record;
+    await store.save(saved);
     const calls = record.steps.map((s) => `${s.tool}:${s.status}`).join(" ");
-    log(`sim ${record.prompt_type} as ${record.agent_id}: ${record.ok ? "ok" : "FAILED " + record.error} · ${record.steps.length} calls [${calls}] · ${record.writes} writes${record.tokens.input ? ` · ${record.tokens.input}+${record.tokens.output || 0} tokens` : ""}`);
+    log(`sim ${record.prompt_type} as ${record.agent_id}: ${record.ok ? "ok" : "FAILED " + record.error} · ${record.steps.length} calls [${calls}] · ${record.writes} writes · checks ${record.checks.passed}/${record.checks.passed + record.checks.failed}${record.anomalies.length ? ` · ANOMALIES ${record.anomalies.map((a) => `${a.tool || "run"}:${a.detail}`).join("; ")}` : ""}${record.tokens.input ? ` · ${record.tokens.input}+${record.tokens.output || 0} tokens` : ""}`);
     return record;
   }
 
@@ -490,7 +643,7 @@ export function createSimulator({ request, fixture, brain, store, keyFor, log = 
     timer = first;
   }
   function stop() { if (timer) { clearTimeout(timer); clearInterval(timer); timer = null; } }
-  return { run, pick, start, stop, people, get running() { return running; } };
+  return { run, pick, start, stop, people, slug, get running() { return running; } };
 }
 
 // ---------- on the board itself, from the environment (the Railway route) ----------
