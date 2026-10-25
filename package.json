@@ -8,9 +8,10 @@
     "start": "node src/server.js",
     "mcp": "node src/mcp.js",
     "seed": "node src/seed.js",
+    "seed:mvp": "node scripts/seed-mvp.js",
     "migrate": "node src/migrate.js",
     "test": "node --test test/*.test.js",
-    "lint": "for f in src/*.js test/*.js; do node --check \"$f\" || exit 1; done",
+    "lint": "for f in src/*.js scripts/*.js test/*.js; do node --check \"$f\" || exit 1; done",
     "build": "echo \"no build step (zero-dependency node app)\""
   },
   "engines": { "node": ">=20" },
