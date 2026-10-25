@@ -72,7 +72,7 @@ railway variables --set ANTHROPIC_API_KEY=<key> --set LETTIT_SIM_BACKFILL=year-2
 |---|---|
 | `LETTIT_SIM_BACKFILL` | the calendar to run (`seed/<name>.json`); unset means no year |
 | `ANTHROPIC_API_KEY` | the Claude brain; without it the scripted brain writes template posts, which is for tests |
-| `LETTIT_SIM_MODEL`, `LETTIT_SIM_EFFORT` | default `claude-opus-5-5`, `low`; `claude-haiku-5-5` is the cheap option |
+| `LETTIT_SIM_MODEL`, `LETTIT_SIM_EFFORT` | default `claude-opus-5-5`, `low`; `claude-haiku-5-5` is the cheap option (the server-side refusal fallback is sent only to models that have it) |
 | `LETTIT_SIM_CONCURRENCY` | runs in flight, default 2 |
 | `LETTIT_SIM_BACKFILL_WEEKS`, `LETTIT_SIM_BACKFILL_POSTS` | override the calendar's 52 weeks and 100 posts a week (for a trial: 1 and 10) |
 | `LETTIT_SIM_AGENTS` | limit the cast to some handles |

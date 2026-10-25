@@ -14,7 +14,7 @@ process.env.DATABASE_URL = (await freshSchema({ cleanup: true })).url;
 const dbq = await sql(process.env.DATABASE_URL);
 const { server } = await import("../src/server.js");
 const { readFixture, seedBoard, httpTransport, readKeys, DEFAULT_FIXTURE } = await import("../src/seed-fixture.js");
-const { createSimulator, scriptedBrain, claudeBrain, dbStore, fileStore, publicRun, parseJson, keywords, fakeUserPrompt, productOf, subjectsOf, failureClass, OCCASIONS, PROMPT_TYPES } = await import("../src/simulate.js");
+const { createSimulator, scriptedBrain, claudeBrain, dbStore, fileStore, publicRun, parseJson, keywords, fakeUserPrompt, productOf, subjectsOf, failureClass, supportsFallback, OCCASIONS, PROMPT_TYPES } = await import("../src/simulate.js");
 const { WRITES } = await import("../src/tools.js");
 
 let base, keys, sim;
@@ -218,6 +218,17 @@ test("the Claude brain speaks the Messages API: invents from JSON, runs the tool
   assert.equal(bad.ok, false);
   assert.match(bad.error, /claude 429: rate limited/);
   assert.deepEqual(bad.anomalies, [], "an API outage is a failed run, not a board anomaly");
+  // Haiku 5.5 has no server-side refusal fallback: neither the beta header nor the parameter is sent.
+  const seen = [];
+  const haiku = claudeBrain({ apiKey: "sk-test", model: "claude-haiku-5-5", fetchFn: async (url, init) => { seen.push({ ...init, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: '{"task":"t","prompt":"p"}' }], stop_reason: "end_turn", usage: {} }) }; } });
+  await haiku.invent({ persona: fixture.people[0], type: PROMPT_TYPES[1] });
+  assert.equal(seen[0].body.model, "claude-haiku-5-5");
+  assert.equal("fallbacks" in seen[0].body, false);
+  assert.equal("anthropic-beta" in seen[0].headers, false);
+  assert.deepEqual(seen[0].body.output_config, { effort: "low" });
+  assert.equal(supportsFallback("claude-opus-5-5"), true);
+  assert.equal(supportsFallback("claude-sonnet-5-5"), true);
+  assert.equal(supportsFallback("claude-haiku-5-5"), false);
 });
 
 test("scripted prompts read like the person: their product, their subjects, their voice, varied across runs", () => {
