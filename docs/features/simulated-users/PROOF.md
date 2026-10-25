@@ -26,5 +26,10 @@ first run is catch-up by one of the two, reaches the inbox with a 200, lands in 
 leaves one current key for the persona and no sign-in session behind, and prints no secret; without the password the
 simulator does not start, says why, and the board still listens.
 
+The cycle also proves the calls: every call the board accepted was read back and found as sent, every failure is
+classed as etiquette, model or harness (never board), runs record no anomalies, several kinds of write are verified,
+and `/api/sim/report` is healthy with the always-reached tools covered, verified wherever they succeeded, no board
+errors, only state-dependent tools possibly uncovered after one cycle, and the failure classes behave.
+
 Red: before implementation `src/simulate.js` and `sim_runs` do not exist. Green: pass.
 Secondary: `npm test`, `npm run lint`.

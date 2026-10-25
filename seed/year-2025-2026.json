@@ -1,0 +1,301 @@
+{
+ "name": "year-2025-2026",
+ "title": "A year of building with AI, Oct 2025 to Oct 2026",
+ "start": "2025-10-27",
+ "weeks": 52,
+ "posts_per_week": 100,
+ "quarters": [
+  "2025-Q4",
+  "2026-Q1",
+  "2026-Q2",
+  "2026-Q3"
+ ],
+ "note": "Month anchors are seasonal and recurring (holidays, tax season, semesters, conference weeks) plus a few industry trends of the period; edit them to pin specific releases or news. Arcs are one line per persona per quarter: what they are building then. The simulation quotes neither; it writes from them.",
+ "weights": {
+  "status": 15,
+  "share-finding": 20,
+  "procedure": 12,
+  "ask": 12,
+  "help": 15,
+  "catch-up": 12,
+  "research": 6,
+  "pushback": 4,
+  "network": 3,
+  "tidy": 1
+ },
+ "months": [
+  {
+   "month": "2025-10",
+   "season": "Late October: Q4 planning, Halloween, the push before the holidays.",
+   "events": [
+    "Coding agents (Claude Code, Codex, Cursor) are the default way small teams build; MCP is how agents reach tools."
+   ]
+  },
+  {
+   "month": "2025-11",
+   "season": "November: Black Friday and Cyber Monday pricing experiments, Thanksgiving week slow in the US, year-end deals.",
+   "events": [
+    "A wave of new model releases from the big labs before year end; teams compare coding agents on real tickets."
+   ]
+  },
+  {
+   "month": "2025-12",
+   "season": "December: holiday slowdown, App Store review freeze around the holidays, year-end investor updates, next year's budgets.",
+   "events": [
+    "Year-in-review posts; AI spend per user is the number founders are asked for."
+   ]
+  },
+  {
+   "month": "2026-01",
+   "season": "January: new-year planning, CES, new cohorts and semesters start, tax-season prep for US small businesses.",
+   "events": [
+    "Accelerator applications open; students return with new projects."
+   ]
+  },
+  {
+   "month": "2026-02",
+   "season": "February: US tax season in full swing, spring semester, accelerator interviews, Ramadan begins mid-month.",
+   "events": [
+    "Bookkeeping and payments founders are flooded; app usage shifts for Ramadan in Arabic-speaking markets."
+   ]
+  },
+  {
+   "month": "2026-03",
+   "season": "March: demo day season for winter batches, SXSW, end of Q1 numbers, Ramadan ends around the 20th.",
+   "events": [
+    "Pitch rehearsals everywhere; AI-built MVPs face investor diligence questions about tests and data access."
+   ]
+  },
+  {
+   "month": "2026-04",
+   "season": "April: Q2 planning, US tax deadline on the 15th, summer internship hiring.",
+   "events": [
+    "Post-tax-season cleanups; pricing changes land as Q2 starts."
+   ]
+  },
+  {
+   "month": "2026-05",
+   "season": "May: Google I/O and Microsoft Build week bring a burst of developer tools, graduations, finals, summer plans.",
+   "events": [
+    "New developer tooling announcements; student founders decide whether to go full time."
+   ]
+  },
+  {
+   "month": "2026-06",
+   "season": "June: WWDC, end of the academic year, summer slowdown begins, mid-year reviews.",
+   "events": [
+    "iOS changes to plan for; interns start; mid-year metrics reviews."
+   ]
+  },
+  {
+   "month": "2026-07",
+   "season": "July: mid-year, quieter inboxes, vacations, a good month for refactors and paying down debt.",
+   "events": [
+    "Summer usage dips for school products, peaks for travel and food."
+   ]
+  },
+  {
+   "month": "2026-08",
+   "season": "August: back-to-school prep, fall launches planned, model releases pick up again after summer.",
+   "events": [
+    "Teams plan fall onboarding; new model generations change cost per call."
+   ]
+  },
+  {
+   "month": "2026-09",
+   "season": "September: fall semester starts with new club members and projects, conference season, Q3 closes.",
+   "events": [
+    "Campus products see their yearly surge; agencies see new client inquiries."
+   ]
+  },
+  {
+   "month": "2026-10",
+   "season": "October: demo day season, Hacktoberfest, Q4 planning, holiday launch prep.",
+   "events": [
+    "Year-end roadmaps; founders write up what a year of building with AI taught them."
+   ]
+  }
+ ],
+ "arcs": {
+  "mayabuilds": {
+   "2025-Q4": "Pilot live on 2 hospital units; building charge-nurse approval with Pixelfold; adding a third unit before the holidays.",
+   "2026-Q1": "Hospital IT security review and an SSO request; first paying hospital contract; shift coverage during the winter surge.",
+   "2026-Q2": "Second hospital signs; hiring a first engineer; compliance questions about staff data; night-shift scheduling across units.",
+   "2026-Q3": "Forge demo day follow-ups and a small raise; rolling to 6 units; measuring unfilled shifts before and after ShiftSwap."
+  },
+  "dreyes": {
+   "2025-Q4": "Nightly reconciliation job in place; Stripe Connect payouts for food trucks; idempotent webhooks everywhere.",
+   "2026-Q1": "Tax season crunch: 1099s, bank feed imports, categorisation accuracy; support load doubles.",
+   "2026-Q2": "Multi-entity owners and pricing tiers; audit logs; first accountant partners.",
+   "2026-Q3": "Webhook volume scaling; a contractor joins; SOC 2 questions from a bigger customer."
+  },
+  "priyaships": {
+   "2025-Q4": "Spec template and reading-level rules in place; building parental consent flow; a first school pilot.",
+   "2026-Q1": "School district pilot runs; COPPA review with a lawyer; usage dips over winter break.",
+   "2026-Q2": "Spring testing season spike; teacher dashboard; parents ask for progress reports.",
+   "2026-Q3": "Summer slump pushes a summer-learning product; Forge demo day; second district."
+  },
+  "jonas_l": {
+   "2025-Q4": "Android launch after Play verification; battery fixes; 10 drivers in internal testing.",
+   "2026-Q1": "A fleet of 40 drivers; offline mode for dead zones; winter weather logs break transcription.",
+   "2026-Q2": "Integration with a dispatch tool; per-driver pricing; app store review surprises.",
+   "2026-Q3": "Enterprise pilot with a logistics firm; security questionnaire; a painful Expo upgrade."
+  },
+  "aishab": {
+   "2025-Q4": "Weekly payouts shipped; onboarding 20 home cooks; holiday meal demand.",
+   "2026-Q1": "Food safety permits and insurance; first 50 cooks; cancellation policy.",
+   "2026-Q2": "Spring marketplace growth; referral loops between families; cook retention.",
+   "2026-Q3": "Fundraising conversations; expansion across the bay; unit economics per meal."
+  },
+  "mchen_dev": {
+   "2025-Q4": "Tests-first workflow for every feature; RLS per kitchen; payouts infrastructure.",
+   "2026-Q1": "An outage post-mortem; payments and payouts hardening; migration discipline.",
+   "2026-Q2": "Search and performance work; CI time cut in half; agent-written tests reviewed.",
+   "2026-Q3": "Hiring a second engineer; platform refactor; on-call rotation for two."
+  },
+  "sofia.alvarez": {
+   "2025-Q4": "Demo day prep for Forge Batch 7; office hours notes into action items.",
+   "2026-Q1": "Selecting Batch 8; monthly workshops at Northbridge; alumni check-ins.",
+   "2026-Q2": "Batch 8 kickoff; tooling for office hours; mentor matching.",
+   "2026-Q3": "Demo day for Batch 8; alumni program; what a year of cohorts taught the program."
+  },
+  "tomh_angel": {
+   "2025-Q4": "Diligence on Batch 7 companies; two checks written; AI cost per user as a diligence question.",
+   "2026-Q1": "Portfolio updates season; founders who cannot explain their own code.",
+   "2026-Q2": "An angel syndicate; a down round; what AI-built MVPs look like six months in.",
+   "2026-Q3": "Board observer seats; first exit conversations; what to check before a Series A."
+  },
+  "leof": {
+   "2025-Q4": "CrowdQ pilot in 2 lectures; hackathon stack; Supabase auth decisions.",
+   "2026-Q1": "Spring semester: 10 lectures; Supabase scaling; club workshop with Forge.",
+   "2026-Q2": "Finals-week spike; club demo night; incorporating or not.",
+   "2026-Q3": "Graduation looming; fall onboarding of 500 students; a cofounder question."
+  },
+  "hanakim": {
+   "2025-Q4": "Design tokens before any UI; v0 into real repos; club projects.",
+   "2026-Q1": "Freelance UI for 3 club projects; Figma variables as the source of truth.",
+   "2026-Q2": "Internship search and portfolio; design-to-code handoff speed.",
+   "2026-Q3": "Summer internship at an agency; design systems at scale; mentoring a freshman."
+  },
+  "ravi.m": {
+   "2025-Q4": "Finishing the Bubble-to-code migration; finals; the admin panel still in Bubble.",
+   "2026-Q1": "Spring semester surge; payments and shipping; a second campus asks in.",
+   "2026-Q2": "Graduation; going full time or not; three campuses by fall?",
+   "2026-Q3": "Fall semester rush; 3 campuses; first real revenue; hiring a classmate."
+  },
+  "gracet": {
+   "2025-Q4": "Citation guardrails; Forge pitch practice; first 300 grad students.",
+   "2026-Q1": "Raising a pre-seed; university partnership talks; retrieval costs.",
+   "2026-Q2": "Pricing for grad students; a library deal; thesis season load.",
+   "2026-Q3": "1,000 users; a first hire; what student founders learn in a year."
+  },
+  "omarh": {
+   "2025-Q4": "RTL layouts and dialect prompts; Lughati beta with 40 learners.",
+   "2026-Q1": "App store launch in Arabic markets; Ramadan changes when people study.",
+   "2026-Q2": "Teacher accounts for classrooms; vocabulary packs; retention after Ramadan.",
+   "2026-Q3": "Summer camps pilot; Gulf expansion; a second language pair."
+  },
+  "chloe.m": {
+   "2025-Q4": "First app ever: PlantPal; environment variables; asking beginner questions.",
+   "2026-Q1": "Learning git and the basics; adding reminders; reading her own code.",
+   "2026-Q2": "First 20 users among friends; push notifications; a bug that deleted plants.",
+   "2026-Q3": "Summer rebuild in code; learning React; helping other beginners."
+  },
+  "prof.rossi": {
+   "2025-Q4": "Class exercises: build nothing until 10 people say yes; grading on validation.",
+   "2026-Q1": "New cohort; an AI policy in the syllabus; students over-trusting generated code.",
+   "2026-Q2": "Judging the club demo night; research on AI-built MVPs; what validation looks like now.",
+   "2026-Q3": "Summer writing; redesigning the fall course around agents; office hours with alumni."
+  },
+  "kwame.a": {
+   "2025-Q4": "WhatsApp template approvals; compliance questions; synthetic patient data.",
+   "2026-Q1": "Clinic pilot with 30 patients; a data agreement; adherence baselines.",
+   "2026-Q2": "MBA graduation; measuring adherence; a second clinic interested.",
+   "2026-Q3": "Second clinic in Accra; a grant application; multilingual reminders."
+  },
+  "nina.pixelfold": {
+   "2025-Q4": "Fixed-price MVP packages; the healthcare client's approval flow; prototype reviews.",
+   "2026-Q1": "Agency pipeline for the new year; two MVP clients; estimating with AI in the loop.",
+   "2026-Q2": "Hiring; AI tooling costs per project; a retainer model.",
+   "2026-Q3": "Case studies; a pricing increase; what agencies sell when building is cheap."
+  },
+  "diego.codes": {
+   "2025-Q4": "Review checklist for AI pull requests; locking migrations; approval flow API.",
+   "2026-Q1": "Approval flow delivery; CI that fails on edited migrations; code review load.",
+   "2026-Q2": "Stack decisions for new clients; agents in CI; dependency hygiene.",
+   "2026-Q3": "Mentoring juniors; architecture reviews; reading more than writing."
+  },
+  "lilyzhang.design": {
+   "2025-Q4": "Figma variables exported as JSON; empty, loading and error states for every screen.",
+   "2026-Q1": "Design systems for 2 clients; naming components the same in Figma and code.",
+   "2026-Q2": "Handoff automation; design QA before release; dark mode by default.",
+   "2026-Q3": "Mentoring Hana; design review of AI-generated UI; accessibility passes."
+  },
+  "samqa": {
+   "2025-Q4": "Playwright end-to-end tests; test data designed to break things; flaky waits banned.",
+   "2026-Q1": "The flaky-test war; a cheap device farm; synthetic patients and cooks.",
+   "2026-Q2": "Testing WhatsApp and payment flows; test data for right-to-left text.",
+   "2026-Q3": "QA for AI features: eval sets, regression prompts, release gates."
+  },
+  "bencarter": {
+   "2025-Q4": "Lessons from the committed .env; explain-before-writing; faster reviews.",
+   "2026-Q1": "First solo feature shipped; pull requests reviewed in a day.",
+   "2026-Q2": "On-call rotation; debugging without the AI first; a production incident.",
+   "2026-Q3": "One year in; mentoring an intern; what dependence on AI looks like from inside."
+  },
+  "ana.pm": {
+   "2025-Q4": "Scoping the ShiftSwap rebuild; estimates from call transcripts; client status rhythm.",
+   "2026-Q1": "Approval flow delivery; weekly client status; scope creep conversations.",
+   "2026-Q2": "Two concurrent client builds; estimating when AI changes durations.",
+   "2026-Q3": "Process docs for the agency; retainers; handing off to a second PM."
+  },
+  "rajops": {
+   "2025-Q4": "Secret scanning on every repo; spend caps on AI keys; deployments for Pixelfold.",
+   "2026-Q1": "CI/CD for 3 client repos; a cost dashboard; a leaked key drill.",
+   "2026-Q2": "Incident response runbooks; backups tested; a Guild talk on secrets.",
+   "2026-Q3": "Terraform modules for client stacks; cost per environment; the Guild's infra night."
+  },
+  "jessmakes": {
+   "2025-Q4": "Holiday booking rush for groomers; Stripe webhooks hardened; solo support.",
+   "2026-Q1": "Annual plans; AI inbox triage; 160 paying customers.",
+   "2026-Q2": "Spring shedding season demand; reminders by text; churn analysis.",
+   "2026-Q3": "200 customers; a part-time support hire; what a solo SaaS year costs."
+  },
+  "kenji.w": {
+   "2025-Q4": "Make and Claude reading invoices for clients; validating AI output before saving.",
+   "2026-Q1": "Tax-season automations for two accountants; Airtable limits.",
+   "2026-Q2": "Scaling a client's Bubble app past 5,000 users; when to leave no-code.",
+   "2026-Q3": "Teaching a no-code course; automations that survived a year."
+  },
+  "fatimabuilds": {
+   "2025-Q4": "WhatsApp templates for shop owners; a stack under 20 dollars a month; local Expo builds.",
+   "2026-Q1": "Ramadan shop demand; offline-first ordering; 3 shops to 5.",
+   "2026-Q2": "8 shops; French and Arabic in one app; mobile money payments.",
+   "2026-Q3": "Payments via mobile money live; a cooperative of shops; costs still under 20 dollars."
+  },
+  "cnovak": {
+   "2025-Q4": "Mentoring in the Guild; maintainability over speed; pushing back on AI hype.",
+   "2026-Q1": "Reviewing Guild members' code; teaching people to read what the AI wrote.",
+   "2026-Q2": "Writing a short guide on reading code; debugging without tools.",
+   "2026-Q3": "Helping a mentee ship; what 30 years says about code that is cheap to write."
+  },
+  "ivybrooks": {
+   "2025-Q4": "Waitlist pages that convert; building in public; posting bugs not wins.",
+   "2026-Q1": "WaitlistKit launch; 1,000 pages made; the creator audience doubles.",
+   "2026-Q2": "A paid tier and templates; distribution experiments.",
+   "2026-Q3": "Newsletter and creator growth; what launching every week taught."
+  },
+  "mateo.f": {
+   "2025-Q4": "A no-code reservations prototype; a tablet waitlist used two nights a week; learning what an app is.",
+   "2026-Q1": "WhatsApp confirmations for guests; no-shows counted; a friend's restaurant asks for it.",
+   "2026-Q2": "A second restaurant; deposits for large parties; payments without a developer.",
+   "2026-Q3": "Deciding whether to leave no-code; no-show numbers before and after; hiring help or not."
+  },
+  "zoeadams": {
+   "2025-Q4": "Budgeting rules in a notebook ported to TypeScript; Stripe fees on a 4-dollar plan.",
+   "2026-Q1": "Annual plans; first 10 paying users; learning front-end state.",
+   "2026-Q2": "Bank import questions; categorisation with an LLM; data privacy for money.",
+   "2026-Q3": "100 users; the side project becomes real; taxes on a side business."
+  }
+ }
+}

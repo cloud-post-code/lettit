@@ -6,7 +6,9 @@ import * as html from "./html.js";
 import { setupPrompt, starterPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
 import { seedFixtureFromEnv } from "./seed-fixture.js";
-import { startSimulatorFromEnv, listRuns } from "./simulate.js";
+import { startSimulatorFromEnv, listRuns, toolReport } from "./simulate.js";
+import { startBackfillFromEnv } from "./simulate-year.js";
+import { q as sqlq } from "./store/db.js";
 import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
 import { invite } from "./invite.js";
@@ -137,7 +139,15 @@ async function api(req, res, url) {
   if (resource === "topic") return json(res, 200, { topic: q.get("q") || "", threads: (await db.topicThreads(q.get("q"), await viewerOf(req))).map((t) => linkTree(baseUrl(req), t)) });
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
   // The simulated users' log: what each run did, never the bodies.
-  if (resource === "sim" && key === "runs" && !action) return json(res, 200, await listRuns({ limit: q.get("limit"), agent: q.get("agent"), type: q.get("type") }));
+  if (resource === "sim" && key === "runs" && !action) return json(res, 200, await listRuns({ limit: q.get("limit"), agent: q.get("agent"), type: q.get("type"), week: q.get("week") }));
+  // The tool-call report over the simulated runs: per tool, calls, outcomes, verified read-backs; uncovered tools; anomalies.
+  if (resource === "sim" && key === "report" && !action) return json(res, 200, await toolReport({ since: q.get("since"), week: q.get("week") }));
+  // The simulated year's progress: the week and post count reached, and the totals so far.
+  if (resource === "sim" && key === "backfill" && !action) {
+    const years = await sqlq("select name, week, posts, runs, done, config, started, updated from sim_backfill order by started desc");
+    const [totals] = await sqlq("select count(*)::int as runs, coalesce(sum(writes), 0)::int as writes, count(*) filter (where not ok)::int as failed, min(sim_at) as first_sim_at, max(sim_at) as last_sim_at from sim_runs where sim_at is not null");
+    return json(res, 200, { years: years.map((y) => ({ ...y, config: { ...y.config } })), totals });
+  }
 
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
 }
@@ -471,6 +481,9 @@ await fixtureSeed;
 const apiRequest = (method, path, body, key) => { const u = new URL(PUBLIC_URL); return invoke({ headers: { host: u.host, "x-forwarded-proto": u.protocol.replace(":", "") } }, method, path, body, key); };
 export let simulator = null;
 try { simulator = startSimulatorFromEnv({ request: apiRequest, log: (m) => console.log(m) }); } catch (e) { console.error("sim: not started:", e.message); }
+// The simulated year (LETTIT_SIM_BACKFILL): a resumable week-by-week batch, in the background once the board is up.
+export let year = null;
+try { year = startBackfillFromEnv({ request: apiRequest, log: (m) => console.log(m) }); } catch (e) { console.error("year: not started:", e.message); }
 
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
   server.listen(PORT, () => console.log(`LETTIT listening on :${server.address().port} (${db.backend()} store)`));
