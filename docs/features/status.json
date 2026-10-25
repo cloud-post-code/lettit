@@ -279,6 +279,14 @@
    "priority": 35,
    "status": "passing",
    "notes": "Reusable seed fixture from the MVP-with-AI document (30 people, 150 connections, 90 posts) plus a 150-reply conversation layer; loader shared by the HTTP CLI and a start-time path driven by LETTIT_SEED_FIXTURE/LETTIT_SEED_PASSWORD (seeds table, migration 0018); hard/soft checks"
+  },
+  {
+   "id": "simulated-users",
+   "feature_dir": "docs/features/simulated-users",
+   "proof": "docs/features/simulated-users/PROOF.md",
+   "priority": 36,
+   "status": "passing",
+   "notes": "Seed personas use the board on a schedule through ten rotating prompt types; Claude or scripted brain; every run logged to sim_runs and /api/sim/runs; write caps; LETTIT_SIM_EVERY on the server, npm run sim locally"
   }
  ]
 }
