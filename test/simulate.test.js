@@ -16,6 +16,7 @@ const { server } = await import("../src/server.js");
 const { readFixture, seedBoard, httpTransport, readKeys, DEFAULT_FIXTURE } = await import("../src/seed-fixture.js");
 const { createSimulator, scriptedBrain, claudeBrain, dbStore, fileStore, publicRun, parseJson, keywords, fakeUserPrompt, productOf, subjectsOf, failureClass, supportsFallback, OCCASIONS, PROMPT_TYPES } = await import("../src/simulate.js");
 const { WRITES } = await import("../src/tools.js");
+const { login } = await import("./_operators.js");
 
 let base, keys, sim;
 const fixture = readFixture(DEFAULT_FIXTURE);
@@ -131,19 +132,50 @@ test("the tool-call report: every tool exercised by the cycle, verified, no boar
   assert.deepEqual(failureClass(400, "body required"), "model");
 });
 
-test("the /sim page is the sheet: report, per-tool table, and every run with its prompt and calls, without bodies", async () => {
-  const [status, html] = await fetch(`${base}/sim`).then(async (r) => [r.status, await r.text()]);
+test("the /sim page is the sheet: the report, every run with its prompt, each call with what it asked for, and what it wrote as the board shows it to the reader; closing notes only to the signed-in persona", async () => {
+  const h = (v) => String(v ?? "").replace(/\s+/g, " ").trim().replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const [status, html] = await fetch(`${base}/sim?limit=100`).then(async (r) => [r.status, await r.text()]);
   assert.equal(status, 200);
   assert.match(html, /<h1>Simulated users<\/h1>/);
   assert.match(html, /<b>healthy<\/b>: every accepted call read back as sent/);
   assert.match(html, /<td>search<\/td><td>\d+<\/td><td>\d+<\/td><td>\d+<\/td>/, "a per-tool row with calls, 2xx, verified");
-  for (const r of await fetch(`${base}/api/sim/runs?limit=100`).then((x) => x.json())) {
+  assert.match(html, /<th>what the agent did<\/th>/);
+  const runs = await fetch(`${base}/api/sim/runs?limit=100`).then((x) => x.json());
+  const MADE = new Set(["post", "reply", "upvote", "edit", "delete", "connect", "accept_connection", "disconnect", "set_visibility"]);
+  let searches = 0, shown = 0, closed = 0;
+  for (const r of runs) {
     assert.ok(html.includes(`href="/agents/${r.agent}"`), r.agent);
-    assert.ok(html.includes(r.prompt.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])).slice(0, 40)), `prompt shown: ${r.prompt.slice(0, 40)}`);
+    assert.ok(html.includes(h(r.prompt).slice(0, 40)), `prompt shown: ${r.prompt.slice(0, 40)}`);
+    assert.equal(r.outcome, undefined, "the API carries no closing note");
+    for (const t of r.tools) {
+      assert.equal(t.args, undefined, "no arguments in the API");
+      assert.equal(t.result, undefined, "no results in the API");
+      if (t.tool === "search" && t.status === 200) { searches++; assert.ok(t.what, "a search carries its query"); assert.ok(html.includes(h(t.what)), `query shown: ${t.what}`); }
+      if (!MADE.has(t.tool) || !(t.status >= 200 && t.status < 300)) continue;
+      assert.ok(t.made, `${t.tool} records what it made`);
+      if (t.made.agent) { assert.ok(html.includes(`href="/agents/${t.made.agent}"`), `${t.tool} links the agent`); continue; }
+      const [p] = await dbq("select p.title, p.body, post_visible(p, null) as visible from posts p where p.id = $1", [t.made.post]);
+      assert.ok(p, `${t.tool} made post ${t.made.post}`);
+      const link = `href="/t/${t.made.post}#${t.made.post}"`;
+      if (p.visible) { shown++; assert.ok(html.includes(link), `public write linked: ${t.tool} ${t.made.post}`); assert.ok(html.includes(h((p.title ? p.title + ": " : "") + (p.body || "")).slice(0, 40)), `its text shown: ${t.made.post}`); }
+      else { closed++; assert.ok(!html.includes(link), `circle-limited write not linked: ${t.made.post}`); assert.ok(!html.includes(h(p.body).slice(0, 30)), `its body kept out: ${t.made.post}`); }
+    }
   }
-  const outcomes = await dbq("select outcome from sim_runs where outcome is not null and length(outcome) > 20");
-  for (const { outcome } of outcomes) assert.ok(!html.includes(outcome.slice(0, 60).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]))), "no closing note on the public sheet");
+  assert.ok(searches > 0 && shown > 0, `the log has searches (${searches}) and public writes (${shown}) to show`);
+  if (closed) assert.match(html, /a post in a circle you are not in/);
+  const outcomes = await dbq("select agent_id, outcome from sim_runs where outcome is not null and length(outcome) > 20 order by started");
+  assert.ok(outcomes.length >= 2);
+  for (const { outcome } of outcomes) assert.ok(!html.includes(h(outcome).slice(0, 60)), "no closing note on the public sheet");
   assert.ok(!html.includes("lettit_"), "no key");
+  assert.match(html, /Sign in as a persona/);
+  // Signed in as a persona's operator, the sheet adds that agent's closing notes and still keeps the others' private.
+  const mine = outcomes[0];
+  const handle = fixture.people.find((p) => p.handle === mine.agent_id || p.handle.toLowerCase().replace(/[^a-z0-9]+/g, "-") === mine.agent_id).handle;
+  const cookie = await login(base, { email: `${handle}@example.com`, password: "seed-password-123" }, "/sim");
+  const signed = await fetch(`${base}/sim?limit=100`, { headers: { cookie } }).then((r) => r.text());
+  assert.ok(signed.includes(`Signed in as ${mine.agent_id}`));
+  assert.ok(signed.includes(h(mine.outcome).slice(0, 60)), "own closing note shown when signed in");
+  for (const o of outcomes.filter((o) => o.agent_id !== mine.agent_id)) assert.ok(!signed.includes(h(o.outcome).slice(0, 60)), `${o.agent_id}'s note stays private`);
   const [, filtered] = await fetch(`${base}/sim?type=tidy&limit=5`).then(async (r) => [r.status, await r.text()]);
   assert.match(filtered, /value="tidy"/);
   assert.equal((filtered.match(/<div class="meta">tidy/g) || []).length, 1);
@@ -233,6 +265,9 @@ test("the Claude brain speaks the Messages API: invents from JSON, runs the tool
   assert.equal(logged.length, 1);
   assert.equal(logged[0].id, r.id);
   assert.equal(publicRun(logged[0]).outcome, undefined);
+  assert.equal(publicRun(logged[0], { notes: true }).outcome, logged[0].outcome, "the closing note comes only when asked for");
+  assert.deepEqual(publicRun(logged[0]).tools.map((t) => [t.tool, t.what]), [["search", "approval flow"], ["post", "x"]], "each call shows what it asked for, never the text");
+  assert.ok(publicRun(logged[0]).tools.every((t) => t.args === undefined && t.result === undefined && t.made === undefined));
   const refusal = claudeBrain({ apiKey: "sk-test", fetchFn: async () => ({ ok: false, status: 429, json: async () => ({ error: { message: "rate limited" } }) }) });
   const s3 = createSimulator({ request: httpTransport(base), fixture, brain: refusal, store: fileStore(path.join(process.env.DATA_DIR, "runs2.jsonl")), keyFor });
   const bad = await s3.run({ handle: "leof", type: "ask" });

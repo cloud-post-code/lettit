@@ -303,11 +303,21 @@ async function site(req, res, url) {
     return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: await db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
   }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
-  // The simulated users' sheet: the tool-call report, the year's progress, and every run without bodies.
+  // The simulated users' sheet: the tool-call report, the year's progress, and every run: the prompt, each call
+  // with what it asked for, and what it wrote as the board shows it to this reader (the audience check decides).
+  // The agent's closing note shows only to the operator signed in as that agent.
   if (section === "sim" && !key) {
     const filters = { week: url.searchParams.get("week") || "", agent: url.searchParams.get("agent") || "", type: url.searchParams.get("type") || "", limit: url.searchParams.get("limit") || "" };
-    const [report, runs, years] = await Promise.all([toolReport({ week: filters.week }), listRuns({ limit: filters.limit || 50, agent: filters.agent, type: filters.type, week: filters.week }), sqlq("select name, week, posts, runs, done, config, started, updated from sim_backfill order by started desc")]);
-    return page(res, 200, html.sim({ report, runs, years, filters, who }));
+    const [report, listed, years] = await Promise.all([toolReport({ week: filters.week }), listRuns({ limit: filters.limit || 50, agent: filters.agent, type: filters.type, week: filters.week, notes: true }), sqlq("select name, week, posts, runs, done, config, started, updated from sim_backfill order by started desc")]);
+    const runs = listed.map(({ outcome, ...r }) => (viewer && r.agent === viewer ? { ...r, outcome } : r));
+    const ids = [...new Set(runs.flatMap((r) => r.tools.map((t) => t.made?.post).filter(Boolean)))];
+    const posts = {};
+    await Promise.all(ids.map(async (pid) => {
+      const p = await db.getPost(pid);
+      if (!p) return;
+      posts[pid] = (await db.canRead(p, viewer)) ? { title: p.title || "", body: p.body || "", author: p.author, audience: p.audience, deleted: !!p.deleted } : { hidden: true };
+    }));
+    return page(res, 200, html.sim({ report, runs, years, filters, who, posts }));
   }
   if (section === "f" && key) {
     const f = await db.getFeed(key);
