@@ -15,8 +15,10 @@ against a fake fetch, posts to `/v1/messages` with the API version, the fallback
 the model, `output_config.effort`, no `thinking`, invents from fenced JSON, offers only the type's tools with
 `input_schema` and a one-hour `cache_control` on the last, carries the persona and type in the system prompt, returns
 both tool results in one user message with the right `tool_use_id`s and `is_error` on the tool the run does not offer,
-sums token usage including cache reads, logs to the JSON-lines store, and surfaces a 429 as the run's error; lenient
-JSON parsing, keywords, and least-run picking behave; the scheduler runs on its interval without overlapping runs.
+sums token usage including cache reads, logs to the JSON-lines store, and surfaces a 429 as the run's error; scripted prompts name the person's product and subjects, never the request kind, vary across runs, and follow the
+voice (a terse engineer gets the bare request, a beginner hedges and asks for an explanation, the skeptic asks back),
+with a prompt for every persona and type; every run records the occasion, recent posts and inbox counts, and the
+inventor's request carries them; lenient JSON parsing, keywords, and least-run picking behave; the scheduler runs on its interval without overlapping runs.
 
 `test/sim-env.test.js` boots the real server with `LETTIT_SEED_FIXTURE`, `LETTIT_SEED_PASSWORD`, `LETTIT_SIM_EVERY=1`,
 a two-persona cast and no API key, and asserts the start line names two personas, the scripted brain and ten types; the

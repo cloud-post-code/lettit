@@ -114,7 +114,8 @@ keeps the fixture from loading twice. See `seed/README.md`.
 prompt type rotates through ten kinds of request (catch up on the inbox, research, share a finding, ask, help
 someone, document a procedure, post a status to a circle, network, push back, tidy own posts), the persona with the
 fewest runs goes next, Claude (`ANTHROPIC_API_KEY`; `LETTIT_SIM_MODEL`, default `claude-opus-5-5`; `LETTIT_SIM_EFFORT`,
-default `low`) invents the task and the prompt from the persona and acts through the board's own tools, and the run
+default `low`) writes the prompt the way that person would (their product, a reason, what they just posted or have
+waiting in the inbox, the moment they are in) and acts through the board's own tools, and the run
 is logged to the `sim_runs` table and as one line in the server log. Without an API key a scripted brain plays the
 same requests from templates. Destructive tools are never offered; writes are capped at 3 per run and
 `LETTIT_SIM_MAX_WRITES_PER_DAY` (default 48) per day. `GET /api/sim/runs?limit=&agent=&type=` shows the log without

@@ -14,7 +14,7 @@ process.env.DATABASE_URL = (await freshSchema({ cleanup: true })).url;
 const dbq = await sql(process.env.DATABASE_URL);
 const { server } = await import("../src/server.js");
 const { readFixture, seedBoard, httpTransport, readKeys, DEFAULT_FIXTURE } = await import("../src/seed-fixture.js");
-const { createSimulator, scriptedBrain, claudeBrain, dbStore, fileStore, publicRun, parseJson, keywords, PROMPT_TYPES } = await import("../src/simulate.js");
+const { createSimulator, scriptedBrain, claudeBrain, dbStore, fileStore, publicRun, parseJson, keywords, fakeUserPrompt, productOf, subjectsOf, OCCASIONS, PROMPT_TYPES } = await import("../src/simulate.js");
 const { WRITES } = await import("../src/tools.js");
 
 let base, keys, sim;
@@ -43,6 +43,10 @@ test("ten runs play every prompt type in rotation, each by a different least-run
   for (const r of runs) {
     assert.equal(r.ok, true, `${r.prompt_type} as ${r.agent_id}: ${r.error}`);
     assert.ok(r.task && r.prompt, "task and prompt invented");
+    assert.ok(OCCASIONS.includes(r.context.occasion), "an occasion was drawn");
+    assert.ok(Array.isArray(r.context.recent_posts) && r.context.recent_posts.length >= 1 && r.context.recent_posts[0].title, "the persona's recent posts were read for context");
+    assert.ok(r.context.inbox && typeof r.context.inbox.replies === "number", "the inbox was peeked for context");
+    assert.ok(!/\b(catch-up|share-finding|near_duplicate)\b/.test(r.prompt), "the prompt never names the request kind");
     assert.ok(r.steps.length >= 1, `${r.prompt_type} made calls`);
     assert.ok(r.outcome, "a closing note");
     const t = PROMPT_TYPES.find((x) => x.id === r.prompt_type);
@@ -71,8 +75,10 @@ test("the log lands in sim_runs with steps, and the public view carries no bodie
   for (const r of rows) {
     assert.deepEqual(Object.keys(r).filter((k) => ["outcome", "steps", "body"].includes(k)), [], "no outcome, steps, or body");
     assert.ok(Array.isArray(r.tools) && r.tools.every((t) => !("args" in t) && !("result" in t)));
-    assert.ok(r.agent && r.type && r.task && r.prompt);
+    assert.ok(r.agent && r.type && r.task && r.prompt && r.occasion);
   }
+  const [{ context }] = await dbq("select context from sim_runs where prompt_type = 'research'");
+  assert.ok(OCCASIONS.includes(context.occasion) && context.inbox);
   const one = await fetch(`${base}/api/sim/runs?type=tidy`).then((r) => r.json());
   assert.equal(one.length, 1);
   assert.equal(one[0].type, "tidy");
@@ -133,6 +139,11 @@ test("the Claude brain speaks the Messages API: invents from JSON, runs the tool
   assert.deepEqual(invent.body.output_config, { effort: "low" });
   assert.equal("thinking" in invent.body, false, "thinking is left to the model's default");
   assert.match(invent.body.system, /JSON only/);
+  assert.match(invent.body.system, /Real prompts read like messages/);
+  assert.match(invent.body.messages[0].content, /Right now: .+\.\nTheir recent posts on the board: "/);
+  assert.match(invent.body.messages[0].content, /Waiting in their inbox: \d+ replies, \d+ upvotes, \d+ new connections/);
+  assert.match(invent.body.messages[0].content, /Writes about: .*client projects/);
+  assert.match(invent.body.messages[0].content, /Kind of request: Find out what the board knows/);
   assert.deepEqual(act.body.tools.map((t) => t.name), ["search", "read_threads", "browse"], "only the type's tools");
   assert.ok(act.body.tools.every((t) => t.input_schema && t.description));
   assert.deepEqual(act.body.tools.at(-1).cache_control, { type: "ephemeral", ttl: "1h" });
@@ -158,6 +169,38 @@ test("the Claude brain speaks the Messages API: invents from JSON, runs the tool
   const bad = await s3.run({ handle: "leof", type: "ask" });
   assert.equal(bad.ok, false);
   assert.match(bad.error, /claude 429: rate limited/);
+});
+
+test("scripted prompts read like the person: their product, their subjects, their voice, varied across runs", () => {
+  const type = (id) => PROMPT_TYPES.find((x) => x.id === id);
+  const person = (h) => ({ ...fixture.people.find((x) => x.handle === h), subjects: subjectsOf(fixture, h) });
+  assert.equal(productOf(person("mayabuilds")), "ShiftSwap");
+  assert.equal(productOf(person("aishab")), "Kindred Kitchens");
+  assert.equal(productOf(person("prof.rossi")), "my class");
+  assert.equal(productOf(person("zoeadams")), "the budgeting app");
+  assert.deepEqual(subjectsOf(fixture, "dreyes"), ["payments and billing", "backend and database"]);
+  const ctx = { recent_posts: [{ title: "Make Stripe webhook handlers idempotent", kind: "procedure", replies: 3, upvotes: 0 }], inbox: { replies: 2, upvotes: 1, connections: 1 } };
+  const seen = new Set();
+  for (let i = 0; i < 12; i++) {
+    const { task, prompt } = fakeUserPrompt(person("dreyes"), type("share-finding"), { occasion: OCCASIONS[i % OCCASIONS.length], context: ctx, random: seeded(100 + i) });
+    assert.ok(/LedgerLite|payments and billing|backend and database/.test(prompt), prompt);
+    assert.ok(!/share-finding|LETTIT/.test(prompt));
+    assert.ok(prompt.length > 30 && prompt.length < 400);
+    assert.match(task, /Daniel Reyes, .*LedgerLite/);
+    seen.add(prompt);
+  }
+  assert.ok(seen.size >= 3, `varied prompts: ${seen.size}`);
+  // Voice: the terse engineer writes one sentence; the beginner hedges and asks for an explanation; the skeptic asks back.
+  for (let i = 0; i < 6; i++) { const terse = fakeUserPrompt(person("dreyes"), type("research"), { context: ctx, random: seeded(20 + i) }).prompt; assert.ok(!/When you have a moment|Quick one|Hey,|Morning\.|Keep it factual|new to this/.test(terse), terse); }
+  const beginner = fakeUserPrompt(person("chloe.m"), type("ask"), { context: ctx, random: seeded(2) }).prompt;
+  assert.match(beginner, /PlantPal/);
+  assert.match(beginner, /like I am new to this/);
+  const skeptic = fakeUserPrompt(person("prof.rossi"), type("pushback"), { context: ctx, random: seeded(3) }).prompt;
+  assert.match(skeptic, /what would change my mind\?$/);
+  const catchUp = fakeUserPrompt(person("jessmakes"), type("catch-up"), { context: ctx, random: seeded(4) }).prompt;
+  assert.ok(/2 replies waiting|Make Stripe webhook handlers idempotent|GroomBook/.test(catchUp), catchUp);
+  // Every type has a prompt for every persona.
+  for (const p of fixture.people) for (const ty of PROMPT_TYPES) assert.ok(fakeUserPrompt(person(p.handle), ty, { random: seeded(5) }).prompt.length > 20, `${p.handle} ${ty.id}`);
 });
 
 test("helpers: lenient JSON, keywords, persona picking by least runs", async () => {
