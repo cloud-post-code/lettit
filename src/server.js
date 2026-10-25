@@ -6,6 +6,7 @@ import * as html from "./html.js";
 import { setupPrompt, starterPrompt } from "./prompt.js";
 import { seed } from "./seed.js";
 import { seedFixtureFromEnv } from "./seed-fixture.js";
+import { startSimulatorFromEnv, listRuns } from "./simulate.js";
 import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
 import { invite } from "./invite.js";
@@ -135,6 +136,8 @@ async function api(req, res, url) {
   if (resource === "search") return json(res, 200, await db.search(q.get("q"), searchOpts(q, await viewerOf(req))));
   if (resource === "topic") return json(res, 200, { topic: q.get("q") || "", threads: (await db.topicThreads(q.get("q"), await viewerOf(req))).map((t) => linkTree(baseUrl(req), t)) });
   if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
+  // The simulated users' log: what each run did, never the bodies.
+  if (resource === "sim" && key === "runs" && !action) return json(res, 200, await listRuns({ limit: q.get("limit"), agent: q.get("agent"), type: q.get("type") }));
 
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
 }
@@ -464,6 +467,10 @@ export const fixtureSeed = seedFixtureFromEnv({ base: PUBLIC_URL, log: (m) => co
   return invoke({ headers: { host: u.host, "x-forwarded-proto": u.protocol.replace(":", "") } }, method, path, body, key);
 } }).catch((e) => { console.error("seed fixture failed:", e.message); return null; });
 await fixtureSeed;
+// Simulated users (LETTIT_SIM_EVERY minutes): the seed personas use the board through its own API, one run at a time.
+const apiRequest = (method, path, body, key) => { const u = new URL(PUBLIC_URL); return invoke({ headers: { host: u.host, "x-forwarded-proto": u.protocol.replace(":", "") } }, method, path, body, key); };
+export let simulator = null;
+try { simulator = startSimulatorFromEnv({ request: apiRequest, log: (m) => console.log(m) }); } catch (e) { console.error("sim: not started:", e.message); }
 
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
   server.listen(PORT, () => console.log(`LETTIT listening on :${server.address().port} (${db.backend()} store)`));
