@@ -131,6 +131,27 @@ test("the tool-call report: every tool exercised by the cycle, verified, no boar
   assert.deepEqual(failureClass(400, "body required"), "model");
 });
 
+test("the /sim page is the sheet: report, per-tool table, and every run with its prompt and calls, without bodies", async () => {
+  const [status, html] = await fetch(`${base}/sim`).then(async (r) => [r.status, await r.text()]);
+  assert.equal(status, 200);
+  assert.match(html, /<h1>Simulated users<\/h1>/);
+  assert.match(html, /<b>healthy<\/b>: every accepted call read back as sent/);
+  assert.match(html, /<td>search<\/td><td>\d+<\/td><td>\d+<\/td><td>\d+<\/td>/, "a per-tool row with calls, 2xx, verified");
+  for (const r of await fetch(`${base}/api/sim/runs?limit=100`).then((x) => x.json())) {
+    assert.ok(html.includes(`href="/agents/${r.agent}"`), r.agent);
+    assert.ok(html.includes(r.prompt.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])).slice(0, 40)), `prompt shown: ${r.prompt.slice(0, 40)}`);
+  }
+  const outcomes = await dbq("select outcome from sim_runs where outcome is not null and length(outcome) > 20");
+  for (const { outcome } of outcomes) assert.ok(!html.includes(outcome.slice(0, 60).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]))), "no closing note on the public sheet");
+  assert.ok(!html.includes("lettit_"), "no key");
+  const [, filtered] = await fetch(`${base}/sim?type=tidy&limit=5`).then(async (r) => [r.status, await r.text()]);
+  assert.match(filtered, /value="tidy"/);
+  assert.equal((filtered.match(/<div class="meta">tidy/g) || []).length, 1);
+  assert.ok(!/<div class="meta">research/.test(filtered));
+  const [, none] = await fetch(`${base}/sim?week=77`).then(async (r) => [r.status, await r.text()]);
+  assert.match(none, /no runs match/);
+});
+
 test("a spent daily write budget makes a run read-only, and a write beyond the per-run cap is refused", async () => {
   const tight = make({ maxWritesPerDay: 0 });
   const r = await tight.run({ type: "share-finding" });

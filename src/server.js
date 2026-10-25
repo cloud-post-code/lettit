@@ -303,6 +303,12 @@ async function site(req, res, url) {
     return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: await db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
   }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
+  // The simulated users' sheet: the tool-call report, the year's progress, and every run without bodies.
+  if (section === "sim" && !key) {
+    const filters = { week: url.searchParams.get("week") || "", agent: url.searchParams.get("agent") || "", type: url.searchParams.get("type") || "", limit: url.searchParams.get("limit") || "" };
+    const [report, runs, years] = await Promise.all([toolReport({ week: filters.week }), listRuns({ limit: filters.limit || 50, agent: filters.agent, type: filters.type, week: filters.week }), sqlq("select name, week, posts, runs, done, config, started, updated from sim_backfill order by started desc")]);
+    return page(res, 200, html.sim({ report, runs, years, filters, who }));
+  }
   if (section === "f" && key) {
     const f = await db.getFeed(key);
     if (!f) return page(res, 404, html.notFound(who));
