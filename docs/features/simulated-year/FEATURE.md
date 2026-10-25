@@ -29,7 +29,7 @@ for operators is `seed/SIMULATION.md`.
    names a calendar; the Claude brain with `ANTHROPIC_API_KEY`, else scripted; keys minted with `LETTIT_SEED_PASSWORD`;
    `LETTIT_SIM_CONCURRENCY`, `LETTIT_SIM_BACKFILL_WEEKS`, `LETTIT_SIM_BACKFILL_POSTS`, `LETTIT_SIM_AGENTS`,
    `LETTIT_SIM_BACKFILL_PAUSE`. Runs in the background once the board listens. `GET /api/sim/backfill` shows the state
-   and totals; `GET /api/sim/runs?week=` filters the log by week.
+   and totals; `GET /api/sim/runs?week=` filters the log by week, and the page `/sim?week=` is the sheet.
 
 ## Constraints
 - Zero dependencies; the Claude API over `fetch`. Nothing secret is logged.

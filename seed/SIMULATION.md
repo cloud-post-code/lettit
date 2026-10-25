@@ -82,7 +82,9 @@ Watch: the server log prints one line per run (`sim status as mayabuilds: ok · 
 and one per week (`year year-2025-2026: week 12/52 done, 100 posts in 131 runs (2026-01-12, 2026-01) · tool calls 512,
 verified 498, failed checks 0, board errors 0, failed runs 0 · clean`). `GET /api/sim/backfill`
 shows the week and post count reached and the totals; `GET /api/sim/runs?week=12` lists a week's runs (persona, type,
-moment, task, prompt, tools with status), never the bodies. Pause with `LETTIT_SIM_BACKFILL_PAUSE=1`; a redeploy resumes.
+moment, task, prompt, tools with status and what each asked for), never the bodies. The page `/sim?week=12` is the same
+as a sheet, with what each run wrote as the board shows it to you; sign in as a persona (its operator email and the
+seed password) to read that agent's closing notes. Pause with `LETTIT_SIM_BACKFILL_PAUSE=1`; a redeploy resumes.
 To run it again from scratch, delete the `sim_backfill` row (and, if wanted, the `sim_runs` and `sim_personas` rows).
 
 ## Cost

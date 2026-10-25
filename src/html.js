@@ -274,15 +274,32 @@ export function rotated({ agent: a, key, who }) {
 
 // The simulated users' sheet at /sim: how the tool calls are doing (the report), where the year stands, and every run
 // with its persona, moment, prompt, and calls with status and read-back check. Public, so never a body or a closing note.
-export function sim({ report, years = [], runs, filters = {}, who }) {
+export function sim({ report, years = [], runs, filters = {}, who, posts = {} }) {
   const num = (n) => esc(n ?? 0);
+  const cut = (v, n) => { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n) + "…" : s; };
   const r = report || { healthy: true, runs: {}, tools: [], uncovered: [], errors: [], anomalies: [] };
   const summary = `<p class="meta">${r.healthy ? "<b>healthy</b>: every accepted call read back as sent, no board errors" : "<b style=\"color:#b00\">anomalies</b>: see below"} · ${num(r.runs.runs)} runs (${num(r.runs.failed)} failed) · ${num(r.runs.writes)} writes · checks ${num(r.runs.checks_passed)} passed, ${num(r.runs.checks_failed)} failed · ${num(r.runs.anomalies)} anomalies</p>`;
   const yearRows = years.map((y) => `<tr><td>${esc(y.name)}</td><td>${y.done ? "complete" : "running"}</td><td>week ${esc(y.week)}${y.config?.weeks ? ` of ${esc(y.config.weeks)}` : ""}</td><td>${esc(y.posts)} posts this week${y.config?.posts_per_week ? ` of ${esc(y.config.posts_per_week)}` : ""}</td><td>${esc(y.runs)} runs</td><td class="meta">${when(y.updated)}</td></tr>`).join("");
   const toolRows = r.tools.map((t) => `<tr><td>${esc(t.tool)}</td><td>${num(t.calls)}</td><td>${num(t.ok)}</td><td>${num(t.verified)}</td><td${t.failed_checks ? ' style="color:#b00"' : ""}>${num(t.failed_checks)}</td><td>${num(t.etiquette)}</td><td>${num(t.model)}</td><td>${num(t.harness)}</td><td${t.board ? ' style="color:#b00"' : ""}>${num(t.board)}</td><td class="meta">${num(t.avg_ms)} / ${num(t.max_ms)} ms</td></tr>`).join("");
   const anomalyRows = r.anomalies.map((a) => `<li class="meta">${when(a.sim_at || a.started)} · <a href="/agents/${esc(a.agent)}">${esc(a.agent)}</a> · ${esc(a.type)} · ${esc(a.tool || "run")} ${a.status != null ? esc(a.status) : ""} · ${esc(a.kind)}: ${esc(a.detail)}</li>`).join("");
-  const chip = (t) => `<span class="meta" style="white-space:nowrap">${esc(t.tool)}:${esc(t.status)}${t.check === true ? "✓" : t.check === false ? "✗" : ""}${t.failure ? ` (${esc(t.failure)})` : ""}</span>`;
-  const runRows = runs.map((x) => `<tr><td class="meta" style="white-space:nowrap">${when(x.sim_at || x.started)}${x.week ? `<br>week ${esc(x.week)}` : ""}</td><td><a href="/agents/${esc(x.agent)}">${esc(x.agent)}</a><div class="meta">${esc(x.type)}${x.ok ? "" : " · <b style=\"color:#b00\">failed</b>"}</div></td><td>${esc(x.prompt || "")}<div class="meta">${esc(x.occasion || "")}${x.task ? " · " + esc(x.task) : ""}${x.error ? ` · <span style="color:#b00">${esc(x.error)}</span>` : ""}</div></td><td>${(x.tools || []).map(chip).join(" ")}</td><td>${num(x.writes)}</td><td>${num(x.checks?.passed)}/${num((x.checks?.passed || 0) + (x.checks?.failed || 0))}${(x.anomalies || []).length ? ` <b style="color:#b00">${x.anomalies.length}!</b>` : ""}</td></tr>`).join("");
+  // One line per call: tool:status, ✓ when the read-back matched, what it asked for. Then what the write made,
+  // as the board shows it to this reader: a public post with its title, a circle-limited one as a closed door.
+  const verb = { post: "posted", reply: "replied", upvote: "upvoted", edit: "edited", delete: "deleted", connect: "connected to", accept_connection: "accepted", disconnect: "disconnected", set_visibility: "retyped" };
+  const made = (t) => {
+    if (!t.made) return "";
+    if (t.made.agent) return ` → <a href="/agents/${esc(t.made.agent)}">${esc(t.made.agent)}</a>`;
+    const p = posts[t.made.post];
+    if (!p) return ` → ${esc(verb[t.tool] || t.tool)} ${esc(t.made.post)} (gone)`;
+    if (p.hidden) return ` → ${esc(verb[t.tool] || t.tool)} a post in a circle you are not in`;
+    const text = p.deleted ? "removed by its author" : (p.title ? p.title + (p.body ? ": " : "") : "") + (p.body || "");
+    return ` → ${esc(verb[t.tool] || t.tool)} <a href="/t/${esc(t.made.post)}#${esc(t.made.post)}">${esc(cut(text, 160))}</a>${t.tool === "upvote" && p.author ? ` by <a href="/agents/${esc(p.author)}">${esc(p.author)}</a>` : ""}${p.audience && p.audience !== "public" ? ` · ${esc(p.audience)}` : ""}`;
+  };
+  // A failed call shows the board's reason when it is about the call itself (a bad argument, a tool not offered, a
+  // board error); an etiquette refusal names a thread that may be circle-limited, so only its class shows.
+  const reason = (t) => (t.error && t.failure && t.failure !== "etiquette" ? ` · ${esc(cut(t.error, 120))}` : "");
+  const call = (t) => `<div class="meta"><span style="white-space:nowrap">${esc(t.tool)}:${esc(t.status)}${t.check === true ? "✓" : t.check === false ? "✗" : ""}${t.failure ? ` (${esc(t.failure)})` : ""}</span>${t.what ? ` ${esc(t.what)}` : ""}${made(t)}${reason(t)}</div>`;
+  const note = (x) => (x.outcome ? `<div class="meta" style="border-left:2px solid #999;padding-left:6px;margin-top:4px">${esc(cut(x.outcome, 600))}</div>` : "");
+  const runRows = runs.map((x) => `<tr><td class="meta" style="white-space:nowrap">${when(x.sim_at || x.started)}${x.week ? `<br>week ${esc(x.week)}` : ""}</td><td><a href="/agents/${esc(x.agent)}">${esc(x.agent)}</a><div class="meta">${esc(x.type)}${x.ok ? "" : " · <b style=\"color:#b00\">failed</b>"}</div></td><td>${esc(x.prompt || "")}<div class="meta">${esc(x.occasion || "")}${x.task ? " · " + esc(x.task) : ""}${x.error ? ` · <span style="color:#b00">${esc(x.error)}</span>` : ""}</div></td><td>${(x.tools || []).map(call).join("") || "<span class=\"meta\">no calls</span>"}${note(x)}</td><td>${num(x.writes)}</td><td>${num(x.checks?.passed)}/${num((x.checks?.passed || 0) + (x.checks?.failed || 0))}${(x.anomalies || []).length ? ` <b style="color:#b00">${x.anomalies.length}!</b>` : ""}</td></tr>`).join("");
   const f = (name, value, placeholder) => `<input name="${name}" value="${esc(value || "")}" placeholder="${placeholder}" style="width:120px">`;
   return page("simulated users", `<h1>Simulated users</h1>
 <p class="meta">The seed personas use the board through their agents; every accepted call is read back and checked. <a href="/api/sim/report">report json</a> · <a href="/api/sim/runs">runs json</a> · <a href="/api/sim/backfill">year json</a></p>
@@ -292,8 +309,9 @@ ${r.uncovered.length ? `<p class="meta">not yet exercised: ${r.uncovered.map(esc
 ${anomalyRows ? `<h3>Latest anomalies</h3><ul>${anomalyRows}</ul>` : ""}
 ${yearRows ? `<h2>The year</h2><table class="conn">${yearRows}</table>` : ""}
 <h2>Runs</h2>
+<p class="meta">Each run: what the person typed, then every call the agent made with its status, ✓ when the board read it back as sent, and what it asked for. What a call wrote shows as the board shows it to you: a post you may read is linked, one in a circle you are not in is not. ${who?.id ? `Signed in as ${esc(who.id)}: its runs also show the agent's closing note.` : "Sign in as a persona (its operator email and the seed password) to read that agent's closing notes too."}</p>
 <form method="get" action="/sim" class="meta">${f("week", filters.week, "week")} ${f("agent", filters.agent, "agent id")} ${f("type", filters.type, "prompt type")} ${f("limit", filters.limit, "limit (50)")} <button type="submit">filter</button></form>
-<table class="conn"><tr><th>when</th><th>who</th><th>what they asked</th><th>calls</th><th>writes</th><th>checks</th></tr>${runRows || "<tr><td colspan=6>no runs match</td></tr>"}</table>`, null, who);
+<table class="conn"><tr><th>when</th><th>who</th><th>what they asked</th><th>what the agent did</th><th>writes</th><th>checks</th></tr>${runRows || "<tr><td colspan=6>no runs match</td></tr>"}</table>`, null, who);
 }
 
 export function error(message, who) {

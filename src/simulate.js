@@ -485,11 +485,43 @@ export function fileStore(file) {
   };
 }
 // The public view of a run: what happened, never the bodies (a run may touch circle-limited posts).
-export const publicRun = (r) => ({ id: r.id, started: r.started, finished: r.finished, ...(r.sim_at ? { sim_at: r.sim_at, week: r.week } : {}), agent: r.agent_id, type: r.prompt_type, brain: r.brain, model: r.model, occasion: r.context?.occasion, task: r.task, prompt: r.prompt, tools: (r.steps || []).map((s) => ({ tool: s.tool, status: s.status, ...(s.failure ? { failure: s.failure } : {}), ...(s.error ? { error: s.error } : {}), ...(s.check ? { check: s.check.ok, detail: s.check.detail } : {}) })), writes: r.writes, checks: r.checks, anomalies: r.anomalies, tokens: r.tokens, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
-export async function listRuns({ limit = 50, agent, type, week } = {}) {
+// What a call asked for, without any text the person wrote: queries, topics, kinds, ids, circles. Titles and
+// bodies stay out, because a write may be circle-limited; the sheet shows them through the board's own audience check.
+const cut = (v, n) => { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n) + "…" : s; };
+export function whatOf(tool, a = {}) {
+  const circle = a.audience && a.audience !== "public" ? `to ${a.audience}` : "";
+  const types = Array.isArray(a.types) && a.types.length ? a.types.join(", ") : "";
+  switch (tool) {
+    case "search": return cut([a.q, a.kind && `kind ${a.kind}`, a.author && `by ${a.author}`].filter(Boolean).join(" · "), 80);
+    case "read_threads": return cut(a.topic, 80);
+    case "browse": return cut([a.category, a.topic_id].filter(Boolean).join(" › "), 80);
+    case "find_agents": return cut(a.q || (a.near_me ? "near me" : ""), 80);
+    case "get_agent": case "connect": case "accept_connection": case "disconnect": case "set_visibility": return cut([a.id, types].filter(Boolean).join(" · "), 80);
+    case "post": return cut([a.category, a.topic_id || (a.topic ? `new topic "${a.topic}"` : ""), a.kind, circle].filter(Boolean).join(" · "), 80);
+    case "reply": return cut([a.parent_id && `on ${a.parent_id}`, circle].filter(Boolean).join(" · "), 80);
+    case "upvote": case "edit": case "delete": return cut(a.post_id, 80);
+    case "my_posts": return cut([a.kind, a.audience].filter(Boolean).join(" · "), 80);
+    default: return "";
+  }
+}
+// What an accepted write made: the post or agent it touched. Steps logged before this was recorded get it from
+// their arguments or from the board's answer, which starts with the new post's id.
+export function madeOf(s) {
+  if (s.made) return s.made;
+  if (!(s.status >= 200 && s.status < 300)) return undefined;
+  if (/^(upvote|edit|delete)$/.test(s.tool) && s.args?.post_id) return { post: String(s.args.post_id) };
+  if (/^(connect|accept_connection|disconnect|set_visibility)$/.test(s.tool) && s.args?.id) return { agent: String(s.args.id) };
+  const m = /^(post|reply)$/.test(s.tool) ? /^\{"id":"([^"]+)"/.exec(s.result || "") : null;
+  return m ? { post: m[1] } : undefined;
+}
+// The public view of a run: who, the prompt, each call with its status, what it asked for, what it made and whether
+// it read back; never the arguments, results, or closing note. With notes: true the closing note comes along, for
+// the operator who owns the agent.
+export const publicRun = (r, { notes = false } = {}) => ({ id: r.id, started: r.started, finished: r.finished, ...(r.sim_at ? { sim_at: r.sim_at, week: r.week } : {}), agent: r.agent_id, type: r.prompt_type, brain: r.brain, model: r.model, occasion: r.context?.occasion, task: r.task, prompt: r.prompt, tools: (r.steps || []).map((s) => { const what = whatOf(s.tool, s.args), made = madeOf(s); return { tool: s.tool, status: s.status, ...(what ? { what } : {}), ...(made ? { made } : {}), ...(s.failure ? { failure: s.failure } : {}), ...(s.error ? { error: s.error } : {}), ...(s.check ? { check: s.check.ok, detail: s.check.detail } : {}) }; }), writes: r.writes, checks: r.checks, anomalies: r.anomalies, tokens: r.tokens, ok: r.ok, ...(r.error ? { error: r.error } : {}), ...(notes ? { outcome: r.outcome || "" } : {}) });
+export async function listRuns({ limit = 50, agent, type, week, notes = false } = {}) {
   const w = week == null || week === "" || Number.isNaN(Number(week)) ? null : Number(week);
   const rows = await q("select * from sim_runs where ($2::text is null or agent_id = $2) and ($3::text is null or prompt_type = $3) and ($4::int is null or week = $4) order by started desc limit $1", [Math.min(Math.max(1, Number(limit) || 50), 200), agent || null, type || null, w]);
-  return rows.map(publicRun);
+  return rows.map((r) => publicRun(r, { notes }));
 }
 
 // The tool-call report: per tool, how often it was called, how often the board answered 2xx, how the failures class
@@ -586,6 +618,10 @@ export function createSimulator({ request, fixture, brain, store, keyFor, log = 
           if (WRITES.has(name)) record.writes++;
           const text = toolResult(name, name === "whoami" ? whoamiView(r.data) : r.data).content[0].text;
           step.result = text.length > 600 ? text.slice(0, 600) + "…" : text;
+          if (name === "post" || name === "reply") step.made = { post: r.data.id };
+          if (name === "upvote") step.made = { post: r.data.post_id };
+          if (name === "edit" || name === "delete") step.made = { post: args.post_id };
+          if (name === "connect" || name === "accept_connection" || name === "disconnect" || name === "set_visibility") step.made = { agent: r.data.id || args.id };
           try {
             // What this run made, for backdating, and whom the person met, for their memory of the board.
             if (name === "post" || name === "reply") { record.made.push({ kind: "post", id: r.data.id }); if (r.data.topic?.created) record.made.push({ kind: "topic", id: r.data.topic.id }); }
