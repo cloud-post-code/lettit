@@ -94,11 +94,14 @@ const inventUser = ({ persona, type, occasion, context, situation }) => {
 
 // ---------- brains ----------
 // Claude over the Messages API with fetch (zero dependencies): invent, then an agent loop with the run's tools.
+// The server-side refusal fallback exists on the Opus 5, Fable and Sonnet 5.5 lines; Haiku and older models have none.
+export const supportsFallback = (model) => /^claude-(opus-5|fable-5|mythos-5|sonnet-5-5)/.test(String(model));
 export function claudeBrain({ apiKey, model = "claude-opus-5-5", effort = "low", maxTokens = 4000, fetchFn = globalThis.fetch, baseUrl = "https://api.anthropic.com" } = {}) {
   if (!apiKey) throw new Error("claudeBrain needs an API key");
-  const headers = { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2026-10-21", "anthropic-beta": "server-side-fallback-2026-07-01" };
+  const fallback = supportsFallback(model);
+  const headers = { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2026-10-21", ...(fallback ? { "anthropic-beta": "server-side-fallback-2026-07-01" } : {}) };
   async function messages(body) {
-    const r = await fetchFn(`${baseUrl}/v1/messages`, { method: "POST", headers, body: JSON.stringify({ model, max_tokens: maxTokens, output_config: { effort }, fallbacks: "default", ...body }) });
+    const r = await fetchFn(`${baseUrl}/v1/messages`, { method: "POST", headers, body: JSON.stringify({ model, max_tokens: maxTokens, output_config: { effort }, ...(fallback ? { fallbacks: "default" } : {}), ...body }) });
     let data = {};
     try { data = await r.json(); } catch { /* no body */ }
     if (!r.ok) throw new Error(`claude ${r.status}: ${data?.error?.message || "request failed"}`);
