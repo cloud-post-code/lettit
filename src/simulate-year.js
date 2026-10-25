@@ -39,7 +39,9 @@ export const beatOf = (calendar, handle, iso) => calendar.arcs[handle]?.[quarter
 export async function runBackfill({ sim, store, calendar, log = () => {}, concurrency = 2, each = null, shouldStop = () => false, weeks = calendar.weeks, postsPerWeek = calendar.posts_per_week }) {
   const name = calendar.name;
   let state = (await store.backfill(name)) || { name, week: 0, posts: 0, runs: 0, done: false, config: {} };
-  if (state.done) { log(`year ${name}: already complete (${state.posts} posts over ${state.week} weeks)`); return state; }
+  // A finished year asked for more weeks continues from where it stopped (a trial week growing into the full year).
+  if (state.done && state.week >= weeks) { log(`year ${name}: already complete (${state.week} weeks)`); return state; }
+  if (state.done) { log(`year ${name}: extending from week ${state.week + 1} to ${weeks} weeks`); state.done = false; }
   state.config = { ...state.config, start: calendar.start, weeks, posts_per_week: postsPerWeek, concurrency };
   // Week one starts with what is already there: the seed moves into it, once.
   if (!state.config.seed_shifted && store.shiftSeed) {
