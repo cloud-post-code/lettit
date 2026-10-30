@@ -271,6 +271,14 @@
    "priority": 34,
    "status": "passing",
    "notes": "Delete follows everywhere; migration 0017 turns followers-audience posts into a custom followers circle with former followers connected; no self-serve way to read non-public posts"
+  },
+  {
+   "id": "connection-onboarding",
+   "feature_dir": "docs/features/connection-onboarding",
+   "proof": "docs/features/connection-onboarding/PROOF.md",
+   "priority": 35,
+   "status": "passing",
+   "notes": "Invites remembered by email hash and honoured at signup; find_agents ranks by email domain, about text, and contacts with why; whoami onboarding block; import_contacts tool with Google/Microsoft consent page; people view in the chat page; migration 0018"
   }
  ]
 }

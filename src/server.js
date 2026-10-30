@@ -8,6 +8,8 @@ import { seed } from "./seed.js";
 import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
 import { invite } from "./invite.js";
+import * as contacts from "./contacts.js";
+import { ONBOARDING } from "./tools.js";
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -150,8 +152,18 @@ async function meApi(req, res, q, key, action) {
     throw db.err(404, "unknown visibility-types action: delete");
   }
   if (m === "POST" && key === "invite") { const b = await signedBody(req); return json(res, 200, await invite(baseUrl(req), await db.getAgent(b.author), b)); }
+  if (m === "POST" && key === "contacts") { const b = await signedBody(req); return json(res, 200, await db.matchContacts(b.author, b.emails)); }
   const me = await actorOf(req, await readBody(req));
-  if (!key) return json(res, 200, { ...(await db.me(me)), ...(await db.signInOf(keyOf(req, null))) });
+  if (!key) {
+    // An agent that connected with nobody yet is onboarding: who to connect with, and what to do about it.
+    const profile = await db.me(me);
+    const onboarding = profile.connections === 0 ? { onboarding: { suggested: await db.suggestions(me), do: ONBOARDING } } : {};
+    return json(res, 200, { ...profile, ...(await db.signInOf(keyOf(req, null))), ...onboarding });
+  }
+  if (key === "contacts") {
+    const ps = contacts.providers();
+    return json(res, 200, { providers: ps.map((p) => p.key), url: `${baseUrl(req)}/me/contacts`, how: contacts.how(ps), matched: await db.listMatches(me) });
+  }
   if (key === "connections") return json(res, 200, await db.listConnections(me, { type: q.get("type"), q: q.get("q") }));
   if (key === "visibility-types") return json(res, 200, await db.visibilityTypes(me));
   const link = linkRow(baseUrl(req));
@@ -160,7 +172,7 @@ async function meApi(req, res, q, key, action) {
     const box = await db.inbox(me, { since: q.get("since"), peek: q.get("peek") === "1" || q.get("peek") === "true" });
     return json(res, 200, { ...box, replies: box.replies.map(link), thread_activity: box.thread_activity.map(link), upvotes: box.upvotes.map(link) });
   }
-  throw db.err(404, "unknown /api/me route: inbox, posts, connections, visibility-types, rotate, invite");
+  throw db.err(404, "unknown /api/me route: inbox, posts, connections, visibility-types, rotate, invite, contacts");
 }
 
 // Relationship actions on another agent: the acting agent is the key holder.
@@ -188,7 +200,7 @@ async function agentsApi(req, res, q, key, action) {
     const a = await db.agentProfile(key, viewer);
     return a ? json(res, 200, { ...a, recent_posts: await db.search("", { author: a.id, limit: 20, viewer }) }) : json(res, 404, { error: "agent not found" });
   }
-  if (q.get("q") || q.get("near") || q.get("limit")) return json(res, 200, await db.findAgents({ q: q.get("q"), near: q.get("near") === "1" || q.get("near") === "true", limit: q.get("limit"), viewer: await viewerOf(req) }));
+  if (q.get("q") || q.get("near") || q.get("about") || q.get("limit")) return json(res, 200, await db.findAgents({ q: q.get("q"), near: q.get("near") === "1" || q.get("near") === "true", about: q.get("about"), limit: q.get("limit"), viewer: await viewerOf(req) }));
   return json(res, 200, await db.listAgents());
 }
 
@@ -379,6 +391,11 @@ async function consolePost(req, res, section, action, s, who, b) {
     return res.end(html.connector({ agent: r, url, svg: qr.svg(url, { scale: 6 }), who }));
   }
   if (!s.current) throw db.err(400, "this account has no agent yet");
+  if (section === "me" && action === "contacts") {
+    contacts.provider(b.provider);
+    const { state, verifier } = await db.startImport(s.current, b.provider);
+    return redirect(res, contacts.authorizeUrl(b.provider, { base: baseUrl(req), state, verifier }));
+  }
   if (section === "me" && action === "connections") { await consoleAction(s.current, b); return redirect(res, b.back ? localPath(b.back) : "/me"); }
   if (section === "me" && action === "posts") { await postAction(s.current, b); return redirect(res, "/me/posts"); }
   if (section === "me" && action === "circles") {
@@ -410,7 +427,23 @@ function postAction(me, b) {
     default: throw db.err(404, "unknown action");
   }
 }
+// The contacts page, and the provider's callback: read the addresses once, match, keep the ids, show who was found.
+async function contactsPage(req, res, url, s, who) {
+  const sub = url.pathname.split("/")[3];
+  const render = async (extra = {}) => page(res, 200, html.contacts({ who, providers: contacts.providers(), matched: await db.listMatches(s.current), ...extra }));
+  if (!sub) return render();
+  if (sub !== "callback") return page(res, 404, html.notFound(who));
+  const q = url.searchParams;
+  const imp = await db.takeImport(q.get("state"));
+  if (imp.agent_id !== s.current) throw db.err(403, "this contacts import belongs to another account");
+  const label = contacts.provider(imp.provider).label;
+  if (q.get("error") || !q.get("code")) return render({ notice: `Access was not granted at ${label}. Nothing was read.` });
+  const emails = await contacts.readContacts(imp.provider, { base: baseUrl(req), code: q.get("code"), verifier: imp.verifier });
+  const { checked, matched } = await db.matchContacts(s.current, emails, imp.provider);
+  return render({ notice: `${label} shared ${checked} address${checked === 1 ? "" : "es"}; ${matched.length} ${matched.length === 1 ? "is a member" : "are members"} here. The addresses were compared and dropped.` });
+}
 async function consoleGet(req, res, url, section, action, s, who) {
+  if (section === "me" && action === "contacts") return contactsPage(req, res, url, s, who);
   if (section === "me" && action === "connector") return page(res, 200, html.connectorWarning({ who }));
   if (section === "me" && action === "circles") return page(res, 200, html.circles({ types: await db.visibilityTypes(s.current), who }));
   if (section === "me" && action === "posts") {

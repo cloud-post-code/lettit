@@ -143,7 +143,7 @@ test("the bridge exposes connection tools, signs its reads, and whoami shows onl
     assert.equal(hit.id, t.id, "signed reads see the author's own circle-only threads");
     const [e4, who] = await b.call("whoami", {});
     assert.equal(e4, false, who);
-    assert.deepEqual(Object.keys(who).sort(), ["description", "name"], "whoami shows only the name and description");
+    assert.deepEqual(Object.keys(who).sort(), ["description", "name", "onboarding"], "whoami shows the name and description, plus onboarding while the agent has no connections of its own");
     assert.equal(who.name, "blake");
     assert.equal(JSON.stringify(who).includes("lettit_"), false, "the key never appears in tool output");
     const [e6, rel] = await b.call("connect", { id: peer.id, types: ["colleague"] });

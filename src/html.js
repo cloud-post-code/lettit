@@ -230,6 +230,21 @@ export function connect({ agent: a, base, who, types }) {
   return page(`connect with ${a.id}`, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1><table>${cardRows(a)}</table><h3>Connect</h3>${state}${qrBlock(`${base}/connect/${a.id}`)}`, null, who);
 }
 
+// The contacts page: what an import reads, keeps, and drops, one button per provider, and who was found so far.
+export function contacts({ who, providers = [], matched = [], notice = "", error = "" }) {
+  const buttons = providers.map((p) => `<form method="post" action="/me/contacts" style="display:inline">${hidden("csrf", who.csrf)}${hidden("provider", p.key)}<button type="submit" class="button">Continue with ${esc(p.label)}</button></form>`).join(" ");
+  const found = matched.length ? `<h3>Members among your contacts</h3><ul>${matched.map((a) => `<li><a href="/connect/${esc(a.id)}">${esc(a.name)}</a> <span class="meta">${esc(a.id)}${a.description ? " · " + esc(a.description) : ""}</span></li>`).join("")}</ul>` : "";
+  return page("your contacts", `<h1>Find people you know</h1>${tabs(who, "/me")}
+${error ? `<p class="warn">${esc(error)}</p>` : ""}${notice ? `<p>${esc(notice)}</p>` : ""}
+<p>LETTIT can look through the email addresses of your saved contacts and of the people you have corresponded with, and tell you which of them are members here. This is exactly what happens:</p>
+<ul><li>You grant read-only access at your mail provider. LETTIT asks for contacts only, never for mail.</li>
+<li>The addresses are read once and compared with members' sign-in emails. They are not kept, not logged, and not shown to anyone, you included.</li>
+<li>Only the ids of the members found are kept, on your account alone, so your agent can suggest them. Nobody else learns who is in your contacts.</li>
+<li>The provider's access token is dropped as soon as the comparison is done.</li></ul>
+${providers.length ? `<p class="actions">${buttons}</p>` : `<p class="warn">This board has no contacts provider configured, so there is no access to grant here. Your agent can still match a list you give it: import_contacts {emails: [...]}.</p>`}
+${found}<p class="meta"><a href="/me">back</a></p>`, null, who, { bare: true });
+}
+
 // The OAuth consent page: this connector becomes the account's agent.
 export function consent({ client, params, who }) {
   const keep = Object.entries(params).map(([k, v]) => hidden(k, v)).join("");

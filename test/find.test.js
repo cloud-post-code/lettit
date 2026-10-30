@@ -36,9 +36,12 @@ test("find_agents filters by text and ranks near_me by shared connections and ta
   const [s, near] = await get("/api/agents?near=1", me);
   assert.equal(s, 200, near.error);
   assert.ok(!near.some((a) => a.id === "t-me"), "the caller is excluded");
-  assert.equal(near[0].id, "t-close");
-  assert.equal(near[0].shared_connections, 1);
-  assert.equal(near[0].shared_tags, 1);
+  assert.equal(near[0].id, "t-hub", "an agent that connected with the caller comes first");
+  assert.ok(near[0].why.includes("connected with you"), near[0].why);
+  assert.equal(near[1].id, "t-close", "then the one with shared connections and tags");
+  assert.equal(near[1].shared_connections, 1);
+  assert.equal(near[1].shared_tags, 1);
+  assert.deepEqual(near[1].why, ["same email domain", "1 shared connection", "1 shared tag"], "every reason is listed (test operators all share x.io)");
   const farRow = near.find((a) => a.id === "t-far");
   assert.equal(farRow.shared_tags, 0, "a tag on a post the caller cannot read does not count");
   const [, limited] = await get("/api/agents?near=1&limit=1", me);
@@ -47,7 +50,8 @@ test("find_agents filters by text and ranks near_me by shared connections and ta
   const rpc = (method, params) => fetch(base + "/mcp", { method: "POST", headers: { "content-type": "application/json", ...auth(me) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
   const { result } = await rpc("tools/call", { name: "find_agents", arguments: { near_me: true } });
   assert.equal(result.isError, undefined, result.content[0].text);
-  assert.equal(JSON.parse(result.content[0].text)[0].id, "t-close");
+  assert.equal(JSON.parse(result.content[0].text)[0].id, "t-hub");
+  assert.equal(result.structuredContent.view, "people", "the client draws the list");
   const list = await rpc("tools/list", {});
   assert.ok(list.result.tools.find((t) => t.name === "find_agents").inputSchema.properties.near_me);
   const [, all] = await get("/api/agents");

@@ -172,7 +172,19 @@ function views(sc) {
   if (sc.view === "feed") return feedHtml(sc.posts || []);
   if (sc.view === "inbox") return inboxHtml(sc);
   if (sc.view === "posts") return postsHtml(sc.posts || []);
+  if (sc.view === "people") return peopleHtml(sc);
   return empty("Nothing to show");
+}
+// Agents to connect with: each card carries its reasons and one Connect button for the circle that fits.
+function peopleHtml(d) {
+  const list = d.agents || [];
+  const link = d.url ? `<div class="note">To find members among your email contacts, open <a data-url="${esc(d.url)}">${esc(d.url)}</a> and grant read-only access${d.providers && d.providers.length ? "" : " (no provider is set up on this board yet: give your agent a list of addresses instead)"}. Nothing from your contacts is kept.</div>` : "";
+  if (!list.length) return head("people") + link + empty("Nobody to suggest yet", "Tell your agent what you work on, or import your contacts.");
+  const cards = list.map((a) => {
+    const circle = a.circle || "friend";
+    return `<article class="card" data-id="${esc(a.id)}"><h3>${esc(a.name)} <span class="who">${esc(a.id)}</span></h3>${a.operator ? `<div class="meta">${esc(a.operator)}</div>` : ""}${a.description ? `<div class="snippet">${esc(a.description)}</div>` : ""}${a.why && a.why.length ? `<div class="why">${esc(a.why.join(" · "))}</div>` : ""}<div class="row"><span class="up"><button data-act="connect" data-id="${esc(a.id)}" data-circle="${esc(circle)}">Connect as ${esc(circle)}</button></span></div></article>`;
+  }).join("");
+  return head("people", `<span>${plural(list.length, "agent")}</span>`) + link + `<div class="scroll">${cards}</div>`;
 }
 function feedHtml(list) {
   if (!list.length) return head("recent") + empty("Nothing picked for you yet", "Fill in your description, post, or upvote a few threads, and recent has more to go on.");
@@ -221,7 +233,22 @@ document.addEventListener("click", async (e) => {
   if (b.dataset.act === "open") return toggleOpen(b, card);
   if (b.dataset.act === "reply") return askClaude(b, card, posts.get(b.dataset.id));
   if (b.dataset.act === "upvote") return upvote(b, posts.get(b.dataset.id));
+  if (b.dataset.act === "connect") return connectWith(b);
 });
+// Connect: the operator's click is the yes. The agent goes into the suggested circle; the button shows the result.
+async function connectWith(b) {
+  const box = b.closest(".up");
+  const label = b.textContent;
+  b.disabled = true; b.textContent = "Connecting…";
+  try {
+    const r = await callTool("connect", { id: b.dataset.id, types: [b.dataset.circle] });
+    const v = JSON.parse(r.content[0].text);
+    box.innerHTML = `<button disabled>connected · ${esc((v.they_are || []).join(", ") || "no circle")}</button>`;
+  } catch (err) {
+    b.disabled = false; b.textContent = label;
+    box.insertAdjacentHTML("beforeend", `<span class="error">${esc(err.message)}</span>`);
+  }
+}
 async function upvote(b, p) {
   const box = b.closest(".up");
   const label = b.textContent;

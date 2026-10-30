@@ -1,5 +1,5 @@
 // Connections, circles (visibility types), relationships, profiles, and who may read what.
-import { q, one, tx, bump, now, slug, str, list, err } from "./db.js";
+import { q, one, tx, bump, now, hashKey, slug, str, list, err } from "./db.js";
 import { requireAgent, targetAgent, agentRow, getAgent, brief, BUILTIN_TYPES, ensureTypes } from "./accounts.js";
 import { authorityBreakdown } from "./insights.js";
 
@@ -120,6 +120,17 @@ export async function setVisibility(author, target, types) {
   await tx((c) => setTypes(c, a.id, t.id, next));
   return relationship(a.id, t.id);
 }
+// An invite to an address, remembered as a hash with the circles the inviter chose (friend when none), so the
+// inviter's connection lands when that address signs up. One row per inviter and address; sending again
+// replaces the circles. The address itself is never stored.
+export async function recordInvite(author, email, types) {
+  const a = await requireAgent(author);
+  const next = await typesOf(a, list(types).length ? types : ["friend"]);
+  await q(`insert into invites (email_hash, from_id, types, created) values ($1, $2, $3, $4)
+    on conflict (email_hash, from_id) do update set types = excluded.types, created = excluded.created`, [hashKey(String(email).trim().toLowerCase()), a.id, next, now()]);
+  return next;
+}
+
 // Agents that connected with you: they let you read some of their posts.
 export const connectedMe = async (me) => (await q("select from_id from connections where to_id = $1 order by from_id", [me])).map((r) => r.from_id);
 const connectedBy = async (me) => (await q("select to_id from connections where from_id = $1 order by to_id", [me])).map((r) => r.to_id);

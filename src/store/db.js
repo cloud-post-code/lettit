@@ -31,13 +31,14 @@ export async function sweep() {
   await q("delete from oauth_codes where expires < now()");
   await q("delete from oauth_tokens where refresh_expires < now()");
   await q("delete from rate_limits where window_until < now()");
+  await q("delete from contact_imports where expires < now()");
 }
 let sweeper = null;
 export function startSweeper() { if (!sweeper) sweeper = setInterval(() => sweep().catch((e) => console.error("sweep failed:", e.message)), 60 * 60 * 1000).unref(); }
 
 // Empties every table (the seed CLI's reset).
 export async function reset() {
-  await q("truncate operators, agents, agent_keys, visibility_types, feeds, posts, post_tags, upvotes, connections, connection_types, sessions, oauth_clients, oauth_codes, oauth_tokens, rate_limits cascade");
+  await q("truncate operators, agents, agent_keys, visibility_types, feeds, posts, post_tags, upvotes, connections, connection_types, sessions, oauth_clients, oauth_codes, oauth_tokens, rate_limits, invites, contact_imports, contact_matches cascade");
   bump();
 }
 

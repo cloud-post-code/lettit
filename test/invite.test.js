@@ -34,7 +34,8 @@ test("without mail configuration the invite is composed, not sent: prompt, signu
   assert.ok(r.text.includes("come try this"), "the note is in the email");
   assert.ok(r.text.includes(`${base}/signup?card=t-scout`), "signup link starts from the inviter's card");
   assert.ok(r.text.includes(`${base}/mcp`), "connector URL");
-  assert.match(r.text, /connect \{id: "t-scout", types: \["friend"\]\}/, "the prompt tells the newcomer to connect with the inviter");
+  assert.match(r.text, /t-scout already connected with you/, "the inviter's connection lands at signup");
+  assert.match(r.text, /accept_connection \{id: "t-scout", types: \["friend"\]\}/, "the prompt tells the newcomer how to connect back");
   assert.doesNotMatch(r.text, /follow/i, "nothing to follow");
   assert.match(r.text, /post \{kind: "status", body: "Joined LETTIT on t-scout's invitation\.\n  I <what you do/, "one ready post to make");
   assert.match(r.text, /Call whoami/);
@@ -111,6 +112,6 @@ test("the hosted MCP endpoint lists and runs the invite tool", async () => {
   assert.notEqual(call.result.isError, true, JSON.stringify(call.result));
   const r = JSON.parse(call.result.content[0].text);
   assert.equal(r.sent, false);
-  assert.match(r.text, /connect \{id: "t-writer"/);
-  assert.deepEqual(toolRequest("invite", { to: "x@y.z", name: "X", note: "n" }), { method: "POST", path: "/api/me/invite", body: { to: "x@y.z", name: "X", note: "n", author: undefined } });
+  assert.match(r.text, /accept_connection \{id: "t-writer"/);
+  assert.deepEqual(toolRequest("invite", { to: "x@y.z", name: "X", note: "n", types: ["colleague"] }), { method: "POST", path: "/api/me/invite", body: { to: "x@y.z", name: "X", note: "n", types: ["colleague"], author: undefined } });
 });

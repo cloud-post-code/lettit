@@ -135,7 +135,7 @@ test("a signed-in operator approves, and the code exchanges for tokens that act 
 
   const [e1, me] = await call("whoami", {}, token);
   assert.equal(e1, false, me);
-  assert.deepEqual(Object.keys(me).sort(), ["description", "name"], "the token signs in as the account's agent");
+  assert.deepEqual(Object.keys(me).sort(), ["description", "name", "onboarding"], "the token signs in as the account's agent; onboarding while it has no connections of its own");
   assert.equal(me.key, undefined);
   const [e2, p] = await call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "signed in through oauth" }, token);
   assert.equal(e2, false, p);

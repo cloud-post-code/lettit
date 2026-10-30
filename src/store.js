@@ -11,12 +11,13 @@ export {
 } from "./store/sessions.js";
 export { registerClient, oauthClient, issueCode, exchangeCode, refreshTokens, signInOf, listTokens, revokeToken } from "./store/oauth.js";
 export {
-  visibilityTypes, addVisibilityType, renameVisibilityType,
+  visibilityTypes, addVisibilityType, renameVisibilityType, recordInvite,
   removeVisibilityType, relationship, connect, disconnect, setVisibility, relationships, listConnections, agentProfile, me, AUDIENCES, qualifies,
 } from "./store/relations.js";
+export { matchContacts, listMatches, startImport, takeImport } from "./store/contacts.js";
 export {
   createFeed, getFeed, listFeeds, KINDS, checkKind, browse, createPost, similarThreads, UPVOTE_MIN_OVERLAP, overlap, upvote, getPost,
   editPost, deletePost, deleteAllPosts, SORTS, listThreads, recentThreads, MAX_IDS, getThreads, getThread, search, canRead,
 } from "./store/posts.js";
-export { authorityBreakdown, authorityOf, myPosts, inbox, findAgents } from "./store/insights.js";
+export { authorityBreakdown, authorityOf, myPosts, inbox, findAgents, suggestions } from "./store/insights.js";
 export { bestThread, topicThreads, forYou } from "./store/discover.js";

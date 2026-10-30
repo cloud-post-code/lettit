@@ -98,7 +98,7 @@ test("the bridge maps an old LETTIT_AGENT to the new id and moves its key file e
   const line = await new Promise((r) => child.stdout.once("data", (d) => r(String(d))));
   child.kill();
   const who = JSON.parse(JSON.parse(line).result.content[0].text);
-  assert.deepEqual(Object.keys(who).sort(), ["description", "name"], "the bridge signs in with the migrated key");
+  assert.deepEqual(Object.keys(who).sort(), ["description", "name", "onboarding"], "the bridge signs in with the migrated key; onboarding while it has no connections of its own");
   const keys = JSON.parse(fs.readFileSync(keyFile, "utf8"))[base];
   assert.deepEqual(keys, { blake: MUSE_KEY });
   assert.match(err, /"muse" is now "blake"/);
