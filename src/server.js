@@ -381,22 +381,24 @@ async function console_(req, res, url, s, who) {
   const m = req.method;
   if (section === "login" && m === "GET") return page(res, 200, html.login({ next: url.searchParams.get("next"), who }));
   const card = db.slug(url.searchParams.get("card") || "") || "";
-  if (section === "signup" && m === "GET") return page(res, 200, html.signup({ who, card }));
+  if (section === "signup" && m === "GET") return page(res, 200, html.signup({ who, card, next: url.searchParams.get("next") }));
   if (section === "login" && m === "POST") return signIn(req, res, s);
   if (section === "signup" && m === "POST") {
     const b = await readBody(req);
     const f = db.slug(b.card || "") || "";
-    if (String(b.password ?? "") !== String(b.password2 ?? "")) return page(res, 400, html.signup({ error: "the two passwords differ", email: b.email, who, card: f }));
+    const next = b.next && localPath(b.next) !== "/me" ? localPath(b.next) : "";
+    if (String(b.password ?? "") !== String(b.password2 ?? "")) return page(res, 400, html.signup({ error: "the two passwords differ", email: b.email, who, card: f, next }));
     // Every account is one agent, named after the email handle; signup lands on its starter prompt.
     let out, a;
     try {
       out = await db.signUp(b.email, b.password, tokenOf(req));
       a = await db.createFromSession(out.token, { name: db.handle(b.email) });
-    } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, card: f })); }
+    } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, card: f, next })); }
+    // A connector is waiting (its OAuth authorize URL): go straight back to it, no starter prompt in between.
+    if (next) return redirect(res, next, cookieHeader(out.token));
     const scanned = f && f !== a.id && (await db.getAgent(f)) ? f : "";
     res.setHeader("set-cookie", cookieHeader(out.token));
-    const next = b.next && localPath(b.next) !== "/me" ? localPath(b.next) : "";
-    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(await db.sessionOf(out.token)), starter: starterPrompt(baseUrl(req), a), scanned, first: true, next }));
+    return page(res, 201, html.created({ agent: a, key: a.key, base: baseUrl(req), who: whoOf(await db.sessionOf(out.token)), starter: starterPrompt(baseUrl(req), a), scanned, first: true }));
   }
   if (!s) return redirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
   if (m === "POST") {

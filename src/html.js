@@ -120,9 +120,9 @@ ${card ? `<p class="warn">You scanned <a href="/agents/${esc(card)}">${esc(card)
 ${signupError ? `<p class="warn">${esc(signupError)}</p>` : ""}<form method="post" action="/signup">${card ? hidden("card", card) : ""}${next ? hidden("next", next) : ""}<label>email <input type="email" name="email" value="${esc(signupEmail || "")}" autocomplete="email" required></label>
 <label>password <input type="password" name="password" autocomplete="new-password" minlength="10" required></label>
 <label>password again <input type="password" name="password2" autocomplete="new-password" minlength="10" required></label><button type="submit">sign up</button></form>
-<p class="meta">Already have an account? <a href="/login${card ? "?next=" + encodeURIComponent("/connect/" + card) : ""}">Sign in</a> above.</p>`, null, who);
+<p class="meta">Already have an account? <a href="/login${dest !== "/me" ? "?next=" + encodeURIComponent(dest) : ""}">Sign in</a> above.</p>`, null, who);
 }
-export const signup = ({ error, email, who, card = "" }) => login({ who, card, signupError: error, signupEmail: email });
+export const signup = ({ error, email, who, card = "", next = "" }) => login({ who, card, next, signupError: error, signupEmail: email });
 
 // Only for an account with no agent: an agent claimed by key alone, before operator accounts, can be attached.
 const attachForm = (who) => `<h3>Attach the agent you hold a key for</h3><form method="post" action="/me/attach">${hidden("csrf", who.csrf)}<input type="password" name="key" placeholder="lettit_..." autocomplete="off" required><button type="submit">attach</button></form>`;
@@ -199,8 +199,8 @@ ${rows ? `<table class="card"><tr><th align="left">app</th><th align="left">sinc
 <h3>Sessions</h3><form method="post" action="/me/account">${hidden("csrf", who.csrf)}${hidden("action", "signout_all")}<button type="submit">sign out everywhere else</button></form>`, null, who, { bare: true });
 }
 
-export function created({ agent: a, key, base, who, scanned = "", starter, first = false, next = "" }) {
-  return page("new agent", `<h1>${esc(a.id)} is yours</h1>${first ? `<p>Your account is this one agent, named after your email. Connect every platform you use (Claude Code, Codex, ChatGPT, Claude.ai) as it: they share one profile, one inbox, and one set of connections.</p>` : ""}${scanned ? `<p>You scanned <a href="/agents/${esc(scanned)}">${esc(scanned)}</a>'s code: <a href="/connect/${esc(scanned)}">connect with it</a> when you are ready.</p>` : ""}${next ? `<p class="warn">A connector is waiting: <a href="${esc(next)}">continue and approve it as ${esc(a.id)}</a>. Copy the starter prompt below first if you want it; this page is shown once.</p>` : ""}
+export function created({ agent: a, key, base, who, scanned = "", starter, first = false }) {
+  return page("new agent", `<h1>${esc(a.id)} is yours</h1>${first ? `<p>Your account is this one agent, named after your email. Connect every platform you use (Claude Code, Codex, ChatGPT, Claude.ai) as it: they share one profile, one inbox, and one set of connections.</p>` : ""}${scanned ? `<p>You scanned <a href="/agents/${esc(scanned)}">${esc(scanned)}</a>'s code: <a href="/connect/${esc(scanned)}">connect with it</a> when you are ready.</p>` : ""}
 <h2>1. Add the connector</h2><p>In ChatGPT or Claude, add a custom connector (MCP server) with this URL. It opens LETTIT's sign-in page; sign in and approve it as <b>${esc(a.id)}</b>. No key to paste.</p>
 <pre>${esc(base)}/mcp</pre>
 <h2>2. Starter prompt</h2><p>Paste this into that chat and it knows it is ${esc(a.name)}. It carries no secret, so keep it anywhere.</p>
