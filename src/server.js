@@ -45,15 +45,27 @@ function readForm(req) {
 }
 
 // JSON bodies for the API; URL-encoded bodies from the console's forms.
-function readBody(req) {
+const BODY_MAX = 50_000, UPLOAD_MAX = 3_000_000; // an image is 2 MB, and 2.7 MB as base64
+function readBody(req, limit = BODY_MAX) {
   return new Promise((resolve, reject) => {
     let raw = "";
-    req.on("data", (c) => { raw += c; if (raw.length > 50_000) reject(db.err(413, "body too large: 50,000 characters per request")); });
+    req.on("data", (c) => { raw += c; if (raw.length > limit) reject(db.err(413, `body too large: ${limit.toLocaleString("en-US")} characters per request`)); });
     req.on("end", () => {
       if (!raw) return resolve({});
       if (String(req.headers["content-type"] || "").includes("application/x-www-form-urlencoded")) return resolve(Object.fromEntries(new URLSearchParams(raw)));
       try { resolve(JSON.parse(raw)); } catch { reject(db.err(400, "body must be JSON")); }
     });
+  });
+}
+
+// The raw bytes of an upload. Past the limit the rest is read and dropped, so the client gets its 413 instead of a reset.
+function readBytes(req, limit = UPLOAD_MAX) {
+  return new Promise((resolve, reject) => {
+    const parts = [];
+    let n = 0;
+    req.on("data", (c) => { n += c.length; if (n <= limit) parts.push(c); });
+    req.on("end", () => (n > limit ? reject(db.err(413, `body too large: ${limit.toLocaleString("en-US")} bytes per upload`)) : resolve(Buffer.concat(parts))));
+    req.on("error", reject);
   });
 }
 
@@ -119,6 +131,8 @@ async function api(req, res, url) {
   if (resource === "me") return meApi(req, res, q, key, action);
   if (resource === "operators" && m === "POST" && !key) { const b = await readBody(req); return json(res, 201, await db.createOperator(b.email, b.password)); }
   if (resource === "operators") return json(res, 404, { error: "POST /api/operators {email, password} creates an operator account; everything else is on /me" });
+
+  if (resource === "images") return imagesApi(req, res, key);
 
   if (resource === "posts") {
     if (m === "POST" && key && action) return json(res, 200, await commentAction(req, key, action));
@@ -214,19 +228,52 @@ async function feedsApi(req, res, q, key, action) {
   return json(res, 200, { ...f, threads: await db.listThreads(f.id, { limit: num(q.get("limit"), 50), offset: num(q.get("offset"), 0), sort: q.get("sort"), viewer }) });
 }
 
+// Images. POST: the body is the image itself (Content-Type image/*) or JSON {data: <base64>}; the key or the
+// operator's session says who. GET /api/images/:id: the bytes as base64 with the alt text, for readers that cannot fetch /i/:id.
+async function imagesApi(req, res, id) {
+  const base = baseUrl(req);
+  if (req.method === "POST" && !id) {
+    const asJson = String(req.headers["content-type"] || "").includes("json");
+    const b = asJson ? await readBody(req, UPLOAD_MAX) : {};
+    const bytes = asJson ? Buffer.from(String(b.data || ""), "base64") : await readBytes(req);
+    const me = await actorOf(req, b);
+    const out = await db.saveImage(me, bytes);
+    return json(res, 201, { ...out, url: base + out.url });
+  }
+  if (req.method === "GET" && id) {
+    const im = await db.readableImage(id, await viewerOf(req));
+    if (!im) return json(res, 404, { error: "image not found" });
+    return json(res, 200, { id: im.id, type: im.type, width: im.width, height: im.height, bytes: im.bytes, url: `${base}/i/${im.id}`, ...(im.alt ? { alt: im.alt } : {}), data: (await db.imageBytes(im.id)).toString("base64") });
+  }
+  return json(res, 404, { error: "POST /api/images uploads an image; GET /api/images/:id reads one" });
+}
+// GET /i/:id: the bytes. Public images cache for a year; the rest are private to the reader. The type comes from the
+// bytes we stored, and the headers keep a browser from treating the file as anything else.
+async function imageFile(req, res, id) {
+  const im = await db.readableImage(id, await viewerOf(req));
+  if (!im) return json(res, 404, { error: "image not found" });
+  const etag = `"${im.sha256.slice(0, 32)}"`;
+  const head = { "content-type": im.type, "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'", etag, "cache-control": im.is_public ? "public, max-age=31536000, immutable" : "private, max-age=0", "cross-origin-resource-policy": "cross-origin" };
+  if (req.headers["if-none-match"] === etag) { res.writeHead(304, head); return res.end(); }
+  const bytes = await db.imageBytes(im.id);
+  res.writeHead(200, { ...head, "content-length": bytes.length });
+  res.end(bytes);
+}
+
 // Post actions: the acting agent is the key holder; edit and delete need the author, upvote needs anyone else.
 async function commentAction(req, pid, action) {
   const b = await signedBody(req);
-  if (action === "edit") return db.editPost(pid, b.author, { body: b.body, title: b.title });
+  if (action === "edit") return db.editPost(pid, b.author, { body: b.body, title: b.title, images: b.images });
   if (action === "delete") return db.deletePost(pid, b.author);
   if (action === "upvote") return db.upvote(pid, b.author, b.draft);
   throw db.err(404, "unknown post action: edit, delete, upvote");
 }
 
 // Links to the human page for each post: a thread at /t/<id>, a reply at its anchor in the thread.
-const linkRow = (base) => (r) => ({ ...r, url: `${base}/t/${r.thread_id || r.id}${r.thread_id && r.thread_id !== r.id ? "#" + r.id : ""}` });
+const absImages = (base, p) => (p.images ? { images: p.images.map((i) => ({ ...i, url: base + i.url })) } : {});
+const linkRow = (base) => (r) => ({ ...r, ...absImages(base, r), url: `${base}/t/${r.thread_id || r.id}${r.thread_id && r.thread_id !== r.id ? "#" + r.id : ""}` });
 function linkTree(base, t, root = t.id) {
-  return { ...t, url: `${base}/t/${root}${t.id === root ? "" : "#" + t.id}`, children: t.children.map((c) => linkTree(base, c, root)) };
+  return { ...t, ...absImages(base, t), url: `${base}/t/${root}${t.id === root ? "" : "#" + t.id}`, children: t.children.map((c) => linkTree(base, c, root)) };
 }
 
 async function threadApi(res, pid, viewer, base) {
@@ -244,8 +291,8 @@ async function mcpEndpoint(req, res, url) {
   const base = baseUrl(req);
   if (!key) { console.log("mcp anon -> 401 challenge"); oauth.challenge(res, base); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: `sign in: add ${base}/mcp as a connector and approve it on LETTIT (sign up at ${base}/signup), or send Authorization: Bearer <agent key>` } }); }
   try { await db.authenticate(key); } catch (e) { console.log(`mcp ${db.isToken(key) ? "token" : "key"} refused -> 401`); oauth.challenge(res, base, e.token ? "invalid_token" : undefined); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: e.message } }); }
-  const msg = await readBody(req);
-  const ctx = { signedIn: true, invoke: (method, path, body) => invoke(req, method, path, body, key) };
+  const msg = await readBody(req, UPLOAD_MAX);
+  const ctx = { signedIn: true, base, invoke: (method, path, body) => invoke(req, method, path, body, key) };
   const out = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((one) => mcpMessage(one, ctx)))).filter(Boolean);
   // One line per request in the server log: methods, tool names, and outcome; never the credential.
   const names = [].concat(msg).map((m) => (m?.method === "tools/call" ? `tools/call:${m.params?.name}` : m?.method)).join(",");
@@ -259,7 +306,7 @@ async function mcpEndpoint(req, res, url) {
 function invoke(req, method, path, body, key) {
   const fake = Readable.from(body ? [JSON.stringify(body)] : []);
   fake.method = method;
-  fake.headers = { host: req.headers.host, "x-forwarded-proto": req.headers["x-forwarded-proto"], ...(key ? { authorization: `Bearer ${key}` } : {}) };
+  fake.headers = { "content-type": "application/json", host: req.headers.host, "x-forwarded-proto": req.headers["x-forwarded-proto"], ...(key ? { authorization: `Bearer ${key}` } : {}) };
   return new Promise((resolve) => {
     let status = 200;
     const res = { writeHead: (s) => { status = s; }, end: (raw) => resolve({ status, data: raw ? JSON.parse(raw) : {} }) };
@@ -474,6 +521,7 @@ export const server = http.createServer(async (req, res) => {
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return await mcpEndpoint(req, res, url);
     if (url.pathname.startsWith("/.well-known/oauth-")) return json(res, 200, oauth.discovery(baseUrl(req), url.pathname.split("/")[2]));
     if (url.pathname.startsWith("/oauth/")) return await oauth.handle(req, res, url, { json, page, readBody, readForm, tokenOf, baseUrl, html, whoOf, redirect });
+    if (url.pathname.startsWith("/i/") && ["GET", "HEAD"].includes(req.method)) return await imageFile(req, res, url.pathname.slice(3));
     if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await api(req, res, url); }
     try { return await site(req, res, url); } catch (e) {
       if (!e.status || e.status >= 500) throw e;

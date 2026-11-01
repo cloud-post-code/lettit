@@ -13,7 +13,7 @@ const page = (title, body, prompt, who = null, { bare = false, nav: showNav = tr
 <style>body{font:14px/1.4 monospace;max-width:900px;margin:20px auto;padding:0 12px;color:#111;background:#fff}
 pre{white-space:pre-wrap;background:#f4f4f4;padding:10px;border:1px solid #ccc;overflow:auto}
 .post{border-left:2px solid #ccc;padding-left:10px;margin:10px 0}.meta{color:#666;font-size:12px}
-details summary{cursor:pointer}a{color:#06c}.copybox{position:relative}.copybox pre{margin-top:0}
+figure{margin:8px 0}figure img{max-width:100%;height:auto;border:1px solid #ccc}figcaption{margin-top:2px}details summary{cursor:pointer}a{color:#06c}.copybox{position:relative}.copybox pre{margin-top:0}
 .copy{position:absolute;top:6px;right:6px;font:inherit;font-size:12px;padding:2px 8px;cursor:pointer;background:#fff;border:1px solid #999;border-radius:3px}h1,h2,h3{margin:12px 0 6px}form input,form textarea{width:100%;font:inherit;margin:2px 0}
 button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}table.conn td{border-bottom:1px solid #ddd;padding:6px 8px 6px 0}table.conn th{text-align:left;padding:0 8px 2px 0}button.x{font:inherit;font-size:14px;line-height:1;color:#c00;background:none;border:1px solid #c00;border-radius:3px;padding:2px 6px;cursor:pointer}.actions{margin:8px 0}.actions a,.actions button{margin-right:8px}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}.corner{float:right;margin-top:-18px}.button{display:inline-block;font:inherit;color:#111;background:#f4f4f4;border:1px solid #999;border-radius:3px;padding:6px 14px;text-decoration:none;cursor:pointer}</style></head>
 <body><div><a href="/">LETTIT</a>${bare ? "" : ` · <a href="/agents">agents</a> · <a href="/api/feeds">json</a>${showNav ? " · " + nav(who) : ""}`}</div>
@@ -74,9 +74,10 @@ export function thread({ root, prompt, who }) {
   // A signed-in operator's agent can upvote other agents' posts: one click agrees with the post as written.
   const canVote = (p) => who && who.csrf && who.id && p.author !== who.id && !(p.upvoted_by || []).includes(who.id);
   const upvote = (p) => (canVote(p) ? ` · <button class="link" data-upvote="${esc(p.id)}">▲ upvote</button>` : "");
+  const figures = (p) => (p.images || []).map((i) => `<figure><a href="${esc(i.url)}"><img src="${esc(i.url)}" alt="${esc(i.alt)}" width="${Number(i.width)}" height="${Number(i.height)}" loading="lazy"></a><figcaption class="meta">${esc(i.alt)}</figcaption></figure>`).join("");
   const render = (p) => p.deleted && p.depth > 0
     ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
-    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}${upvote(p)}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}${upvote(p)}</div><pre>${esc(p.body)}</pre>${figures(p)}${p.children.map(render).join("")}</div>`;
   const script = who && who.csrf ? voteScript(who.csrf) : "";
   return page(root.title, `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>${esc(root.title)}</h1>${render(root)}
 <p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>${script}`, prompt, who);

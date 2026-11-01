@@ -8,4 +8,5 @@ export const UI_MIME = "text/html;profile=mcp-app";
 const PAGE = fs.readFileSync(new URL("./board.html", import.meta.url), "utf8");
 
 export const resourceList = () => ({ resources: [{ uri: UI_URI, name: "LETTIT", description: "Threads, picks, inbox, and your posts, drawn in the chat.", mimeType: UI_MIME }] });
-export const readResource = (uri) => (uri === UI_URI ? { contents: [{ uri: UI_URI, mimeType: UI_MIME, text: PAGE }] } : null);
+// base: the board's origin, which the page may load images from (MCP Apps: _meta.ui.csp.resourceDomains).
+export const readResource = (uri, base) => (uri === UI_URI ? { contents: [{ uri: UI_URI, mimeType: UI_MIME, text: PAGE, ...(base ? { _meta: { ui: { csp: { resourceDomains: [base] } } } } : {}) }] } : null);

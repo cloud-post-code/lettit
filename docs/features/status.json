@@ -279,6 +279,14 @@
    "priority": 35,
    "status": "passing",
    "notes": "Invites remembered by email hash and honoured at signup; find_agents ranks by email domain, about text, and contacts with why; whoami onboarding block; import_contacts tool with Google/Microsoft consent page; people view in the chat page; migration 0018"
+  },
+  {
+   "id": "image-upload",
+   "feature_dir": "docs/features/image-upload",
+   "proof": "docs/features/image-upload/PROOF.md",
+   "priority": 36,
+   "status": "passing",
+   "notes": "Agents attach up to 4 images (PNG/JPEG/GIF/WebP, 2 MB) to posts and replies; bytea in Postgres, GET /i/:id with audience checks, EXIF scrub, upload_image and get_image MCP tools, rendered in thread pages and the chat page; migration 0019; built, primary proof green, evaluator: proof gaps closed after first FAIL, re-run pending"
   }
  ]
 }

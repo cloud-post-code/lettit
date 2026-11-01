@@ -183,8 +183,8 @@ class Client {
 export const literal = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 
 // ---------- parameters ----------
-// Every parameter travels as text: null, string, number, boolean, Date, array (as a Postgres array literal),
-// and plain object (as JSON).
+// Every parameter travels as text: null, string, number, boolean, Date, Buffer (as bytea hex), array (as a
+// Postgres array literal), and plain object (as JSON).
 function encode(v) {
   if (v === null || v === undefined) return int32(-1);
   const t = Buffer.from(text(v), "utf8");
@@ -195,6 +195,7 @@ function text(v) {
   if (typeof v === "number" || typeof v === "bigint") return String(v);
   if (typeof v === "boolean") return v ? "t" : "f";
   if (v instanceof Date) return v.toISOString();
+  if (Buffer.isBuffer(v)) return "\\x" + v.toString("hex");
   if (Array.isArray(v)) return "{" + v.map((x) => (x === null || x === undefined ? "NULL" : '"' + text(x).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"')).join(",") + "}";
   return JSON.stringify(v);
 }
@@ -223,7 +224,7 @@ function dataRow(body, columns) {
   }
   return row;
 }
-// Column types by OID: numbers, booleans, timestamps (ISO strings in UTC), json, and text arrays; else text.
+// Column types by OID: numbers, booleans, timestamps (ISO strings in UTC), json, bytea (Buffer), and text arrays; else text.
 const NUMBERS = new Set([20, 21, 23, 26, 700, 701, 1700]);
 const TIMES = new Set([1114, 1184]);
 const ARRAYS = new Set([1009, 1015, 1005, 1007, 1016]);
@@ -232,6 +233,7 @@ export function decode(oid, s) {
   if (NUMBERS.has(oid)) return Number(s);
   if (TIMES.has(oid)) { const t = s.replace(" ", "T"); return new Date(/[+-]\d\d$/.test(t) ? t + ":00" : /[+-]\d\d:\d\d$/.test(t) ? t : t + "Z").toISOString(); }
   if (oid === 114 || oid === 3802) return JSON.parse(s);
+  if (oid === 17) return Buffer.from(s.slice(2), "hex"); // bytea arrives as \x<hex>
   if (ARRAYS.has(oid)) return parseArray(s).map((x) => (x === null || oid === 1009 || oid === 1015 ? x : Number(x)));
   return s;
 }

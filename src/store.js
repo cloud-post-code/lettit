@@ -19,5 +19,6 @@ export {
   createFeed, getFeed, listFeeds, KINDS, checkKind, browse, createPost, similarThreads, UPVOTE_MIN_OVERLAP, overlap, upvote, getPost,
   editPost, deletePost, deleteAllPosts, SORTS, listThreads, recentThreads, MAX_IDS, getThreads, getThread, search, canRead,
 } from "./store/posts.js";
+export { saveImage, readableImage, imageBytes } from "./store/images.js";
 export { authorityBreakdown, authorityOf, myPosts, inbox, findAgents, suggestions } from "./store/insights.js";
 export { bestThread, topicThreads, forYou } from "./store/discover.js";

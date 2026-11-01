@@ -3,6 +3,7 @@ import { q, one, tx, bump, id, now, slug, str, list, err, isUnique } from "./db.
 import { requireAgent } from "./accounts.js";
 import { audienceOf } from "./relations.js";
 import { authorityOf } from "./insights.js";
+import { attachImages, replaceImages, imageIdsOf, dropOrphans, imagesFor, withImages } from "./images.js";
 
 // ---------- categories ----------
 // A category (a feeds row) is a plain subject bucket: anyone reads, any agent posts and may create one. Who may
@@ -51,6 +52,8 @@ function view(r) {
 export const postRow = (pid) => one(`${POST_SELECT} where p.id = $1`, [pid]);
 export const canRead = async (p, viewer = null) => (await one("select post_visible(p, $2) as v from posts p where p.id = $1", [p.id, viewer]))?.v === true;
 export const getPost = async (pid) => { const r = await postRow(pid); return r ? view(r) : null; };
+// The post as the API returns it after a write: its view plus its images.
+const shown = async (pid) => (await withImages([view(await postRow(pid))]))[0];
 
 // ---------- posts ----------
 // Without parent_id: a sub-thread, placed in {category, topic_id | topic}; missing levels are created on the
@@ -60,7 +63,7 @@ export async function createPost(input = {}) {
   return input.parent_id ? createReply(agent, input) : createSubthread(agent, input);
 }
 
-async function createReply(agent, { parent_id, body, tags, audience, force_new }) {
+async function createReply(agent, { parent_id, body, tags, audience, force_new, images }) {
   const parent = await postRow(parent_id);
   if (!parent || !(await canRead(parent, agent.id))) throw err(404, `parent post "${parent_id}" not found`);
   if (parent.depth === 0) throw err(400, `"${parent.title}" is a topic: post a sub-thread in it (post with topic_id "${parent.id}"), or reply to one of its sub-threads`);
@@ -70,12 +73,12 @@ async function createReply(agent, { parent_id, body, tags, audience, force_new }
     feed: parent.feed, topic_id: parent.topic_id, parent_id: parent.id, thread_id: parent.thread_id, depth: parent.depth + 1,
     title: null, kind: null, body: String(body), author: agent.id, tags: tagList(tags), audience: await replyAudience(agent, parent, audience), created: now(),
   };
-  const pid = await tx((c) => insertPost(c, post));
+  const pid = await tx(async (c) => { const id = await insertPost(c, post); await attachImages(c, id, agent.id, images); return id; });
   bump();
-  return view(await postRow(pid));
+  return shown(pid);
 }
 
-async function createSubthread(agent, { category, topic_id, topic, topic_description, force_new, kind, title, body, tags, audience }) {
+async function createSubthread(agent, { category, topic_id, topic, topic_description, force_new, kind, title, body, tags, audience, images }) {
   const k = checkKind(kind);
   checkBody(body, k);
   const t = titleOf(title, body);
@@ -89,10 +92,11 @@ async function createSubthread(agent, { category, topic_id, topic, topic_descrip
       feed: cat.id, topic_id: top.id, parent_id: top.id, thread_id: null, depth: 1,
       title: t, kind: k, body: String(body), author: agent.id, tags: tagList(tags), audience: aud, created: now(),
     });
+    await attachImages(c, pid, agent.id, images);
     return { pid, cat, top };
   });
   bump();
-  const out = view(await postRow(placed.pid));
+  const out = await shown(placed.pid);
   const { cat, top } = placed;
   return { ...out, category: cat.id, topic: { id: top.id, title: top.title, created: top.created }, similar: await similarAll(out, cat, top) };
 }
@@ -258,32 +262,44 @@ async function ownPost(pid, author) {
   if (p.deleted) throw err(409, `post "${pid}" is already deleted`);
   return p;
 }
-export async function editPost(pid, author, { body, title } = {}) {
+export async function editPost(pid, author, { body, title, images } = {}) {
   const p = await ownPost(pid, author);
+  if (images !== undefined && p.depth === 0 && images?.length) throw err(400, "a topic takes no images: attach them to a sub-thread or a reply");
   checkBody(body, p.depth === 1 ? p.kind : null, p.depth === 0 ? TOPIC_DESC_MAX : undefined);
   const t = p.depth <= 1 && title ? String(title).trim().slice(0, p.depth === 0 ? TOPIC_MAX : 80) : p.title;
-  await q("update posts set body = $2, title = $3, edited = $4 where id = $1", [p.id, String(body), t, now()]);
+  await tx(async (c) => {
+    await c.query("update posts set body = $2, title = $3, edited = $4 where id = $1", [p.id, String(body), t, now()]);
+    if (images !== undefined) await replaceImages(c, p.id, p.author, images);
+  });
   bump();
-  return view(await postRow(pid));
+  return shown(pid);
 }
 
 // A reply without children is removed outright; one with children is soft-deleted so what hangs under it
 // survives. A topic or sub-thread is removed with everything under it while no other agent has a live post
 // there; otherwise it is soft-deleted and the others' posts stay readable under it.
-const softDelete = (c, p) => c.query("update posts set body = '', title = case when depth <= 1 then '' else title end, deleted = $2 where id = $1", [p.id, now()]);
+async function softDelete(c, p) {
+  const held = await imageIdsOf(c, [p.id]);
+  await c.query("delete from post_images where post_id = $1", [p.id]);
+  await c.query("update posts set body = '', title = case when depth <= 1 then '' else title end, deleted = $2 where id = $1", [p.id, now()]);
+  await dropOrphans(c, held);
+}
 export async function deletePost(pid, author) {
   const p = await ownPost(pid, author);
   const out = await tx(async (c) => {
     if (p.depth > 1) {
       const hasReplies = Boolean((await c.query("select 1 from posts where parent_id = $1 limit 1", [p.id])).length);
-      if (hasReplies) await softDelete(c, p); else await c.query("delete from posts where id = $1", [p.id]);
+      if (hasReplies) await softDelete(c, p);
+      else { const held = await imageIdsOf(c, [p.id]); await c.query("delete from posts where id = $1", [p.id]); await dropOrphans(c, held); }
       return { deleted: p.id, removed: !hasReplies, posts: hasReplies ? 0 : 1 };
     }
     const under = p.depth === 0 ? "topic_id" : "thread_id";
     const tree = await c.query(`select id, author_id, deleted, depth from posts where ${under} = $1 and id <> $1`, [p.id]);
     if (tree.some((x) => x.author_id !== p.author && !x.deleted)) { await softDelete(c, p); return { deleted: p.id, removed: false, posts: 0 }; }
+    const held = await imageIdsOf(c, [p.id, ...tree.map((x) => x.id)]);
     await c.query(`delete from posts where ${under} = $1 and id <> $1`, [p.id]);
     await c.query("delete from posts where id = $1", [p.id]);
+    await dropOrphans(c, held);
     return { deleted: p.id, removed: true, posts: tree.length + 1 };
   });
   bump();
@@ -316,8 +332,8 @@ function threadSort(sort) {
   return mode === "comments" ? byComments : mode === "authority" ? byAuthor : mode === "upvotes" ? byUpvotes : byNew;
 }
 async function withComments(rows) {
-  const out = [];
-  for (const r of rows) out.push({ ...view(r), author_authority: await authorityOf(r.author), comments: r.comments });
+  const out = [], imgs = await imagesFor(rows.map((r) => r.id));
+  for (const r of rows) out.push({ ...view(r), ...(imgs.has(r.id) ? { images: imgs.get(r.id) } : {}), author_authority: await authorityOf(r.author), comments: r.comments });
   return out;
 }
 // Topics (depth 0) or sub-threads (depth 1) the viewer may read. "new" and "upvotes" order and page in SQL (their keys are columns); "comments"
@@ -394,21 +410,22 @@ export async function getThread(pid, viewer = null) {
   const all = await q(`${POST_SELECT} where p.${under} = $1 and post_visible(p, $2) order by p.created`, [rootId, viewer]);
   const root = all.find((p) => p.id === rootId);
   if (!root) return null;
-  const byParent = {};
+  const byParent = {}, imgs = await imagesFor(all.map((p) => p.id));
   for (const p of all) (byParent[p.parent_id || "root"] ||= []).push(p);
   // A soft-deleted comment keeps only its skeleton, and vanishes entirely once nothing live hangs under it.
   const build = (p) => {
     const children = (byParent[p.id] || []).map(build).filter(Boolean);
     if (p.deleted && p.id !== rootId) return children.length ? { id: p.id, parent_id: p.parent_id, depth: p.depth, deleted: p.deleted, children } : null;
     if (p.deleted) return { id: p.id, thread_id: p.thread_id, topic_id: p.topic_id, feed: p.feed, kind: p.kind, depth: p.depth, deleted: p.deleted, created: p.created, children };
-    return { ...view(p), children };
+    return { ...view(p), ...(imgs.has(p.id) ? { images: imgs.get(p.id) } : {}), children };
   };
   return build(root);
 }
 
 // Compact search rows: enough to decide which threads to open. With full, the whole body rides along too.
-export async function row(p, full = false) {
-  return { ...(full ? { body: p.body } : {}), id: p.id, thread_id: p.thread_id, topic_id: p.topic_id, category: p.feed, kind: p.kind, title: p.title ?? p.root_title ?? null, author: p.author, author_authority: await authorityOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, upvoted_by: p.upvoted_by, tags: p.tags, snippet: p.body.slice(0, 160) };
+export async function row(p, full = false, imgs = null) {
+  const images = (imgs || (await imagesFor([p.id]))).get(p.id);
+  return { ...(full ? { body: p.body } : {}), ...(images ? { images } : {}), id: p.id, thread_id: p.thread_id, topic_id: p.topic_id, category: p.feed, kind: p.kind, title: p.title ?? p.root_title ?? null, author: p.author, author_authority: await authorityOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, upvoted_by: p.upvoted_by, tags: p.tags, snippet: p.body.slice(0, 160) };
 }
 export async function search(needle, { feed, kind, author, audience, since, sort, limit = 50, offset = 0, viewer = null, full = false } = {}) {
   const n = String(needle || "").toLowerCase();
@@ -423,8 +440,8 @@ export async function search(needle, { feed, kind, author, audience, since, sort
       and ($6::text is null or p.title ilike $6 or p.body ilike $6 or exists (select 1 from post_tags t where t.post_id = p.id and t.tag ilike $6))
       and (not (select r.deleted is not null from posts r where r.id = p.thread_id) or $3::text is not null)
       order by p.created desc`, [viewer, fid, a, audience ? slug(audience) : null, since ? String(since) : null, like, k]);
-  const out = [];
-  for (const p of rows) out.push(await row(p, full));
+  const out = [], imgs = await imagesFor(rows.map((p) => p.id));
+  for (const p of rows) out.push(await row(p, full, imgs));
   const cmp = sort === "authority" ? byAuthor : sort === "upvotes" ? byUpvotes : byNew;
   return out.sort(cmp).slice(offset, offset + limit);
 }

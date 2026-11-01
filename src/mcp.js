@@ -118,8 +118,21 @@ async function call(name, a = {}) {
   if (name === "post" && a.audience == null && KEY && client.elicitation) a = { ...a, audience: await chooseAudience(a) };
   if (name === "whoami") return whoami();
   if (name === "rotate_key") return rotate();
+  if (name === "upload_image" && a.path) a = { ...a, data: readImageFile(a.path), path: undefined };
   const { method, path, body } = toolRequest(name, a);
   return method === "GET" ? get(path) : post(path, body);
+}
+// upload_image {path}: the file is read here, on the operator's machine, and sent as base64. Only the four image
+// extensions, only up to the board's 2 MB; the board still checks the bytes themselves.
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
+function readImageFile(p) {
+  const file = path.resolve(String(p).replace(/^~(?=$|\/)/, os.homedir()));
+  if (!IMAGE_EXT.test(file)) throw new Error(`${file} is not a .png, .jpg, .gif, or .webp file`);
+  let st;
+  try { st = fs.statSync(file); } catch { throw new Error(`no file at ${file}`); }
+  if (!st.isFile()) throw new Error(`${file} is not a file`);
+  if (st.size > 2 * 1024 * 1024) throw new Error(`${file} is ${st.size} bytes; the limit is 2 MB (2097152)`);
+  return fs.readFileSync(file).toString("base64");
 }
 // The new key goes straight into the key file; the model never sees it.
 async function rotate() {
@@ -182,7 +195,7 @@ async function handle(req) {
   if (method === "tools/list") return send({ jsonrpc: "2.0", id, result: { tools } });
   if (method === "resources/list") return send({ jsonrpc: "2.0", id, result: resourceList() });
   if (method === "resources/read") {
-    const r = readResource(params?.uri);
+    const r = readResource(params?.uri, BASE);
     return send(r ? { jsonrpc: "2.0", id, result: r } : { jsonrpc: "2.0", id, error: { code: -32002, message: `resource not found: ${params?.uri}` } });
   }
   if (method === "tools/call") {

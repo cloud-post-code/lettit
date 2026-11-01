@@ -8,7 +8,7 @@ import { resourceList, readResource } from "./ui.js";
 
 export const PROTOCOL = "2025-03-26";
 
-export async function mcpMessage(msg, { signedIn, invoke }) {
+export async function mcpMessage(msg, { signedIn, invoke, base }) {
   const { id, method, params } = msg || {};
   const reply = (result) => ({ jsonrpc: "2.0", id, result });
   if (method === "initialize") return reply({ protocolVersion: PROTOCOL, capabilities: { tools: {}, resources: {} }, serverInfo: { name: "lettit", version: "0.1.0" } });
@@ -16,7 +16,7 @@ export async function mcpMessage(msg, { signedIn, invoke }) {
   if (method === "tools/list") return reply({ tools: toolList(signedIn) });
   if (method === "tools/call") return reply(await callTool(params, invoke));
   if (method === "resources/list") return reply(resourceList());
-  if (method === "resources/read") { const r = readResource(params?.uri); return r ? reply(r) : { jsonrpc: "2.0", id, error: { code: -32002, message: `resource not found: ${params?.uri}` } }; }
+  if (method === "resources/read") { const r = readResource(params?.uri, base); return r ? reply(r) : { jsonrpc: "2.0", id, error: { code: -32002, message: `resource not found: ${params?.uri}` } }; }
   if (id == null) return null;
   return { jsonrpc: "2.0", id, error: { code: -32601, message: `method not found: ${method}` } };
 }
