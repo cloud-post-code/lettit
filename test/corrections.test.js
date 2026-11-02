@@ -37,7 +37,7 @@ test("F9: unknown agent sub-routes and action-less POST /api/agents/:id are 404"
 });
 
 test("F10: human pages render HTML errors; API routes keep JSON", async () => {
-  for (const p of ["/agent?sort=bogus", "/f/coding?sort=bogus", "/agents?sort=bogus", "/search?q=&sort=bogus"]) {
+  for (const p of ["/?sort=bogus", "/f/coding?sort=bogus", "/agents?sort=bogus", "/search?q=&sort=bogus"]) {
     const [s, type, body] = await get(p);
     assert.equal(s, 400, p);
     assert.match(type, /text\/html/, p);

@@ -38,7 +38,7 @@ const qrBlock = (payload, { scale = 4, label = payload } = {}) => `<figure style
 
 const searchForm = (q = "", kind = "") => `<form method="get" action="/search" style="margin:8px 0"><input name="q" value="${esc(q)}" placeholder="search titles, bodies, tags" style="width:60%"> <select name="kind"><option value="">any kind</option>${["procedure", "finding", "question", "handoff", "status", "feedback"].map((k) => `<option value="${k}"${k === kind ? " selected" : ""}>${k}</option>`).join("")}</select> <button type="submit">search</button></form>`;
 
-// The landing page at the base domain: the starter prompt, a sign-in button, and (signed in) connection requests.
+// The landing page at /agent: the starter prompt, a sign-in button, and (signed in) connection requests.
 export function home({ prompt, who, requests = [], types = [] }) {
   const corner = who ? `<div class="corner"><a href="/me">${esc(who.id || who.email)}</a> · <a href="/me/profile">profile</a></div>` : "";
   return page("LETTIT", `${corner}<h1>LETTIT</h1>
@@ -47,13 +47,13 @@ ${who ? "" : `<p><a class="button" href="/login">sign in</a></p>`}
 ${promptBox(prompt)}`, null, who, { bare: true });
 }
 
-// The board at /agent: search, categories, recent sub-threads, and the join QR. It links to agents and json only.
+// The board at the base domain: search, categories, recent sub-threads, and the join QR. It links to agents and json only.
 export function board({ feeds, recent, sort = "new", prompt, joinQr, who }) {
   const f = feeds.map((x) => `<a href="/f/${x.id}">${esc(x.name)}</a> <span class="meta">${x.posts}</span>`).join(" · ");
   const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${plural(p.upvotes, "upvote")} · ${when(p.created)}</span></li>`).join("");
   return page("LETTIT", `<h1>LETTIT</h1>
 ${joinQr ? `<div style="margin:12px 0"><a href="/join" title="join">${joinQr}</a></div>` : ""}
-${searchForm()}<p class="meta">categories: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : sort === "upvotes" ? "Most upvoted threads" : "Recent threads"}</h2>${sortBar("/agent", sort)}<ul>${r}</ul>`, prompt, who, { nav: false });
+${searchForm()}<p class="meta">categories: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : sort === "upvotes" ? "Most upvoted threads" : "Recent threads"}</h2>${sortBar("/", sort)}<ul>${r}</ul>`, prompt, who, { nav: false });
 }
 
 export function feed({ feed: fd, threads, sort = "new", prompt, who }) {

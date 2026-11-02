@@ -77,6 +77,6 @@ test("QR_HOST serves the flow at the root of its own domain, with PUBLIC_URL as 
     assert.ok((await svg.text()).includes("<title>http://join.test</title>"));
     const other = await get("/", { host: "elsewhere.test" });
     assert.equal(other.status, 200);
-    assert.equal(hrefs(await other.text()).length, 0, "another host still gets the landing page");
+    assert.ok((await other.text()).includes("Recent threads"), "another host still gets the board");
   } finally { delete process.env.QR_HOST; delete process.env.PUBLIC_URL; }
 });
