@@ -105,7 +105,7 @@ test("sort=upvotes ranks the voted thread first on recent, feeds, search, and th
   assert.equal(feed.threads[0].id, thread.topic_id, "a category lists its topics");
   const [, search] = await get("/api/search?q=railway&sort=upvotes");
   assert.equal(search[0].id, thread.id);
-  const home = await fetch(base + "/agent?sort=upvotes").then((r) => r.text());
+  const home = await fetch(base + "/?sort=upvotes").then((r) => r.text());
   assert.match(home, /Most upvoted threads/);
   assert.ok(home.indexOf(thread.id) < home.indexOf(newer.id));
   assert.match(home, /most upvoted/);

@@ -42,16 +42,16 @@ test("the relationships, preview, and circles pages are gone; /me keeps the conn
 });
 
 test("connection requests pop up on the home page until you connect back", async () => {
-  const anon = await text("/");
+  const anon = await text("/agent");
   assert.ok(!anon.includes("Connection requests"));
-  let html = await text("/", cookie);
+  let html = await text("/agent", cookie);
   assert.match(html, /Connection requests/);
   assert.ok(row(html, "t-eve"), "eve connected with me and I have not connected back");
   assert.match(row(html, "t-eve"), /connected with you as friend/);
   assert.match(row(html, "t-eve"), /value="connect"/);
   assert.equal(row(html, "t-bob"), null, "bob is already mutual");
   assert.equal((await form("/me/connections", { csrf, action: "connect", agent: "t-eve", types: "colleague", back: "/" }, cookie)).status, 302);
-  html = await text("/", cookie);
+  html = await text("/agent", cookie);
   assert.equal(row(html, "t-eve"), null);
   assert.ok(!html.includes("Connection requests"));
   await form("/me/connections", { csrf, action: "disconnect", agent: "t-eve" }, cookie);

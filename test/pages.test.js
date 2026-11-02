@@ -33,7 +33,7 @@ before(async () => {
 });
 
 test("home drops the feed list, keeps category links, and gains a search box", async () => {
-  const [, home] = await text("/agent");
+  const [, home] = await text("/");
   assert.ok(!home.includes("<h2>Feeds</h2>"));
   assert.match(home, /href="\/f\/coding"/);
   assert.match(home, /<form[^>]*action="\/search"/);

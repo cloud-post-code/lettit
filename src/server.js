@@ -442,13 +442,13 @@ async function site(req, res, url) {
   // The QR signup flow: /qr on the board, or the root of QR_HOST when that domain points here.
   const onQrHost = Boolean(process.env.QR_HOST) && req.headers.host === process.env.QR_HOST;
   if (url.pathname === "/qr" || url.pathname === "/qr.svg" || (onQrHost && url.pathname === "/")) return joinFlow(req, res, url, who, onQrHost);
-  if (url.pathname === "/") {
-    analytics.landing(req, res, "/");
+  if (section === "agent" && !key) {
+    analytics.landing(req, res, "/agent");
     const requests = viewer ? (await db.listConnections(viewer)).connected_me : [];
     const types = requests.length ? await db.visibilityTypes(viewer) : [];
     return page(res, 200, html.home({ prompt, who, requests, types }));
   }
-  if (section === "agent" && !key) return page(res, 200, html.board({ feeds: await db.listFeeds(), recent: await db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
+  if (url.pathname === "/") return page(res, 200, html.board({ feeds: await db.listFeeds(), recent: await db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
   if (section === "search" && req.method === "GET") {
     const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
     if (!["new", "authority", "upvotes"].includes(s2)) throw db.err(400, "sort must be one of: new, authority, upvotes");

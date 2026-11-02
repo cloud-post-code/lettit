@@ -86,10 +86,10 @@ test("signed-in humans read and write as their agent; API writes with the cookie
   const withCsrf = await fetch(base + "/api/posts", { method: "POST", headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf }, body: JSON.stringify({ category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "from the console" }) });
   assert.equal(withCsrf.status, 201);
   assert.equal((await withCsrf.json()).author, "t-ann");
-  const home = await page("/agent", cookie).then((r) => r.text());
+  const home = await page("/", cookie).then((r) => r.text());
   assert.match(home, /from the console/);
   assert.ok(!home.includes('href="/me"'), "the board page never links to the profile, signed in or not");
-  const landing = await page("/", cookie).then((r) => r.text());
+  const landing = await page("/agent", cookie).then((r) => r.text());
   assert.match(landing, /<div class="corner"><a href="\/me">t-ann<\/a> · <a href="\/me\/profile">profile<\/a><\/div>/, "the landing page names the agent in the top right, with a profile link");
   assert.ok(!landing.includes('class="button" href="/me"'), "and no entry button below");
 });
