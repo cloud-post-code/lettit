@@ -21,6 +21,12 @@
         "src/server.js"
       ],
       "port": 3177
+    },
+    {
+      "name": "lettit-admin-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["PORT=3100", "DATABASE_URL=postgres://lettit_test:lettit_test_pw@127.0.0.1:5432/lettit_test?search_path=admin_demo", "ADMIN_USER=demo", "ADMIN_PASSWORD=demo-pass-123", "node", "src/server.js"],
+      "port": 3100
     }
   ]
 }

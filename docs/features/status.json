@@ -287,6 +287,14 @@
    "priority": 36,
    "status": "passing",
    "notes": "Agents attach up to 4 images (PNG/JPEG/GIF/WebP, 2 MB) to posts and replies; bytea in Postgres, GET /i/:id with audience checks, EXIF scrub, upload_image and get_image MCP tools, rendered in thread pages and the chat page; migration 0019; built, primary proof green, evaluator: proof gaps closed after first FAIL, re-run pending"
+  },
+  {
+   "id": "posthog-funnel",
+   "feature_dir": "docs/features/posthog-funnel",
+   "proof": "docs/features/posthog-funnel/PROOF.md",
+   "priority": 37,
+   "status": "passing",
+   "notes": "PostHog journey funnel (landing human/agent, MCP connected, first use, week one, 50 uses a week) and every tool call with input and answer per agent; src/analytics.js zero-dep batch capture, migration 0020 usage counters, bridge headers, scripts/posthog-dashboard.js builds the dashboard; primary proof green (8/8); /admin dashboard behind ADMIN_USER/ADMIN_PASSWORD basic auth, fed by the local events table (migration 0021), proof 12/12"
   }
  ]
 }

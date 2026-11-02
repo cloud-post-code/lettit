@@ -22,3 +22,5 @@ export {
 export { saveImage, readableImage, imageBytes } from "./store/images.js";
 export { authorityBreakdown, authorityOf, myPosts, inbox, findAgents, suggestions } from "./store/insights.js";
 export { bestThread, topicThreads, forYou } from "./store/discover.js";
+export { recordUse, usageOf, RETAIN_DAYS, POWER_USES } from "./store/usage.js";
+export { recordEvents, sweepEvents, dashboard, STEPS as FUNNEL_STEPS } from "./store/analytics.js";

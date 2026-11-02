@@ -9,11 +9,14 @@ import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
 import { invite } from "./invite.js";
 import * as contacts from "./contacts.js";
-import { ONBOARDING } from "./tools.js";
+import crypto from "node:crypto";
+import { ONBOARDING, WRITES } from "./tools.js";
+import * as analytics from "./analytics.js";
 
 const PORT = Number(process.env.PORT || 3000);
 
 await db.open();
+analytics.setSink(db.recordEvents); // the events table: what the /admin dashboard reads
 await seed(); // idempotent: feeds and agents upserted, nothing ever re-posted
 db.startSweeper();
 
@@ -24,7 +27,7 @@ const json = (res, status, data) => {
 };
 const page = (res, status, body) => {
   res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
-  res.end(body);
+  res.end(res.visitor ? body.replace("</head>", analytics.snippet(res.visitor) + "</head>") : body);
 };
 const text = (res, body) => {
   res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
@@ -39,6 +42,7 @@ function readForm(req) {
     req.on("end", () => {
       const out = {};
       for (const [k, v] of new URLSearchParams(raw)) out[k] = k in out ? [].concat(out[k], v) : v;
+      req.parsed = out;
       resolve(out);
     });
   });
@@ -52,8 +56,9 @@ function readBody(req, limit = BODY_MAX) {
     req.on("data", (c) => { raw += c; if (raw.length > limit) reject(db.err(413, `body too large: ${limit.toLocaleString("en-US")} characters per request`)); });
     req.on("end", () => {
       if (!raw) return resolve({});
-      if (String(req.headers["content-type"] || "").includes("application/x-www-form-urlencoded")) return resolve(Object.fromEntries(new URLSearchParams(raw)));
-      try { resolve(JSON.parse(raw)); } catch { reject(db.err(400, "body must be JSON")); }
+      const done = (b) => { req.parsed = b; resolve(b); };
+      if (String(req.headers["content-type"] || "").includes("application/x-www-form-urlencoded")) return done(Object.fromEntries(new URLSearchParams(raw)));
+      try { done(JSON.parse(raw)); } catch { reject(db.err(400, "body must be JSON")); }
     });
   });
 }
@@ -129,7 +134,7 @@ async function api(req, res, url) {
   if (resource === "agents") return agentsApi(req, res, q, key, action);
   if (resource === "feeds") return feedsApi(req, res, q, key, action);
   if (resource === "me") return meApi(req, res, q, key, action);
-  if (resource === "operators" && m === "POST" && !key) { const b = await readBody(req); return json(res, 201, await db.createOperator(b.email, b.password)); }
+  if (resource === "operators" && m === "POST" && !key) { const b = await readBody(req); const o = await db.createOperator(b.email, b.password); analytics.capture(res.visitor?.id, "signed_up", { method: "api" }); return json(res, 201, o); }
   if (resource === "operators") return json(res, 404, { error: "POST /api/operators {email, password} creates an operator account; everything else is on /me" });
 
   if (resource === "images") return imagesApi(req, res, key);
@@ -149,7 +154,7 @@ async function api(req, res, url) {
   if (resource === "search" && key === "best") { const t = await db.bestThread(q.get("q"), searchOpts(q, await viewerOf(req))); return json(res, 200, { match: t && linkTree(baseUrl(req), t) }); }
   if (resource === "search") return json(res, 200, await db.search(q.get("q"), searchOpts(q, await viewerOf(req))));
   if (resource === "topic") return json(res, 200, { topic: q.get("q") || "", threads: (await db.topicThreads(q.get("q"), await viewerOf(req))).map((t) => linkTree(baseUrl(req), t)) });
-  if (resource === "prompt") return json(res, 200, { prompt: setupPrompt(baseUrl(req)) });
+  if (resource === "prompt") { analytics.landing(req, res, "/api/prompt"); return json(res, 200, { prompt: setupPrompt(baseUrl(req)) }); }
 
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
 }
@@ -167,6 +172,13 @@ async function meApi(req, res, q, key, action) {
   }
   if (m === "POST" && key === "invite") { const b = await signedBody(req); return json(res, 200, await invite(baseUrl(req), await db.getAgent(b.author), b)); }
   if (m === "POST" && key === "contacts") { const b = await signedBody(req); return json(res, 200, await db.matchContacts(b.author, b.emails)); }
+  // The stdio bridge says it is up (on initialize, and when it first claims a key): the funnel's "connected" step.
+  if (m === "POST" && key === "connected") {
+    const b = await readBody(req);
+    const me = await actorOf(req, b);
+    analytics.capture(me, "mcp_connected", { transport: "bridge", via: "key", client: String(b.client || "").slice(0, 80) || undefined });
+    return json(res, 200, { ok: true });
+  }
   const me = await actorOf(req, await readBody(req));
   if (!key) {
     // An agent that connected with nobody yet is onboarding: who to connect with, and what to do about it.
@@ -201,7 +213,12 @@ async function agentsApi(req, res, q, key, action) {
   if (req.method === "POST" && key && action === "rotate") { const b = await readBody(req); return json(res, 200, await db.rotateKey(key, keyOf(req, b))); }
   if (req.method === "POST" && key && SOCIAL[action]) return json(res, 200, await SOCIAL[action](await signedBody(req), key));
   if (req.method === "POST" && key) return json(res, 404, { error: `unknown agent action; claim or update with POST /api/agents, act with /api/agents/:id/${Object.keys(SOCIAL).join("|")}` });
-  if (req.method === "POST") { const { key: k, ...card } = await readBody(req); const r = await db.claimOrUpdateAgent(card, keyOf(req, { key: k })); return json(res, r.status, r.agent); }
+  if (req.method === "POST") {
+    const { key: k, ...card } = await readBody(req);
+    const r = await db.claimOrUpdateAgent(card, keyOf(req, { key: k }));
+    if (r.status === 201) { analytics.identify(r.agent.id, res.visitor?.id); analytics.capture(r.agent.id, "agent_claimed", { client: res.visitor?.client }); }
+    return json(res, r.status, r.agent);
+  }
   if (key && action === "qr.svg") {
     const a = await db.getAgent(key);
     if (!a) return json(res, 404, { error: "agent not found" });
@@ -290,16 +307,73 @@ async function mcpEndpoint(req, res, url) {
   // No credential, or a dead token: a 401 with WWW-Authenticate is what makes an MCP client start OAuth.
   const base = baseUrl(req);
   if (!key) { console.log("mcp anon -> 401 challenge"); oauth.challenge(res, base); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: `sign in: add ${base}/mcp as a connector and approve it on LETTIT (sign up at ${base}/signup), or send Authorization: Bearer <agent key>` } }); }
-  try { await db.authenticate(key); } catch (e) { console.log(`mcp ${db.isToken(key) ? "token" : "key"} refused -> 401`); oauth.challenge(res, base, e.token ? "invalid_token" : undefined); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: e.message } }); }
+  let who;
+  try { who = (await db.authenticate(key)).id; } catch (e) { console.log(`mcp ${db.isToken(key) ? "token" : "key"} refused -> 401`); oauth.challenge(res, base, e.token ? "invalid_token" : undefined); return json(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: e.message } }); }
   const msg = await readBody(req, UPLOAD_MAX);
   const ctx = { signedIn: true, base, invoke: (method, path, body) => invoke(req, method, path, body, key) };
-  const out = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((one) => mcpMessage(one, ctx)))).filter(Boolean);
+  const signIn = await db.signInOf(key);
+  const run = async (one) => { const t0 = Date.now(); const r = await mcpMessage(one, ctx); await reportMcp(who, signIn, one, r, Date.now() - t0).catch((e) => console.error("analytics:", e.message)); return r; };
+  const out = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map(run))).filter(Boolean);
   // One line per request in the server log: methods, tool names, and outcome; never the credential.
   const names = [].concat(msg).map((m) => (m?.method === "tools/call" ? `tools/call:${m.params?.name}` : m?.method)).join(",");
   const failed = out.filter((m) => m.error || m.result?.isError).length;
-  console.log(`mcp ${(await db.signInOf(key)).via} ${names || "empty"}${failed ? ` errors=${failed}` : ""}`);
+  console.log(`mcp ${signIn.via} ${names || "empty"}${failed ? ` errors=${failed}` : ""}`);
   if (!out.length) { res.writeHead(202); return res.end(); }
   return json(res, 200, Array.isArray(msg) ? out : out[0]);
+}
+
+// PostHog: initialize is the "connected" step; every tool call goes out with its input and the answer the
+// model got, under the agent's id, and counts as a use.
+async function reportMcp(who, signIn, one, r, duration_ms) {
+  if (!analytics.enabled() || !one?.method) return;
+  const client = one.params?.clientInfo?.name || signIn.client;
+  if (one.method === "initialize") return analytics.capture(who, "mcp_connected", { transport: "hosted", via: signIn.via, client });
+  if (one.method !== "tools/call") return;
+  const name = String(one.params?.name || "");
+  const text = (r?.result?.content || []).map((c) => c.text).filter(Boolean).join("\n") || (r?.error ? r.error.message : "");
+  const ok = !r?.error && r?.result?.isError !== true;
+  await use(who, { tool: name, kind: WRITES.has(name) ? "write" : "read", transport: "hosted", via: signIn.via, client, input: one.params?.arguments, answer: text, ok, duration_ms, error: ok ? undefined : text });
+}
+// One tool call by an identified agent: the event, and the use count with its two one-time milestones.
+async function use(agentId, p) {
+  analytics.toolCalled(agentId, p);
+  try {
+    const u = await db.recordUse(agentId);
+    if (u.retained) analytics.capture(agentId, "retained_week_one", { days_since_first: u.days_since_first });
+    if (u.power) analytics.capture(agentId, "power_week", { uses: u.uses });
+  } catch (e) { console.error("usage:", e.message); }
+}
+// Every /api/* request by HTTP (the stdio bridge, curl, scripts): reported like a tool call, with the bridge's
+// tool name when it says one. Health, the prompt, sign-up, the connected ping, and image bytes are left out.
+const UNTRACKED = new Set(["health", "prompt", "operators", "images"]);
+async function apiTracked(req, res, url) {
+  const resource = url.pathname.split("/")[2];
+  if (!analytics.enabled() || UNTRACKED.has(resource) || url.pathname === "/api/me/connected") return api(req, res, url);
+  const t0 = Date.now();
+  let out = "", failed = null;
+  const end = res.end.bind(res);
+  res.end = (raw) => { out = raw == null ? "" : String(raw); return end(raw); };
+  try { return await api(req, res, url); } catch (e) { failed = e; throw e; }
+  finally { reportApi(req, res, url, { out, failed, duration_ms: Date.now() - t0 }).catch((e) => console.error("analytics:", e.message)); }
+}
+async function reportApi(req, res, url, { out, failed, duration_ms }) {
+  const actor = await apiActor(req);
+  const named = String(req.headers["x-lettit-tool"] || "");
+  const tool = named || `${req.method} /api/${url.pathname.split("/")[2]}`;
+  const kind = named ? (WRITES.has(named) ? "write" : "read") : req.method === "GET" ? "read" : "write";
+  const status = failed ? failed.status || 500 : res.statusCode;
+  const ok = status < 400;
+  let error;
+  if (!ok) { try { error = failed ? failed.message : JSON.parse(out).error; } catch { error = out.slice(0, 500); } }
+  const p = { tool, kind, transport: req.headers["x-lettit-client"] ? "bridge" : "http", client: req.headers["x-lettit-host"] || res.visitor?.client, input: { ...Object.fromEntries(url.searchParams), ...(req.parsed || {}) }, answer: out, ok, status, duration_ms, error };
+  if (actor) return use(actor, p);
+  analytics.toolCalled(res.visitor?.id, p);
+}
+// The agent behind an API request, for reporting: a key, else the operator's session; a bad key is nobody.
+async function apiActor(req) {
+  const key = keyOf(req, req.parsed);
+  if (key) { try { return (await db.authenticate(key)).id; } catch { return null; } }
+  return (await sessionOf(req))?.current || null;
 }
 
 // Run one API request in-process on behalf of a key holder, capturing the JSON the API would send.
@@ -337,6 +411,7 @@ async function site(req, res, url) {
     return page(res, 200, html.connect({ agent: a, base, who, types: await db.visibilityTypes(who.id) }));
   }
   if (url.pathname === "/") {
+    analytics.landing(req, res, "/");
     const requests = viewer ? (await db.listConnections(viewer)).connected_me : [];
     const types = requests.length ? await db.visibilityTypes(viewer) : [];
     return page(res, 200, html.home({ prompt, who, requests, types }));
@@ -345,9 +420,11 @@ async function site(req, res, url) {
   if (section === "search" && req.method === "GET") {
     const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
     if (!["new", "authority", "upvotes"].includes(s2)) throw db.err(400, "sort must be one of: new, authority, upvotes");
-    return page(res, 200, html.searchPage({ q, kind, sort: s2, rows: await db.search(q, { kind, sort: s2, viewer, limit: 100 }), who }));
+    const rows = await db.search(q, { kind, sort: s2, viewer, limit: 100 });
+    analytics.capture(viewer || res.visitor?.id, "search_performed", { surface: "web", q, kind: kind || undefined, results: rows.length });
+    return page(res, 200, html.searchPage({ q, kind, sort: s2, rows, who }));
   }
-  if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") return text(res, prompt);
+  if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") { analytics.landing(req, res, url.pathname); return text(res, prompt); }
   if (section === "f" && key) {
     const f = await db.getFeed(key);
     if (!f) return page(res, 404, html.notFound(who));
@@ -394,6 +471,8 @@ async function console_(req, res, url, s, who) {
       out = await db.signUp(b.email, b.password, tokenOf(req));
       a = await db.createFromSession(out.token, { name: db.handle(b.email) });
     } catch (e) { return page(res, e.status || 400, html.signup({ error: e.message, email: b.email, who, card: f, next })); }
+    analytics.identify(a.id, res.visitor?.id, { signup_method: "form" });
+    analytics.capture(a.id, "signed_up", { method: "form", client: res.visitor?.client });
     // A connector is waiting (its OAuth authorize URL): go straight back to it, no starter prompt in between.
     if (next) return redirect(res, next, cookieHeader(out.token));
     const scanned = f && f !== a.id && (await db.getAgent(f)) ? f : "";
@@ -424,6 +503,7 @@ async function signIn(req, res, s) {
   let out;
   try { out = await db.createSession(email, b.password, tokenOf(req)); } catch (e) { await failed(email); return page(res, e.status || 400, html.login({ error: e.message, next: b.next, email })); }
   await db.limitClear("signin", email);
+  if (out.agent) { analytics.identify(out.agent, res.visitor?.id); analytics.capture(out.agent, "signed_in", { client: res.visitor?.client }); }
   return redirect(res, localPath(b.next), s?.operator === out.operator ? null : cookieHeader(out.token));
 }
 async function consolePost(req, res, section, action, s, who, b) {
@@ -502,6 +582,29 @@ async function consoleGet(req, res, url, section, action, s, who) {
   return page(res, 404, html.notFound(who));
 }
 
+// ---------- the operator's dashboard: /admin ----------
+// HTTP Basic auth against ADMIN_USER and ADMIN_PASSWORD (service variables on Railway). Off, with a 404 that says
+// so, until both are set. Ten wrong tries per address lock it for 15 minutes.
+const same = (a, b) => crypto.timingSafeEqual(crypto.createHash("sha256").update(String(a)).digest(), crypto.createHash("sha256").update(String(b)).digest());
+async function adminPage(req, res, url) {
+  const user = process.env.ADMIN_USER || "", password = process.env.ADMIN_PASSWORD || "";
+  if (!user || !password) return page(res, 404, html.error("the dashboard is off: set ADMIN_USER and ADMIN_PASSWORD on the service", null));
+  const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket.remoteAddress || "";
+  if ((await db.limitCount("admin", ip)) >= LIMIT.tries) return page(res, 429, html.error("too many failed sign-ins: wait 15 minutes", null));
+  const h = String(req.headers.authorization || "");
+  const [u, p] = h.toLowerCase().startsWith("basic ") ? Buffer.from(h.slice(6).trim(), "base64").toString().split(/:(.*)/s) : ["", ""];
+  if (!same(u || "", user) || !same(p || "", password)) {
+    if (h) await db.limitHit("admin", ip, LIMIT.windowMs);
+    res.writeHead(401, { "www-authenticate": 'Basic realm="LETTIT admin", charset="UTF-8"', "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    return res.end("sign in with the admin user and password");
+  }
+  const days = Math.min(365, Math.max(1, num(url.searchParams.get("days"), 30)));
+  const by = ["visitor", "client", "transport"].includes(url.searchParams.get("by")) ? url.searchParams.get("by") : "visitor";
+  const data = await db.dashboard({ days, by });
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+  return res.end(html.admin({ data, base: baseUrl(req) }));
+}
+
 // Console actions call the same store functions the API does.
 const list = (v) => (v == null || v === "" ? [] : [].concat(v).flatMap((x) => String(x).split(",")).map((x) => x.trim()).filter(Boolean));
 function consoleAction(me, b) {
@@ -518,13 +621,15 @@ const searchOpts = (q, viewer) => ({ feed: q.get("feed"), kind: q.get("kind"), a
 
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
+  res.visitor = analytics.enabled() ? analytics.visitor(req, res) : null;
   try {
     if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,authorization" }); return res.end(); }
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return await mcpEndpoint(req, res, url);
     if (url.pathname.startsWith("/.well-known/oauth-")) return json(res, 200, oauth.discovery(baseUrl(req), url.pathname.split("/")[2]));
     if (url.pathname.startsWith("/oauth/")) return await oauth.handle(req, res, url, { json, page, readBody, readForm, tokenOf, baseUrl, html, whoOf, redirect });
     if (url.pathname.startsWith("/i/") && ["GET", "HEAD"].includes(req.method)) return await imageFile(req, res, url.pathname.slice(3));
-    if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await api(req, res, url); }
+    if (url.pathname === "/admin") return await adminPage(req, res, url);
+    if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await apiTracked(req, res, url); }
     try { return await site(req, res, url); } catch (e) {
       if (!e.status || e.status >= 500) throw e;
       const s = await db.sessionOf(tokenOf(req));
@@ -540,5 +645,5 @@ export const server = http.createServer(async (req, res) => {
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
   server.listen(PORT, () => console.log(`LETTIT listening on :${server.address().port} (${db.backend()} store)`));
   // Railway sends SIGTERM before a redeploy: stop taking requests, let queued writes land, then exit.
-  process.on("SIGTERM", async () => { server.close(); await db.flush(); db.close(); process.exit(0); });
+  process.on("SIGTERM", async () => { server.close(); await db.flush(); await analytics.flush(); db.close(); process.exit(0); });
 }

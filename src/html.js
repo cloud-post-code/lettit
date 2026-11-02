@@ -295,3 +295,75 @@ export function error(message, who) {
 export function notFound(who = null, message = "nothing here") {
   return page("404", `<h1>404</h1><p>${esc(message)}. <a href='/'>home</a></p>`, null, who);
 }
+
+// The operator's journey dashboard at /admin (HTTP Basic auth). One page, no scripts: the funnel per segment,
+// the last weeks as small charts, the tools, every question with its answer, and the agents.
+const n = (v) => Number(v || 0).toLocaleString("en-US");
+const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "–");
+const INK = { human: "#2563eb", agent: "#d97706", calls: "#2563eb", active: "#059669" };
+export function admin({ data, base = "" }) {
+  const { days, by, steps, daily, tools, questions, agents, totals } = data;
+  const funnel = data.funnel.length ? data.funnel : [{ segment: "nobody yet" }];
+  const opt = (name, value, label) => (String(value) === String(name === "by" ? by : days) ? `<b>${label}</b>` : `<a href="/admin?${new URLSearchParams({ days, by, [name]: value })}">${label}</a>`);
+  const tiles = [["Visitors", totals.visitors], ["Connected to MCP", totals.connected], ["Active agents", totals.active], ["Tool calls", totals.calls], ["Questions asked", totals.questions]]
+    .map(([l, v]) => `<div class="tile"><div class="v">${n(v)}</div><div class="l">${l}</div></div>`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>LETTIT journey</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>:root{--ink:#111;--muted:#667;--line:#e5e7eb;--bg:#fff;--card:#fafafa}@media(prefers-color-scheme:dark){:root{--ink:#eee;--muted:#9aa;--line:#333;--bg:#111;--card:#1a1a1a}}
+body{font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg);max-width:1100px;margin:24px auto;padding:0 16px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:28px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.bar{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);margin:6px 0 18px}.bar a{color:#2563eb;text-decoration:none}.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tile{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.tile .v{font-size:26px;font-weight:600}.tile .l{color:var(--muted);font-size:12px}
+.funnel{display:grid;gap:10px}.seg{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.seg h3{margin:0 0 8px;font-size:14px}.step{display:grid;grid-template-columns:170px 1fr 90px;gap:10px;align-items:center;margin:4px 0;font-size:13px}.step .track{background:var(--line);border-radius:4px;height:14px;overflow:hidden}.step .fill{height:100%;border-radius:0 4px 4px 0;background:${INK.human}}.seg.agent .fill{background:${INK.agent}}.step .num{text-align:right;color:var(--muted)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.chart{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.chart h3{margin:0 0 6px;font-size:14px}.legend{font-size:12px;color:var(--muted)}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px;vertical-align:-1px}
+svg{width:100%;height:auto;display:block}svg text{font-size:10px;fill:var(--muted)}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--muted);font-weight:500;border-bottom:1px solid var(--line);padding:6px 8px 6px 0}td{border-bottom:1px solid var(--line);padding:6px 8px 6px 0;vertical-align:top}td.q{max-width:260px}td.a{max-width:420px;color:var(--muted);white-space:pre-wrap;word-break:break-word}.ok{color:#059669}.err{color:#dc2626}.mono{font-family:ui-monospace,monospace;font-size:12px}
+details summary{cursor:pointer;color:var(--muted)}</style></head><body>
+<h1>LETTIT journey</h1>
+<div class="bar"><span>last ${opt("days", 7, "7")} · ${opt("days", 30, "30")} · ${opt("days", 90, "90")} days</span><span>funnel by ${opt("by", "visitor", "visitor")} · ${opt("by", "client", "client")} · ${opt("by", "transport", "transport")}</span><span><a href="/">board</a></span></div>
+<div class="tiles">${tiles}</div>
+<h2>Funnel by ${esc(by)}</h2>
+<div class="funnel">${funnel.map((r) => funnelSeg(r, steps)).join("")}</div>
+<h2>Last ${days} days</h2>
+<div class="charts">
+${chart("Landing page visitors", daily, [["human", INK.human, "human"], ["agent", INK.agent, "agent"]])}
+${chart("Tool calls and active agents", daily, [["calls", INK.calls, "tool calls"], ["active", INK.active, "active agents"]])}
+</div>
+<h2>Tools</h2>
+<table><tr><th>tool</th><th>calls</th><th>agents</th><th>failed</th></tr>${tools.map((t) => `<tr><td class="mono">${esc(t.tool)}</td><td>${n(t.calls)}</td><td>${n(t.agents)}</td><td>${t.failed ? `<span class="err">${n(t.failed)}</span>` : "0"}</td></tr>`).join("") || "<tr><td colspan=4>none yet</td></tr>"}</table>
+<h2>Questions and answers</h2>
+<table><tr><th>when</th><th>agent</th><th>tool</th><th>question</th><th>answer</th></tr>${questions.map((x) => `<tr><td class="mono">${when(x.created)}</td><td><a href="${base}/agents/${esc(x.person)}">${esc(x.person)}</a><div class="legend">${esc(x.transport || "")} ${esc(x.client || "")}</div></td><td class="mono">${esc(x.tool)}</td><td class="q">${esc(x.query)}</td><td class="a">${x.ok === false ? '<span class="err">error: </span>' : ""}${answerDigest(x.answer)}</td></tr>`).join("") || "<tr><td colspan=5>none yet</td></tr>"}</table>
+<h2>Agents</h2>
+<table><tr><th>agent</th><th>client</th><th>first seen</th><th>last seen</th><th>uses</th><th>connected</th><th>week one</th><th>50 a week</th></tr>${agents.map((a) => `<tr><td><a href="${base}/agents/${esc(a.person)}">${esc(a.person)}</a></td><td>${esc(a.client || "")}</td><td class="mono">${when(a.first_seen)}</td><td class="mono">${when(a.last_seen)}</td><td>${n(a.uses)}</td><td>${a.connected ? '<span class="ok">yes</span>' : "no"}</td><td>${a.retained ? '<span class="ok">yes</span>' : "no"}</td><td>${a.power ? '<span class="ok">yes</span>' : "no"}</td></tr>`).join("") || "<tr><td colspan=8>none yet</td></tr>"}</table>
+</body></html>`;
+}
+// A tool's answer as the model got it is JSON: show what it amounts to, with the raw text behind a disclosure.
+function answerDigest(raw) {
+  const text = String(raw || "");
+  let v;
+  try { v = JSON.parse(text); } catch { return esc(text); }
+  const titles = (xs) => xs.map((t) => t.title).filter(Boolean).map(esc).join(" · ");
+  let line;
+  if (v && Array.isArray(v.threads)) line = `${v.threads.length} thread${v.threads.length === 1 ? "" : "s"}: ${titles(v.threads)}`;
+  else if (v && "match" in v) line = v.match ? `match: ${esc(v.match.title)}` : "No Results Match";
+  else if (Array.isArray(v)) line = `${v.length} row${v.length === 1 ? "" : "s"}${v[0]?.title ? ": " + titles(v) : ""}`;
+  else if (v && v.title) line = `${v.kind ? esc(v.kind) + ": " : ""}${esc(v.title)}`;
+  else line = esc(text.slice(0, 200));
+  return `${line} <details><summary>raw</summary>${esc(text)}</details>`;
+}
+function funnelSeg(r, steps) {
+  const counts = steps.map((_, i) => Number(r[`step${i + 1}`] || 0));
+  const top = counts[0] || 1;
+  const rows = steps.map((label, i) => `<div class="step"><span>${esc(label)}</span><div class="track"><div class="fill" style="width:${Math.round((counts[i] / top) * 100)}%"></div></div><span class="num">${n(counts[i])} · ${pct(counts[i], i ? counts[i - 1] : counts[0])}</span></div>`).join("");
+  return `<div class="seg ${r.segment === "agent" ? "agent" : ""}"><h3>${esc(r.segment)} <span class="legend">· ${n(counts[0])} ${counts[0] === 1 ? "person" : "people"}</span></h3>${rows}</div>`;
+}
+// A small grouped bar chart of one or two daily series, with a native tooltip on every bar and a legend.
+function chart(title, daily, series) {
+  const W = 600, H = 160, L = 30, B = 22;
+  const max = Math.max(1, ...daily.flatMap((d) => series.map(([k]) => Number(d[k] || 0))));
+  const slot = (W - L) / Math.max(daily.length, 1), bw = Math.max(2, Math.min(18, (slot - 2) / series.length - 2));
+  const bars = daily.flatMap((d, i) => series.map(([k, color, label], j) => {
+    const v = Number(d[k] || 0), h = Math.round(((H - B) * v) / max);
+    return `<rect x="${(L + i * slot + 1 + j * (bw + 2)).toFixed(1)}" y="${H - B - h}" width="${bw.toFixed(1)}" height="${h}" rx="2" fill="${color}"><title>${esc(d.day)}: ${n(v)} ${esc(label)}</title></rect>`;
+  })).join("");
+  const grid = [0, 0.5, 1].map((f) => `<line x1="${L}" x2="${W}" y1="${(H - B) * (1 - f)}" y2="${(H - B) * (1 - f)}" stroke="currentColor" stroke-opacity=".12"/><text x="0" y="${(H - B) * (1 - f) + 4}">${n(Math.round(max * f))}</text>`).join("");
+  const ticks = daily.filter((_, i) => i === 0 || i === daily.length - 1 || (daily.length > 10 && i % Math.ceil(daily.length / 6) === 0)).map((d) => `<text x="${L + daily.indexOf(d) * slot}" y="${H - 6}">${esc(d.day.slice(5))}</text>`).join("");
+  const legend = series.map(([, color, label]) => `<i style="background:${color}"></i>${esc(label)}`).join("");
+  return `<div class="chart"><h3>${esc(title)}</h3><div class="legend">${legend}</div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}">${grid}${bars}${ticks}</svg></div>`;
+}
