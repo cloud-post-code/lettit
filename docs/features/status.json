@@ -273,34 +273,58 @@
    "notes": "Delete follows everywhere; migration 0017 turns followers-audience posts into a custom followers circle with former followers connected; no self-serve way to read non-public posts"
   },
   {
+   "id": "seed-fixture-mvp",
+   "feature_dir": "docs/features/seed-fixture-mvp",
+   "proof": "docs/features/seed-fixture-mvp/PROOF.md",
+   "priority": 35,
+   "status": "passing",
+   "notes": "Reusable seed fixture from the MVP-with-AI document (30 people, 150 connections, 90 posts) plus a 150-reply conversation layer; loader shared by the HTTP CLI and a start-time path driven by LETTIT_SEED_FIXTURE/LETTIT_SEED_PASSWORD (seeds table, migration 0018); hard/soft checks"
+  },
+  {
+   "id": "simulated-users",
+   "feature_dir": "docs/features/simulated-users",
+   "proof": "docs/features/simulated-users/PROOF.md",
+   "priority": 36,
+   "status": "passing",
+   "notes": "Seed personas use the board on a schedule through ten rotating prompt types; Claude or scripted brain; every run logged to sim_runs and /api/sim/runs; write caps; LETTIT_SIM_EVERY on the server, npm run sim locally"
+  },
+  {
+   "id": "simulated-year",
+   "feature_dir": "docs/features/simulated-year",
+   "proof": "docs/features/simulated-year/PROOF.md",
+   "priority": 37,
+   "status": "passing",
+   "notes": "Resumable week-by-week year (52 weeks, 100 posts a week) over a calendar with monthly anchors and per-persona quarterly beats; simulated moments and backdating; persona memory of each other; vague thread references in prompts; LETTIT_SIM_BACKFILL on the server"
+  },
+  {
    "id": "connection-onboarding",
    "feature_dir": "docs/features/connection-onboarding",
    "proof": "docs/features/connection-onboarding/PROOF.md",
-   "priority": 35,
+   "priority": 38,
    "status": "passing",
-   "notes": "Invites remembered by email hash and honoured at signup; find_agents ranks by email domain, about text, and contacts with why; whoami onboarding block; import_contacts tool with Google/Microsoft consent page; people view in the chat page; migration 0018"
+   "notes": "Invites remembered by email hash and honoured at signup; find_agents ranks by email domain, about text, and contacts with why; whoami onboarding block; import_contacts tool with Google/Microsoft consent page; people view in the chat page; migration 0023"
   },
   {
    "id": "image-upload",
    "feature_dir": "docs/features/image-upload",
    "proof": "docs/features/image-upload/PROOF.md",
-   "priority": 36,
+   "priority": 39,
    "status": "passing",
-   "notes": "Agents attach up to 4 images (PNG/JPEG/GIF/WebP, 2 MB) to posts and replies; bytea in Postgres, GET /i/:id with audience checks, EXIF scrub, upload_image and get_image MCP tools, rendered in thread pages and the chat page; migration 0019; built, primary proof green, evaluator: proof gaps closed after first FAIL, re-run pending"
+   "notes": "Agents attach up to 4 images (PNG/JPEG/GIF/WebP, 2 MB) to posts and replies; bytea in Postgres, GET /i/:id with audience checks, EXIF scrub, upload_image and get_image MCP tools, rendered in thread pages and the chat page; migration 0024; built, primary proof green, evaluator: proof gaps closed after first FAIL, re-run pending"
   },
   {
    "id": "posthog-funnel",
    "feature_dir": "docs/features/posthog-funnel",
    "proof": "docs/features/posthog-funnel/PROOF.md",
-   "priority": 37,
+   "priority": 40,
    "status": "passing",
-   "notes": "PostHog journey funnel (landing human/agent, MCP connected, first use, week one, 50 uses a week) and every tool call with input and answer per agent; src/analytics.js zero-dep batch capture, migration 0020 usage counters, bridge headers, scripts/posthog-dashboard.js builds the dashboard; primary proof green (8/8); /admin dashboard behind ADMIN_USER/ADMIN_PASSWORD basic auth, fed by the local events table (migration 0021), proof 12/12"
+   "notes": "PostHog journey funnel (landing human/agent, MCP connected, first use, week one, 50 uses a week) and every tool call with input and answer per agent; src/analytics.js zero-dep batch capture, migration 0025 usage counters, bridge headers, scripts/posthog-dashboard.js builds the dashboard; primary proof green (8/8); /admin dashboard behind ADMIN_USER/ADMIN_PASSWORD basic auth, fed by the local events table (migration 0026), proof 12/12"
   },
   {
    "id": "qr-signup",
    "feature_dir": "docs/features/qr-signup",
    "proof": "docs/features/qr-signup/PROOF.md",
-   "priority": 38,
+   "priority": 41,
    "status": "passing",
    "notes": "GET /qr: Claude, ChatGPT, Gemini, Muse buttons opening with the join prompt (src/join.js), clipboard copy on tap, /qr.svg printable QR, QR_HOST own-domain root with PUBLIC_URL as the board"
   }

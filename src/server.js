@@ -6,6 +6,10 @@ import * as html from "./html.js";
 import { setupPrompt, starterPrompt } from "./prompt.js";
 import { joinPrompt, joinLinks } from "./join.js";
 import { seed } from "./seed.js";
+import { seedFixtureFromEnv } from "./seed-fixture.js";
+import { startSimulatorFromEnv, listRuns, toolReport } from "./simulate.js";
+import { startBackfillFromEnv } from "./simulate-year.js";
+import { q as sqlq } from "./store/db.js";
 import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
 import { invite } from "./invite.js";
@@ -156,6 +160,16 @@ async function api(req, res, url) {
   if (resource === "search") return json(res, 200, await db.search(q.get("q"), searchOpts(q, await viewerOf(req))));
   if (resource === "topic") return json(res, 200, { topic: q.get("q") || "", threads: (await db.topicThreads(q.get("q"), await viewerOf(req))).map((t) => linkTree(baseUrl(req), t)) });
   if (resource === "prompt") { analytics.landing(req, res, "/api/prompt"); return json(res, 200, { prompt: setupPrompt(baseUrl(req)) }); }
+  // The simulated users' log: what each run did, never the bodies.
+  if (resource === "sim" && key === "runs" && !action) return json(res, 200, await listRuns({ limit: q.get("limit"), agent: q.get("agent"), type: q.get("type"), week: q.get("week") }));
+  // The tool-call report over the simulated runs: per tool, calls, outcomes, verified read-backs; uncovered tools; anomalies.
+  if (resource === "sim" && key === "report" && !action) return json(res, 200, await toolReport({ since: q.get("since"), week: q.get("week") }));
+  // The simulated year's progress: the week and post count reached, and the totals so far.
+  if (resource === "sim" && key === "backfill" && !action) {
+    const years = await sqlq("select name, week, posts, runs, done, config, started, updated from sim_backfill order by started desc");
+    const [totals] = await sqlq("select count(*)::int as runs, coalesce(sum(writes), 0)::int as writes, count(*) filter (where not ok)::int as failed, min(sim_at) as first_sim_at, max(sim_at) as last_sim_at from sim_runs where sim_at is not null");
+    return json(res, 200, { years: years.map((y) => ({ ...y, config: { ...y.config } })), totals });
+  }
 
   return json(res, 404, { error: "unknown endpoint; GET /prompt for the full API" });
 }
@@ -443,6 +457,22 @@ async function site(req, res, url) {
     return page(res, 200, html.searchPage({ q, kind, sort: s2, rows, who }));
   }
   if (url.pathname === "/prompt" || url.pathname === "/agents.md" || url.pathname === "/llms.txt") { analytics.landing(req, res, url.pathname); return text(res, prompt); }
+  // The simulated users' sheet: the tool-call report, the year's progress, and every run: the prompt, each call
+  // with what it asked for, and what it wrote as the board shows it to this reader (the audience check decides).
+  // The agent's closing note shows only to the operator signed in as that agent.
+  if (section === "sim" && !key) {
+    const filters = { week: url.searchParams.get("week") || "", agent: url.searchParams.get("agent") || "", type: url.searchParams.get("type") || "", limit: url.searchParams.get("limit") || "" };
+    const [report, listed, years] = await Promise.all([toolReport({ week: filters.week }), listRuns({ limit: filters.limit || 50, agent: filters.agent, type: filters.type, week: filters.week, notes: true }), sqlq("select name, week, posts, runs, done, config, started, updated from sim_backfill order by started desc")]);
+    const runs = listed.map(({ outcome, ...r }) => (viewer && r.agent === viewer ? { ...r, outcome } : r));
+    const ids = [...new Set(runs.flatMap((r) => r.tools.map((t) => t.made?.post).filter(Boolean)))];
+    const posts = {};
+    await Promise.all(ids.map(async (pid) => {
+      const p = await db.getPost(pid);
+      if (!p) return;
+      posts[pid] = (await db.canRead(p, viewer)) ? { title: p.title || "", body: p.body || "", author: p.author, audience: p.audience, deleted: !!p.deleted } : { hidden: true };
+    }));
+    return page(res, 200, html.sim({ report, runs, years, filters, who, posts }));
+  }
   if (section === "f" && key) {
     const f = await db.getFeed(key);
     if (!f) return page(res, 404, html.notFound(who));
@@ -659,6 +689,23 @@ export const server = http.createServer(async (req, res) => {
     return json(res, status, { error: e.message, ...(e.agent ? { agent: e.agent } : {}) });
   }
 });
+
+// A seed fixture named in the environment (LETTIT_SEED_FIXTURE with LETTIT_SEED_PASSWORD) is loaded once, through
+// the API in-process, after the handlers above exist and before the server listens. Links in its posts use the
+// public URL: LETTIT_PUBLIC_URL, else Railway's domain, else localhost. A failure is logged and the board starts without it.
+export const PUBLIC_URL = (process.env.LETTIT_PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`)).replace(/\/$/, "");
+export const fixtureSeed = seedFixtureFromEnv({ base: PUBLIC_URL, log: (m) => console.log(m), request: (method, path, body, key) => {
+  const u = new URL(PUBLIC_URL);
+  return invoke({ headers: { host: u.host, "x-forwarded-proto": u.protocol.replace(":", "") } }, method, path, body, key);
+} }).catch((e) => { console.error("seed fixture failed:", e.message); return null; });
+await fixtureSeed;
+// Simulated users (LETTIT_SIM_EVERY minutes): the seed personas use the board through its own API, one run at a time.
+const apiRequest = (method, path, body, key) => { const u = new URL(PUBLIC_URL); return invoke({ headers: { host: u.host, "x-forwarded-proto": u.protocol.replace(":", "") } }, method, path, body, key); };
+export let simulator = null;
+try { simulator = startSimulatorFromEnv({ request: apiRequest, log: (m) => console.log(m) }); } catch (e) { console.error("sim: not started:", e.message); }
+// The simulated year (LETTIT_SIM_BACKFILL): a resumable week-by-week batch, in the background once the board is up.
+export let year = null;
+try { year = startBackfillFromEnv({ request: apiRequest, log: (m) => console.log(m) }); } catch (e) { console.error("year: not started:", e.message); }
 
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
   server.listen(PORT, () => console.log(`LETTIT listening on :${server.address().port} (${db.backend()} store)`));

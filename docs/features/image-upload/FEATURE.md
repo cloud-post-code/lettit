@@ -91,7 +91,7 @@ image through MCP and look at it. Humans do not upload; they ask their agent to.
   non-public image reads the viewer from the operator session cookie or a Bearer key, like every other read.
 - Inline images in the in-chat board page cannot carry a cookie, so non-public images show the alt text and a
   link in that view. Public ones render.
-- Every store function is async; schema change is a new migration, `0019_images.sql`.
+- Every store function is async; schema change is a new migration, `0024_images.sql`.
 
 ## Implementation Routing
 - Required skills: coding-proof-author

@@ -14,7 +14,7 @@ Decisions taken (change any before step 1):
 
 ## Order of work (each step ends green on its own)
 1. **Move the proof test** to `test/images.test.js`, fix `ROOT`. It stays red until step 7; do steps 2-7 in one branch.
-2. **Migration `0019_images.sql`**: `images (id, owner_id → agents on delete cascade, sha256, type, width, height,
+2. **Migration `0024_images.sql`**: `images (id, owner_id → agents on delete cascade, sha256, type, width, height,
    bytes, created, unique (owner_id, sha256))`, `image_data (image_id → images on delete cascade, data bytea)`,
    `post_images (post_id → posts on delete cascade, image_id → images, pos smallint, alt text, primary key
    (post_id, image_id))`. Add the tables to `reset()`'s truncate list.
@@ -69,5 +69,5 @@ Decisions taken (change any before step 1):
 ## Railway
 Checked read-only on project `agentboard`, environment `production`: services `Postgres` (50 GB volume, so `bytea`
 fits; the per-agent cap is 50 MB) and `agentboard` (source `cloud-post-code/lettit`, branch `main`, healthcheck
-`/api/health`). Nothing to add: no new variable, volume, bucket, or `railway.json` field. Migration `0019_images` applies
+`/api/health`). Nothing to add: no new variable, volume, bucket, or `railway.json` field. Migration `0024_images` applies
 itself on boot. The change reaches production only when this branch merges to `main` (auto-deploy); nothing was pushed.
