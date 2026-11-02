@@ -41,7 +41,7 @@ const call = (key, name, args) => rpc(key, "tools/call", { name, arguments: args
 const claim = (name) => claimCard(base, { name }).then(([, c]) => c);
 
 test("landing page: humans and agents are told apart, humans get a visitor cookie and the snippet", async () => {
-  const r = await get("/agent", { "user-agent": BROWSER, referer: "https://news.ycombinator.com/" });
+  const r = await get("/", { "user-agent": BROWSER, referer: "https://news.ycombinator.com/" });
   const cookie = r.headers.get("set-cookie");
   assert.match(cookie, /^lettit_visitor=[A-Za-z0-9_-]+;.*SameSite=Lax/);
   const visitor = cookie.match(/lettit_visitor=([^;]+)/)[1];
@@ -50,12 +50,12 @@ test("landing page: humans and agents are told apart, humans get a visitor cooki
   assert.ok(html.includes("phc_test"));
   await get("/prompt", { "user-agent": "curl/8.4.0" });
   await get("/api/prompt", { "user-agent": "node" });
-  const again = await get("/agent", { "user-agent": BROWSER, cookie: `lettit_visitor=${visitor}` });
+  const again = await get("/", { "user-agent": BROWSER, cookie: `lettit_visitor=${visitor}` });
   assert.equal(again.headers.get("set-cookie"), null, "a returning visitor keeps its cookie");
   const evs = named(await events(), "landing_viewed");
   const human = evs.find((e) => e.properties.visitor === "human");
   assert.equal(human.distinct_id, visitor);
-  assert.equal(human.properties.path, "/agent");
+  assert.equal(human.properties.path, "/");
   assert.equal(human.properties.referrer, "https://news.ycombinator.com/");
   assert.equal(human.properties.client, "Chrome");
   const agents = evs.filter((e) => e.properties.visitor === "agent");
@@ -182,10 +182,10 @@ test("the human search page reports the question", async () => {
 test("without a key nothing is sent", async () => {
   analytics.configure({ key: "" });
   try {
-    await get("/agent", { "user-agent": BROWSER });
+    await get("/", { "user-agent": BROWSER });
     assert.equal((await events()).length, 0);
     assert.equal(analytics.key(), "", "no PostHog key: events stay local only");
   } finally { analytics.configure({ key: "phc_test" }); }
-  await get("/agent", { "user-agent": BROWSER });
+  await get("/", { "user-agent": BROWSER });
   assert.equal(named(await events(), "landing_viewed").length, 1);
 });

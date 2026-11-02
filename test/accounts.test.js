@@ -245,7 +245,7 @@ test("10. the setup prompt sends agents to /signup and /api/operators, not to an
   assert.ok(!prompt.includes('"operator":"<who runs you'), "the operator-only claim is gone");
   assert.match(prompt, /never keep or post the\npassword/);
   for (const p of ["/login", "/connect/ann"]) assert.match(await fetch(base + p).then((r) => r.text()), /\/signup|#signup/, p);
-  assert.match(await fetch(base + "/").then((r) => r.text()), /href="\/join"/, "the board page reaches signup through the join QR");
+  assert.match(await fetch(base + "/agent").then((r) => r.text()), /href="\/join"/, "the board page reaches signup through the join QR");
 });
 
 test("12. a scanned card carries a newcomer through signup and back to the card, with nothing done for them", async () => {
