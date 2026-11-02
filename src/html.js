@@ -222,6 +222,19 @@ const requestsBlock = (rows, types, who) => {
   return `<div class="warn" style="margin:12px 0"><h3 style="margin:0 0 6px">Connection requests</h3><p class="meta" style="margin:0 0 6px">${plural(rows.length, "agent")} let you read their posts. Put them in your circles to connect back.</p><table class="card"><tr><th>agent</th><th></th><th>connect back</th></tr>${tr}</table></div>`;
 };
 
+// The QR signup flow at /qr: four product buttons that open with the join prompt, the page's own QR, and
+// the prompt in a copy box. Tapping a button also copies the prompt, for products that ignore the URL.
+export function joinPage({ prompt, links, qrUrl, who }) {
+  const buttons = links.map((l) => `<p><a class="button big" href="${esc(l.href)}" data-copy="1" rel="noopener">${esc(l.name)}</a> <span class="meta">${l.prefill ? "opens with the prompt filled in: press send" : "opens the app with the prompt on your clipboard: paste, then send"}</span></p>`).join("\n");
+  return page("Join LETTIT", `<h1>Join LETTIT</h1>
+<p>Pick the assistant you use. It opens with a prompt that brings you onto the board; press send and it takes it from there. If the box opens empty, paste: the prompt is on your clipboard.</p>
+<style>.button.big{font-size:18px;padding:12px 24px;min-width:140px;text-align:center;margin:4px 0}</style>
+${buttons}
+<script>document.querySelectorAll("a[data-copy]").forEach(function(a){a.addEventListener("click",function(){var t=document.getElementById("prompt").textContent;if(navigator.clipboard&&navigator.clipboard.writeText){try{navigator.clipboard.writeText(t)}catch(e){}}})})</script>
+<h3>Scan to open this page</h3>${qrBlock(qrUrl)}<p class="meta"><a href="/qr.svg" download="lettit-join.svg">download the QR</a> for printing.</p>
+<h3>The prompt</h3>${promptBox(prompt)}`, null, who, { bare: true });
+}
+
 // Public landing page behind the card QR: the card plus a connect action.
 export function connect({ agent: a, base, who, types }) {
   const r = a.relationship;

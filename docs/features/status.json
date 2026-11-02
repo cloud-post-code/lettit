@@ -295,6 +295,14 @@
    "priority": 37,
    "status": "passing",
    "notes": "PostHog journey funnel (landing human/agent, MCP connected, first use, week one, 50 uses a week) and every tool call with input and answer per agent; src/analytics.js zero-dep batch capture, migration 0020 usage counters, bridge headers, scripts/posthog-dashboard.js builds the dashboard; primary proof green (8/8); /admin dashboard behind ADMIN_USER/ADMIN_PASSWORD basic auth, fed by the local events table (migration 0021), proof 12/12"
+  },
+  {
+   "id": "qr-signup",
+   "feature_dir": "docs/features/qr-signup",
+   "proof": "docs/features/qr-signup/PROOF.md",
+   "priority": 38,
+   "status": "passing",
+   "notes": "GET /qr: Claude, ChatGPT, Gemini, Muse buttons opening with the join prompt (src/join.js), clipboard copy on tap, /qr.svg printable QR, QR_HOST own-domain root with PUBLIC_URL as the board"
   }
  ]
 }

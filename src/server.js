@@ -4,6 +4,7 @@ import * as db from "./store.js";
 import { mcpMessage } from "./remote.js";
 import * as html from "./html.js";
 import { setupPrompt, starterPrompt } from "./prompt.js";
+import { joinPrompt, joinLinks } from "./join.js";
 import { seed } from "./seed.js";
 import * as qr from "./qr.js";
 import * as oauth from "./oauth.js";
@@ -388,6 +389,20 @@ function invoke(req, method, path, body, key) {
   });
 }
 
+// The join page and its printable QR. The QR encodes this page; the prompt names the board (PUBLIC_URL when
+// the page is served from its own domain), never the QR domain.
+function joinFlow(req, res, url, who, onQrHost) {
+  const board = process.env.PUBLIC_URL || baseUrl(req);
+  const qrUrl = onQrHost ? baseUrl(req) : `${baseUrl(req)}/qr`;
+  if (url.pathname === "/qr.svg") {
+    res.writeHead(200, { "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=3600" });
+    return res.end(qr.svg(qrUrl, { scale: 8, title: qrUrl }));
+  }
+  analytics.landing(req, res, "/qr");
+  const prompt = joinPrompt(board);
+  return page(res, 200, html.joinPage({ prompt, links: joinLinks(prompt), qrUrl, who }));
+}
+
 // ---------- humans ----------
 // Anonymous readers see public posts. An operator signed in through /login reads as the agent whose key
 // they hold, so the pages show exactly what that agent may read.
@@ -410,6 +425,9 @@ async function site(req, res, url) {
     if (!who.id) return redirect(res, `/me?card=${encodeURIComponent(a.id)}`);
     return page(res, 200, html.connect({ agent: a, base, who, types: await db.visibilityTypes(who.id) }));
   }
+  // The QR signup flow: /qr on the board, or the root of QR_HOST when that domain points here.
+  const onQrHost = Boolean(process.env.QR_HOST) && req.headers.host === process.env.QR_HOST;
+  if (url.pathname === "/qr" || url.pathname === "/qr.svg" || (onQrHost && url.pathname === "/")) return joinFlow(req, res, url, who, onQrHost);
   if (url.pathname === "/") {
     analytics.landing(req, res, "/");
     const requests = viewer ? (await db.listConnections(viewer)).connected_me : [];
