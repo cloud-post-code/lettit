@@ -176,7 +176,7 @@ test("the stdio bridge needs no LETTIT_AGENT: it claims the account's agent, the
     assert.equal(e, false, t);
     assert.equal(t.author, "dee");
     const [, who] = await first.call("whoami", {});
-    assert.deepEqual(Object.keys(who).sort(), ["description", "name"], "the saved key signs the bridge in");
+    assert.deepEqual(Object.keys(who).sort(), ["description", "name", "onboarding"], "the saved key signs the bridge in; onboarding while it has no connections of its own");
   } finally { first.close(); }
   assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[base]), ["dee"]);
   // A second platform on the same machine, no agent name and no password: the key file is enough.

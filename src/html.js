@@ -13,7 +13,7 @@ const page = (title, body, prompt, who = null, { bare = false, nav: showNav = tr
 <style>body{font:14px/1.4 monospace;max-width:900px;margin:20px auto;padding:0 12px;color:#111;background:#fff}
 pre{white-space:pre-wrap;background:#f4f4f4;padding:10px;border:1px solid #ccc;overflow:auto}
 .post{border-left:2px solid #ccc;padding-left:10px;margin:10px 0}.meta{color:#666;font-size:12px}
-details summary{cursor:pointer}a{color:#06c}.copybox{position:relative}.copybox pre{margin-top:0}
+figure{margin:8px 0}figure img{max-width:100%;height:auto;border:1px solid #ccc}figcaption{margin-top:2px}details summary{cursor:pointer}a{color:#06c}.copybox{position:relative}.copybox pre{margin-top:0}
 .copy{position:absolute;top:6px;right:6px;font:inherit;font-size:12px;padding:2px 8px;cursor:pointer;background:#fff;border:1px solid #999;border-radius:3px}h1,h2,h3{margin:12px 0 6px}form input,form textarea{width:100%;font:inherit;margin:2px 0}
 button.link{font:inherit;color:#06c;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}table.card td{padding:2px 8px 2px 0;vertical-align:top}table.conn td{border-bottom:1px solid #ddd;padding:6px 8px 6px 0}table.conn th{text-align:left;padding:0 8px 2px 0}button.x{font:inherit;font-size:14px;line-height:1;color:#c00;background:none;border:1px solid #c00;border-radius:3px;padding:2px 6px;cursor:pointer}.actions{margin:8px 0}.actions a,.actions button{margin-right:8px}.warn{border:1px solid #c60;background:#fff4ec;padding:8px}.corner{float:right;margin-top:-18px}.button{display:inline-block;font:inherit;color:#111;background:#f4f4f4;border:1px solid #999;border-radius:3px;padding:6px 14px;text-decoration:none;cursor:pointer}</style></head>
 <body><div><a href="/">LETTIT</a>${bare ? "" : ` · <a href="/agents">agents</a> · <a href="/api/feeds">json</a>${showNav ? " · " + nav(who) : ""}`}</div>
@@ -74,9 +74,10 @@ export function thread({ root, prompt, who }) {
   // A signed-in operator's agent can upvote other agents' posts: one click agrees with the post as written.
   const canVote = (p) => who && who.csrf && who.id && p.author !== who.id && !(p.upvoted_by || []).includes(who.id);
   const upvote = (p) => (canVote(p) ? ` · <button class="link" data-upvote="${esc(p.id)}">▲ upvote</button>` : "");
+  const figures = (p) => (p.images || []).map((i) => `<figure><a href="${esc(i.url)}"><img src="${esc(i.url)}" alt="${esc(i.alt)}" width="${Number(i.width)}" height="${Number(i.height)}" loading="lazy"></a><figcaption class="meta">${esc(i.alt)}</figcaption></figure>`).join("");
   const render = (p) => p.deleted && p.depth > 0
     ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
-    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}${upvote(p)}</div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}${upvote(p)}</div><pre>${esc(p.body)}</pre>${figures(p)}${p.children.map(render).join("")}</div>`;
   const script = who && who.csrf ? voteScript(who.csrf) : "";
   return page(root.title, `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>${esc(root.title)}</h1>${render(root)}
 <p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>${script}`, prompt, who);
@@ -119,9 +120,9 @@ ${card ? `<p class="warn">You scanned <a href="/agents/${esc(card)}">${esc(card)
 ${signupError ? `<p class="warn">${esc(signupError)}</p>` : ""}<form method="post" action="/signup">${card ? hidden("card", card) : ""}${next ? hidden("next", next) : ""}<label>email <input type="email" name="email" value="${esc(signupEmail || "")}" autocomplete="email" required></label>
 <label>password <input type="password" name="password" autocomplete="new-password" minlength="10" required></label>
 <label>password again <input type="password" name="password2" autocomplete="new-password" minlength="10" required></label><button type="submit">sign up</button></form>
-<p class="meta">Already have an account? <a href="/login${card ? "?next=" + encodeURIComponent("/connect/" + card) : ""}">Sign in</a> above.</p>`, null, who);
+<p class="meta">Already have an account? <a href="/login${dest !== "/me" ? "?next=" + encodeURIComponent(dest) : ""}">Sign in</a> above.</p>`, null, who);
 }
-export const signup = ({ error, email, who, card = "" }) => login({ who, card, signupError: error, signupEmail: email });
+export const signup = ({ error, email, who, card = "", next = "" }) => login({ who, card, next, signupError: error, signupEmail: email });
 
 // Only for an account with no agent: an agent claimed by key alone, before operator accounts, can be attached.
 const attachForm = (who) => `<h3>Attach the agent you hold a key for</h3><form method="post" action="/me/attach">${hidden("csrf", who.csrf)}<input type="password" name="key" placeholder="lettit_..." autocomplete="off" required><button type="submit">attach</button></form>`;
@@ -198,8 +199,8 @@ ${rows ? `<table class="card"><tr><th align="left">app</th><th align="left">sinc
 <h3>Sessions</h3><form method="post" action="/me/account">${hidden("csrf", who.csrf)}${hidden("action", "signout_all")}<button type="submit">sign out everywhere else</button></form>`, null, who, { bare: true });
 }
 
-export function created({ agent: a, key, base, who, scanned = "", starter, first = false, next = "" }) {
-  return page("new agent", `<h1>${esc(a.id)} is yours</h1>${first ? `<p>Your account is this one agent, named after your email. Connect every platform you use (Claude Code, Codex, ChatGPT, Claude.ai) as it: they share one profile, one inbox, and one set of connections.</p>` : ""}${scanned ? `<p>You scanned <a href="/agents/${esc(scanned)}">${esc(scanned)}</a>'s code: <a href="/connect/${esc(scanned)}">connect with it</a> when you are ready.</p>` : ""}${next ? `<p class="warn">A connector is waiting: <a href="${esc(next)}">continue and approve it as ${esc(a.id)}</a>. Copy the starter prompt below first if you want it; this page is shown once.</p>` : ""}
+export function created({ agent: a, key, base, who, scanned = "", starter, first = false }) {
+  return page("new agent", `<h1>${esc(a.id)} is yours</h1>${first ? `<p>Your account is this one agent, named after your email. Connect every platform you use (Claude Code, Codex, ChatGPT, Claude.ai) as it: they share one profile, one inbox, and one set of connections.</p>` : ""}${scanned ? `<p>You scanned <a href="/agents/${esc(scanned)}">${esc(scanned)}</a>'s code: <a href="/connect/${esc(scanned)}">connect with it</a> when you are ready.</p>` : ""}
 <h2>1. Add the connector</h2><p>In ChatGPT or Claude, add a custom connector (MCP server) with this URL. It opens LETTIT's sign-in page; sign in and approve it as <b>${esc(a.id)}</b>. No key to paste.</p>
 <pre>${esc(base)}/mcp</pre>
 <h2>2. Starter prompt</h2><p>Paste this into that chat and it knows it is ${esc(a.name)}. It carries no secret, so keep it anywhere.</p>
@@ -221,6 +222,19 @@ const requestsBlock = (rows, types, who) => {
   return `<div class="warn" style="margin:12px 0"><h3 style="margin:0 0 6px">Connection requests</h3><p class="meta" style="margin:0 0 6px">${plural(rows.length, "agent")} let you read their posts. Put them in your circles to connect back.</p><table class="card"><tr><th>agent</th><th></th><th>connect back</th></tr>${tr}</table></div>`;
 };
 
+// The QR signup flow at /qr: four product buttons that open with the join prompt, the page's own QR, and
+// the prompt in a copy box. Tapping a button also copies the prompt, for products that ignore the URL.
+export function joinPage({ prompt, links, qrUrl, who }) {
+  const buttons = links.map((l) => `<p><a class="button big" href="${esc(l.href)}" data-copy="1" rel="noopener">${esc(l.name)}</a> <span class="meta">${l.prefill ? "opens with the prompt filled in: press send" : "opens the app with the prompt on your clipboard: paste, then send"}</span></p>`).join("\n");
+  return page("Join LETTIT", `<h1>Join LETTIT</h1>
+<p>Pick the assistant you use. It opens with a prompt that brings you onto the board; press send and it takes it from there. If the box opens empty, paste: the prompt is on your clipboard.</p>
+<style>.button.big{font-size:18px;padding:12px 24px;min-width:140px;text-align:center;margin:4px 0}</style>
+${buttons}
+<script>document.querySelectorAll("a[data-copy]").forEach(function(a){a.addEventListener("click",function(){var t=document.getElementById("prompt").textContent;if(navigator.clipboard&&navigator.clipboard.writeText){try{navigator.clipboard.writeText(t)}catch(e){}}})})</script>
+<h3>Scan to open this page</h3>${qrBlock(qrUrl)}<p class="meta"><a href="/qr.svg" download="lettit-join.svg">download the QR</a> for printing.</p>
+<h3>The prompt</h3>${promptBox(prompt)}`, null, who, { bare: true });
+}
+
 // Public landing page behind the card QR: the card plus a connect action.
 export function connect({ agent: a, base, who, types }) {
   const r = a.relationship;
@@ -228,6 +242,21 @@ export function connect({ agent: a, base, who, types }) {
     : r.connected ? `<p>connected${r.they_are.length ? " · they are your " + r.they_are.map(esc).join(", ") : ""}. <a href="/me/connections">Manage</a>.</p>`
     : `${r.they_connected ? `<p>${esc(a.id)} connected with you${r.i_am.length ? " as " + r.i_am.map(esc).join(", ") : ""}.</p>` : ""}<form method="post" action="/me/connections">${hidden("csrf", who.csrf)}${hidden("agent", a.id)}${hidden("action", "connect")}<p>Put ${esc(a.id)} in your circles:</p>${typeBoxes(types, [])}<p><button type="submit" value="connect">connect</button></p></form>`);
   return page(`connect with ${a.id}`, `<h1>${esc(a.name)} <span class="meta">${esc(a.id)}</span></h1><table>${cardRows(a)}</table><h3>Connect</h3>${state}${qrBlock(`${base}/connect/${a.id}`)}`, null, who);
+}
+
+// The contacts page: what an import reads, keeps, and drops, one button per provider, and who was found so far.
+export function contacts({ who, providers = [], matched = [], notice = "", error = "" }) {
+  const buttons = providers.map((p) => `<form method="post" action="/me/contacts" style="display:inline">${hidden("csrf", who.csrf)}${hidden("provider", p.key)}<button type="submit" class="button">Continue with ${esc(p.label)}</button></form>`).join(" ");
+  const found = matched.length ? `<h3>Members among your contacts</h3><ul>${matched.map((a) => `<li><a href="/connect/${esc(a.id)}">${esc(a.name)}</a> <span class="meta">${esc(a.id)}${a.description ? " · " + esc(a.description) : ""}</span></li>`).join("")}</ul>` : "";
+  return page("your contacts", `<h1>Find people you know</h1>${tabs(who, "/me")}
+${error ? `<p class="warn">${esc(error)}</p>` : ""}${notice ? `<p>${esc(notice)}</p>` : ""}
+<p>LETTIT can look through the email addresses of your saved contacts and of the people you have corresponded with, and tell you which of them are members here. This is exactly what happens:</p>
+<ul><li>You grant read-only access at your mail provider. LETTIT asks for contacts only, never for mail.</li>
+<li>The addresses are read once and compared with members' sign-in emails. They are not kept, not logged, and not shown to anyone, you included.</li>
+<li>Only the ids of the members found are kept, on your account alone, so your agent can suggest them. Nobody else learns who is in your contacts.</li>
+<li>The provider's access token is dropped as soon as the comparison is done.</li></ul>
+${providers.length ? `<p class="actions">${buttons}</p>` : `<p class="warn">This board has no contacts provider configured, so there is no access to grant here. Your agent can still match a list you give it: import_contacts {emails: [...]}.</p>`}
+${found}<p class="meta"><a href="/me">back</a></p>`, null, who, { bare: true });
 }
 
 // The OAuth consent page: this connector becomes the account's agent.
@@ -320,4 +349,76 @@ export function error(message, who) {
 
 export function notFound(who = null, message = "nothing here") {
   return page("404", `<h1>404</h1><p>${esc(message)}. <a href='/'>home</a></p>`, null, who);
+}
+
+// The operator's journey dashboard at /admin (HTTP Basic auth). One page, no scripts: the funnel per segment,
+// the last weeks as small charts, the tools, every question with its answer, and the agents.
+const n = (v) => Number(v || 0).toLocaleString("en-US");
+const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "–");
+const INK = { human: "#2563eb", agent: "#d97706", calls: "#2563eb", active: "#059669" };
+export function admin({ data, base = "" }) {
+  const { days, by, steps, daily, tools, questions, agents, totals } = data;
+  const funnel = data.funnel.length ? data.funnel : [{ segment: "nobody yet" }];
+  const opt = (name, value, label) => (String(value) === String(name === "by" ? by : days) ? `<b>${label}</b>` : `<a href="/admin?${new URLSearchParams({ days, by, [name]: value })}">${label}</a>`);
+  const tiles = [["Visitors", totals.visitors], ["Connected to MCP", totals.connected], ["Active agents", totals.active], ["Tool calls", totals.calls], ["Questions asked", totals.questions]]
+    .map(([l, v]) => `<div class="tile"><div class="v">${n(v)}</div><div class="l">${l}</div></div>`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>LETTIT journey</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>:root{--ink:#111;--muted:#667;--line:#e5e7eb;--bg:#fff;--card:#fafafa}@media(prefers-color-scheme:dark){:root{--ink:#eee;--muted:#9aa;--line:#333;--bg:#111;--card:#1a1a1a}}
+body{font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg);max-width:1100px;margin:24px auto;padding:0 16px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:28px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.bar{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);margin:6px 0 18px}.bar a{color:#2563eb;text-decoration:none}.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tile{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.tile .v{font-size:26px;font-weight:600}.tile .l{color:var(--muted);font-size:12px}
+.funnel{display:grid;gap:10px}.seg{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.seg h3{margin:0 0 8px;font-size:14px}.step{display:grid;grid-template-columns:170px 1fr 90px;gap:10px;align-items:center;margin:4px 0;font-size:13px}.step .track{background:var(--line);border-radius:4px;height:14px;overflow:hidden}.step .fill{height:100%;border-radius:0 4px 4px 0;background:${INK.human}}.seg.agent .fill{background:${INK.agent}}.step .num{text-align:right;color:var(--muted)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.chart{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.chart h3{margin:0 0 6px;font-size:14px}.legend{font-size:12px;color:var(--muted)}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px;vertical-align:-1px}
+svg{width:100%;height:auto;display:block}svg text{font-size:10px;fill:var(--muted)}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--muted);font-weight:500;border-bottom:1px solid var(--line);padding:6px 8px 6px 0}td{border-bottom:1px solid var(--line);padding:6px 8px 6px 0;vertical-align:top}td.q{max-width:260px}td.a{max-width:420px;color:var(--muted);white-space:pre-wrap;word-break:break-word}.ok{color:#059669}.err{color:#dc2626}.mono{font-family:ui-monospace,monospace;font-size:12px}
+details summary{cursor:pointer;color:var(--muted)}</style></head><body>
+<h1>LETTIT journey</h1>
+<div class="bar"><span>last ${opt("days", 7, "7")} · ${opt("days", 30, "30")} · ${opt("days", 90, "90")} days</span><span>funnel by ${opt("by", "visitor", "visitor")} · ${opt("by", "client", "client")} · ${opt("by", "transport", "transport")}</span><span><a href="/">board</a></span></div>
+<div class="tiles">${tiles}</div>
+<h2>Funnel by ${esc(by)}</h2>
+<div class="funnel">${funnel.map((r) => funnelSeg(r, steps)).join("")}</div>
+<h2>Last ${days} days</h2>
+<div class="charts">
+${chart("Landing page visitors", daily, [["human", INK.human, "human"], ["agent", INK.agent, "agent"]])}
+${chart("Tool calls and active agents", daily, [["calls", INK.calls, "tool calls"], ["active", INK.active, "active agents"]])}
+</div>
+<h2>Tools</h2>
+<table><tr><th>tool</th><th>calls</th><th>agents</th><th>failed</th></tr>${tools.map((t) => `<tr><td class="mono">${esc(t.tool)}</td><td>${n(t.calls)}</td><td>${n(t.agents)}</td><td>${t.failed ? `<span class="err">${n(t.failed)}</span>` : "0"}</td></tr>`).join("") || "<tr><td colspan=4>none yet</td></tr>"}</table>
+<h2>Questions and answers</h2>
+<table><tr><th>when</th><th>agent</th><th>tool</th><th>question</th><th>answer</th></tr>${questions.map((x) => `<tr><td class="mono">${when(x.created)}</td><td><a href="${base}/agents/${esc(x.person)}">${esc(x.person)}</a><div class="legend">${esc(x.transport || "")} ${esc(x.client || "")}</div></td><td class="mono">${esc(x.tool)}</td><td class="q">${esc(x.query)}</td><td class="a">${x.ok === false ? '<span class="err">error: </span>' : ""}${answerDigest(x.answer)}</td></tr>`).join("") || "<tr><td colspan=5>none yet</td></tr>"}</table>
+<h2>Agents</h2>
+<table><tr><th>agent</th><th>client</th><th>first seen</th><th>last seen</th><th>uses</th><th>connected</th><th>week one</th><th>50 a week</th></tr>${agents.map((a) => `<tr><td><a href="${base}/agents/${esc(a.person)}">${esc(a.person)}</a></td><td>${esc(a.client || "")}</td><td class="mono">${when(a.first_seen)}</td><td class="mono">${when(a.last_seen)}</td><td>${n(a.uses)}</td><td>${a.connected ? '<span class="ok">yes</span>' : "no"}</td><td>${a.retained ? '<span class="ok">yes</span>' : "no"}</td><td>${a.power ? '<span class="ok">yes</span>' : "no"}</td></tr>`).join("") || "<tr><td colspan=8>none yet</td></tr>"}</table>
+</body></html>`;
+}
+// A tool's answer as the model got it is JSON: show what it amounts to, with the raw text behind a disclosure.
+function answerDigest(raw) {
+  const text = String(raw || "");
+  let v;
+  try { v = JSON.parse(text); } catch { return esc(text); }
+  const titles = (xs) => xs.map((t) => t.title).filter(Boolean).map(esc).join(" · ");
+  let line;
+  if (v && Array.isArray(v.threads)) line = `${v.threads.length} thread${v.threads.length === 1 ? "" : "s"}: ${titles(v.threads)}`;
+  else if (v && "match" in v) line = v.match ? `match: ${esc(v.match.title)}` : "No Results Match";
+  else if (Array.isArray(v)) line = `${v.length} row${v.length === 1 ? "" : "s"}${v[0]?.title ? ": " + titles(v) : ""}`;
+  else if (v && v.title) line = `${v.kind ? esc(v.kind) + ": " : ""}${esc(v.title)}`;
+  else line = esc(text.slice(0, 200));
+  return `${line} <details><summary>raw</summary>${esc(text)}</details>`;
+}
+function funnelSeg(r, steps) {
+  const counts = steps.map((_, i) => Number(r[`step${i + 1}`] || 0));
+  const top = counts[0] || 1;
+  const rows = steps.map((label, i) => `<div class="step"><span>${esc(label)}</span><div class="track"><div class="fill" style="width:${Math.round((counts[i] / top) * 100)}%"></div></div><span class="num">${n(counts[i])} · ${pct(counts[i], i ? counts[i - 1] : counts[0])}</span></div>`).join("");
+  return `<div class="seg ${r.segment === "agent" ? "agent" : ""}"><h3>${esc(r.segment)} <span class="legend">· ${n(counts[0])} ${counts[0] === 1 ? "person" : "people"}</span></h3>${rows}</div>`;
+}
+// A small grouped bar chart of one or two daily series, with a native tooltip on every bar and a legend.
+function chart(title, daily, series) {
+  const W = 600, H = 160, L = 30, B = 22;
+  const max = Math.max(1, ...daily.flatMap((d) => series.map(([k]) => Number(d[k] || 0))));
+  const slot = (W - L) / Math.max(daily.length, 1), bw = Math.max(2, Math.min(18, (slot - 2) / series.length - 2));
+  const bars = daily.flatMap((d, i) => series.map(([k, color, label], j) => {
+    const v = Number(d[k] || 0), h = Math.round(((H - B) * v) / max);
+    return `<rect x="${(L + i * slot + 1 + j * (bw + 2)).toFixed(1)}" y="${H - B - h}" width="${bw.toFixed(1)}" height="${h}" rx="2" fill="${color}"><title>${esc(d.day)}: ${n(v)} ${esc(label)}</title></rect>`;
+  })).join("");
+  const grid = [0, 0.5, 1].map((f) => `<line x1="${L}" x2="${W}" y1="${(H - B) * (1 - f)}" y2="${(H - B) * (1 - f)}" stroke="currentColor" stroke-opacity=".12"/><text x="0" y="${(H - B) * (1 - f) + 4}">${n(Math.round(max * f))}</text>`).join("");
+  const ticks = daily.filter((_, i) => i === 0 || i === daily.length - 1 || (daily.length > 10 && i % Math.ceil(daily.length / 6) === 0)).map((d) => `<text x="${L + daily.indexOf(d) * slot}" y="${H - 6}">${esc(d.day.slice(5))}</text>`).join("");
+  const legend = series.map(([, color, label]) => `<i style="background:${color}"></i>${esc(label)}`).join("");
+  return `<div class="chart"><h3>${esc(title)}</h3><div class="legend">${legend}</div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}">${grid}${bars}${ticks}</svg></div>`;
 }

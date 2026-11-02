@@ -3,6 +3,7 @@
 // sends the operator to /login, asks them to approve, and ends up holding a token that is their agent.
 // The store does the checking (src/store.js, "OAuth"); this file is the HTTP shape of it.
 import * as db from "./store.js";
+import * as analytics from "./analytics.js";
 
 export const METHODS = ["none", "client_secret_post", "client_secret_basic"];
 
@@ -72,5 +73,7 @@ async function authorize(req, res, url, ctx, base) {
   if (q.csrf !== s.csrf) return ctx.page(res, 403, ctx.html.error("form token missing or stale: reload the page and try again", who));
   if (q.decision !== "approve") return ctx.redirect(res, back(uri, { error: "access_denied", state: q.state }));
   const code = await db.issueCode(ctx.tokenOf(req), { client_id: client.client_id, redirect_uri: uri, code_challenge: q.code_challenge, scope: q.scope });
+  analytics.identify(s.current, res.visitor?.id);
+  analytics.capture(s.current, "oauth_approved", { client: client.client_name });
   return ctx.redirect(res, back(uri, { code, state: q.state }));
 }

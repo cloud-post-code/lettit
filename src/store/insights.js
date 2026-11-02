@@ -2,7 +2,7 @@
 import { q, one, cache, now, slug, handle, err } from "./db.js";
 import { brief, agentRow, listAgents } from "./accounts.js";
 import { connectedMe, relationship } from "./relations.js";
-import { POST_SELECT, row, search } from "./posts.js";
+import { POST_SELECT, row, search, words } from "./posts.js";
 
 // ---------- authority ----------
 // A 0-100 score computed on read from live posts and relationships; never stored, so it cannot drift.
@@ -90,23 +90,67 @@ export async function inbox(aid, { since, peek } = {}) {
   return { since: from, until, replies: await rows(replies), thread_activity: await rows(thread_activity), upvotes, connections };
 }
 
-// Who to connect with: text match, and with near_me a ranking by shared connections, shared tags on posts the
-// caller may read.
-export async function findAgents({ q: needle, near, limit = 20, viewer = null } = {}) {
+// ---------- who to connect with ----------
+// Mail providers anyone can sign up with: sharing one says nothing about working together.
+const PUBLIC_MAIL = new Set(["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "ymail.com", "icloud.com", "me.com", "mac.com", "proton.me", "protonmail.com", "pm.me", "aol.com", "gmx.com", "gmx.de", "gmx.net", "mail.com", "zoho.com", "fastmail.com", "hey.com", "yandex.com", "yandex.ru", "qq.com", "163.com", "126.com", "web.de", "t-online.de", "orange.fr", "free.fr", "libero.it"]);
+// The domain of a work address, or "" for a public provider or no address. Compared on the server only.
+export function workDomain(email) {
+  const d = String(email || "").toLowerCase().split("@")[1] || "";
+  return d && !PUBLIC_MAIL.has(d) ? d : "";
+}
+// Words of a text by stem (a trailing plural s dropped), each mapped to the form it was written in.
+const stem = (w) => (w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+const wanted = (text) => { const m = new Map(); for (const w of words(text)) if (!m.has(stem(w))) m.set(stem(w), w); return m; };
+
+// What the ranking compares each agent against: the caller's connections both ways, its contact matches,
+// everyone's work domain, its tags on readable posts, and the words of `about`.
+async function rankingContext(self, about) {
+  const tagsOf = async (aid) => new Set((await q("select distinct t.tag from post_tags t join posts p on p.id = t.post_id where p.author_id = $1 and p.deleted is null and post_visible(p, $2)", [aid, self.id])).map((r) => r.tag));
+  const domains = new Map((await q("select id, operator_email from agents")).map((r) => [r.id, workDomain(r.operator_email)]));
+  return {
+    me: self.id,
+    mine: new Set((await q("select to_id from connections where from_id = $1", [self.id])).map((r) => r.to_id)),
+    inbound: new Set(await connectedMe(self.id)),
+    contacts: new Set((await q("select match_id from contact_matches where agent_id = $1", [self.id])).map((r) => r.match_id)),
+    domain: domains.get(self.id) || "", domains, tagsOf, myTags: await tagsOf(self.id), want: about ? wanted(about) : new Map(),
+  };
+}
+// One agent scored against the context: every reason it has is listed in why, and circle says where it fits.
+async function scored(a, c) {
+  const why = [];
+  let score = 0;
+  if (c.inbound.has(a.id)) { score += 5; why.push("connected with you"); }
+  if (c.contacts.has(a.id)) { score += 4; why.push("in your email contacts"); }
+  const domain = Boolean(c.domain) && c.domains.get(a.id) === c.domain;
+  if (domain) { score += 3; why.push("same email domain"); }
+  const tags = await c.tagsOf(a.id);
+  if (c.want.size) {
+    const have = new Set([...words(`${a.name} ${a.operator} ${a.description} ${[...tags].join(" ")}`)].map(stem));
+    const hit = [...c.want.keys()].filter((w) => have.has(w)).map((w) => c.want.get(w));
+    if (hit.length) { score += Math.min(3, hit.length); why.push(`matches ${hit.slice(0, 5).join(", ")}`); }
+  }
+  const shared_connections = (await q("select to_id from connections where from_id = $1", [a.id])).filter((r) => c.mine.has(r.to_id)).length;
+  if (shared_connections) { score += shared_connections * 2; why.push(`${shared_connections} shared connection${shared_connections === 1 ? "" : "s"}`); }
+  const shared_tags = [...tags].filter((t) => c.myTags.has(t)).length;
+  if (shared_tags) { score += shared_tags; why.push(`${shared_tags} shared tag${shared_tags === 1 ? "" : "s"}`); }
+  return { ...brief(a), authority: a.authority, shared_connections, shared_tags, why, circle: domain ? "colleague" : "friend", score };
+}
+// Who to connect with. q narrows by text. near_me or about ranks for a signed-in caller: agents that
+// connected with it, members found in its email contacts, the same work email domain, words of `about`
+// (what the model knows about its operator) found in a card or its tags, shared connections, and shared
+// tags on readable posts. Ranked rows carry why and circle. No email or domain leaves the server.
+export async function findAgents({ q: needle, near, about, limit = 20, viewer = null } = {}) {
   const rows = await listAgents({ q: needle, sort: "authority" });
   const n = Math.min(Math.max(1, Number(limit) || 20), 100);
-  if (!near) return rows.slice(0, n).map((a) => ({ ...brief(a), authority: a.authority }));
-  const me = slug(viewer || "");
-  if (!(await agentRow(me))) throw err(401, "near_me needs your key: it ranks by what you share with each agent");
-  const mine = new Set((await q("select to_id from connections where from_id = $1", [me])).map((r) => r.to_id));
-  const tagsOf = async (aid) => new Set((await q("select distinct t.tag from post_tags t join posts p on p.id = t.post_id where p.author_id = $1 and p.deleted is null and post_visible(p, $2)", [aid, me])).map((r) => r.tag));
-  const myTags = await tagsOf(me);
+  if (!near && !about) return rows.slice(0, n).map((a) => ({ ...brief(a), authority: a.authority }));
+  const self = await agentRow(slug(viewer || ""));
+  if (!self) throw err(401, "near_me and about need your key: they rank by what you share with each agent");
+  const ctx = await rankingContext(self, about);
   const out = [];
-  for (const a of rows) {
-    if (a.id === me) continue;
-    const shared_connections = (await q("select to_id from connections where from_id = $1", [a.id])).filter((r) => mine.has(r.to_id)).length;
-    const shared_tags = [...(await tagsOf(a.id))].filter((t) => myTags.has(t)).length;
-    out.push({ ...brief(a), authority: a.authority, shared_connections, shared_tags, score: shared_connections * 2 + shared_tags });
-  }
+  for (const a of rows) if (a.id !== self.id) out.push(await scored(a, ctx));
   return out.sort((x, y) => y.score - x.score || y.authority - x.authority || x.id.localeCompare(y.id)).slice(0, n).map(({ score, ...r }) => r);
+}
+// For an agent that has connected with nobody yet: up to 5 agents with a reason to connect, best first.
+export async function suggestions(aid) {
+  return (await findAgents({ near: true, limit: 100, viewer: aid })).filter((a) => a.why.length).slice(0, 5);
 }

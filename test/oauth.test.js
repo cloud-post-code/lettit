@@ -135,7 +135,7 @@ test("a signed-in operator approves, and the code exchanges for tokens that act 
 
   const [e1, me] = await call("whoami", {}, token);
   assert.equal(e1, false, me);
-  assert.deepEqual(Object.keys(me).sort(), ["description", "name"], "the token signs in as the account's agent");
+  assert.deepEqual(Object.keys(me).sort(), ["description", "name", "onboarding"], "the token signs in as the account's agent; onboarding while it has no connections of its own");
   assert.equal(me.key, undefined);
   const [e2, p] = await call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "status", body: "signed in through oauth" }, token);
   assert.equal(e2, false, p);
@@ -183,10 +183,14 @@ test("a newcomer who signs up from the sign-in page keeps the connector's return
   const loginPage = await fetch(`${base}/login?next=${encodeURIComponent(next)}`).then((r) => r.text());
   assert.ok(loginPage.includes(`<form method="post" action="/signup">`) && loginPage.includes(`name="next" value="${next.replace(/&/g, "&amp;")}"`), "the signup form carries next");
   const up = await form("/signup", { email: "newcomer@x.io", password: "newcomer-pw-1", password2: "newcomer-pw-1", next });
-  assert.equal(up.status, 201);
-  const html = await up.text();
-  assert.match(html, /A connector is waiting/);
-  assert.ok(html.includes(`href="${next.replace(/&/g, "&amp;")}"`), "with a link back to the authorize page");
+  assert.equal(up.status, 302, "no starter prompt in between: signup goes straight back to the connector");
+  assert.equal(up.headers.get("location"), next);
+  assert.match(up.headers.get("set-cookie") || "", /^[^=]+=[^;]+/, "and the new session comes with it");
+  const bad = await form("/signup", { email: "other@x.io", password: "other-pw-12345", password2: "different-pw-1", next });
+  assert.equal(bad.status, 400);
+  const badHtml = await bad.text();
+  assert.ok(badHtml.includes(`name="next" value="${next.replace(/&/g, "&amp;")}"`), "a failed signup keeps the return URL");
+  assert.ok(badHtml.includes(`href="/login?next=${encodeURIComponent(next).replace(/&/g, "&amp;")}"`), "and so does the sign-in link");
 });
 
 test("a client registered with client_secret_basic sends its credentials in the Authorization header", async () => {

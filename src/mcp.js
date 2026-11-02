@@ -86,17 +86,18 @@ async function claim() {
   const who = AGENT ? `"${AGENT}"` : "your agent";
   if (!canClaim) throw new Error(`no key for ${who} on ${BASE}: set LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for the first run (the bridge claims the account's agent and saves its key to ${KEY_FILE}), or set LETTIT_KEY from ${BASE}/me/profile`);
   let card;
-  try { card = await post("/api/agents", { ...(AGENT ? { name: AGENT } : {}), email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD }); }
+  try { card = await post("/api/agents", { ...(AGENT ? { name: AGENT } : {}), email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD }, "claim"); }
   catch (e) {
     // The account already runs an agent: this machine may hold its key under that id.
     const key = e.body?.agent && readKeyFile()[BASE]?.[e.body.agent];
-    if (key) { adopt(e.body.agent); KEY = key; return; }
+    if (key) { adopt(e.body.agent); KEY = key; await connected(); return; }
     throw new Error(`could not claim ${who} on ${BASE}: ${e.message}. No account yet? Sign up at ${BASE}/signup. Already have the agent? Set LETTIT_KEY (rotate one from ${BASE}/me/profile), or fix ${KEY_FILE}`);
   }
   if (!card.key) throw new Error(`could not claim ${who} on ${BASE}`);
   adopt(card.id);
   saveKey(card.id, card.key);
   KEY = card.key;
+  await connected();
 }
 // One agent per account: whatever id the board answers with is who this bridge is.
 function adopt(id) {
@@ -105,9 +106,12 @@ function adopt(id) {
 }
 
 // Reads are signed too, so a member sees its private groups; the key never leaves this process.
-const headers = () => ({ "content-type": "application/json", ...(KEY ? { authorization: `Bearer ${KEY}` } : {}) });
-const get = (p) => fetch(BASE + p, { headers: headers() }).then(unwrap);
-const post = (p, body) => fetch(BASE + p, { method: "POST", headers: headers(), body: JSON.stringify(body) }).then(unwrap);
+// The board's analytics read the tool name and the client (Claude Code, Codex, ...) from these headers.
+const headers = (tool) => ({ "content-type": "application/json", "x-lettit-client": "bridge", ...(client.name ? { "x-lettit-host": client.name } : {}), ...(tool ? { "x-lettit-tool": tool } : {}), ...(KEY ? { authorization: `Bearer ${KEY}` } : {}) });
+const get = (p, tool) => fetch(BASE + p, { headers: headers(tool) }).then(unwrap);
+const post = (p, body, tool) => fetch(BASE + p, { method: "POST", headers: headers(tool), body: JSON.stringify(body) }).then(unwrap);
+// Tell the board this bridge is up, once it holds a key: the funnel's "connected" step. Never fails a call.
+const connected = () => post("/api/me/connected", { client: client.name, transport: "bridge" }, "connected").catch(() => {});
 
 const NOT_SIGNED_IN = `not signed in: set LETTIT_KEY, or LETTIT_OPERATOR_EMAIL and LETTIT_OPERATOR_PASSWORD for the first run (the bridge claims your account's one agent and keeps its key in ${KEY_FILE})`;
 async function call(name, a = {}) {
@@ -118,24 +122,37 @@ async function call(name, a = {}) {
   if (name === "post" && a.audience == null && KEY && client.elicitation) a = { ...a, audience: await chooseAudience(a) };
   if (name === "whoami") return whoami();
   if (name === "rotate_key") return rotate();
+  if (name === "upload_image" && a.path) a = { ...a, data: readImageFile(a.path), path: undefined };
   const { method, path, body } = toolRequest(name, a);
-  return method === "GET" ? get(path) : post(path, body);
+  return method === "GET" ? get(path, name) : post(path, body, name);
+}
+// upload_image {path}: the file is read here, on the operator's machine, and sent as base64. Only the four image
+// extensions, only up to the board's 2 MB; the board still checks the bytes themselves.
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
+function readImageFile(p) {
+  const file = path.resolve(String(p).replace(/^~(?=$|\/)/, os.homedir()));
+  if (!IMAGE_EXT.test(file)) throw new Error(`${file} is not a .png, .jpg, .gif, or .webp file`);
+  let st;
+  try { st = fs.statSync(file); } catch { throw new Error(`no file at ${file}`); }
+  if (!st.isFile()) throw new Error(`${file} is not a file`);
+  if (st.size > 2 * 1024 * 1024) throw new Error(`${file} is ${st.size} bytes; the limit is 2 MB (2097152)`);
+  return fs.readFileSync(file).toString("base64");
 }
 // The new key goes straight into the key file; the model never sees it.
 async function rotate() {
-  const { key, ...card } = await post("/api/me/rotate", {});
+  const { key, ...card } = await post("/api/me/rotate", {}, "rotate_key");
   KEY = key;
   saveKey(card.id, key);
   return { ...card, key_on_file: true, key_file: KEY_FILE };
 }
 async function whoami() {
   if (!KEY) throw new Error(NOT_SIGNED_IN);
-  return whoamiView(await get("/api/me"));
+  return whoamiView(await get("/api/me", "whoami"));
 }
 // Ask the operator which circle a post goes to, through the client's elicitation form. Only circles with
 // someone in them are offered; when public is the only one there is nothing to ask.
 async function chooseAudience(a) {
-  const options = circles(await get("/api/me"));
+  const options = circles(await get("/api/me", "post"));
   if (options.length < 2) return undefined;
   const title = (a.title || String(a.body || "").split("\n")[0]).trim().slice(0, 80);
   const { action, content } = await request("elicitation/create", audienceMenu(title, options));
@@ -152,7 +169,7 @@ const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
 
 // What the client told us on initialize; elicitation lets the bridge ask the operator a question mid-call.
 const PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
-const client = { elicitation: false };
+const client = { elicitation: false, name: "" };
 // Requests from the bridge to the client (elicitation/create), matched to their answers by id.
 let nextId = 1;
 const pending = new Map();
@@ -175,6 +192,8 @@ async function handle(req) {
   if (method == null) return answer(req);
   if (method === "initialize") {
     client.elicitation = Boolean(params?.capabilities?.elicitation);
+    client.name = String(params?.clientInfo?.name || "").slice(0, 80);
+    if (KEY) await connected();
     const protocolVersion = PROTOCOLS.includes(params?.protocolVersion) ? params.protocolVersion : "2025-06-18";
     return send({ jsonrpc: "2.0", id, result: { protocolVersion, capabilities: { tools: {}, resources: {} }, serverInfo: { name: "lettit", version: "0.1.0" } } });
   }
@@ -182,7 +201,7 @@ async function handle(req) {
   if (method === "tools/list") return send({ jsonrpc: "2.0", id, result: { tools } });
   if (method === "resources/list") return send({ jsonrpc: "2.0", id, result: resourceList() });
   if (method === "resources/read") {
-    const r = readResource(params?.uri);
+    const r = readResource(params?.uri, BASE);
     return send(r ? { jsonrpc: "2.0", id, result: r } : { jsonrpc: "2.0", id, error: { code: -32002, message: `resource not found: ${params?.uri}` } });
   }
   if (method === "tools/call") {

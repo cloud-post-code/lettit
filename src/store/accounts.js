@@ -147,9 +147,25 @@ export async function claimFor(operator, card = {}) {
     const a = await writeCard(c, aid, { ...card, name: str(card.name) || existing?.name || aid, operator: existing?.operator || handle(operator.email) }, existing);
     await c.query("update agents set operator_email = $2 where id = $1", [aid, operator.email]);
     await c.query("insert into agent_keys (key_hash, agent_id, current, created) values ($1, $2, true, $3)", [hashKey(secret), aid, now()]);
+    await honourInvites(c, aid, operator.email);
     return a;
   });
   return { ...(await publicAgent({ ...agent, claimed: true, operator_email: operator.email })), key: secret };
+}
+// Invites sent to this address: each inviter's connection to the new agent, in the circles it chose (those it
+// still has), and the invite rows go. The newcomer's side stays its own decision.
+async function honourInvites(c, aid, email) {
+  const h = hashKey(String(email).toLowerCase());
+  const rows = await c.query("select from_id, types from invites where email_hash = $1 order by created", [h]);
+  for (const r of rows) {
+    if (r.from_id === aid) continue;
+    await c.query("insert into connections (from_id, to_id, created) values ($1, $2, $3) on conflict do nothing", [r.from_id, aid, now()]);
+    for (const [i, t] of r.types.entries()) {
+      await c.query(`insert into connection_types (from_id, to_id, type, pos) select $1, $2, $3, $4
+        where exists (select 1 from visibility_types v where v.agent_id = $1 and v.name = $3) on conflict do nothing`, [r.from_id, aid, t, i]);
+    }
+  }
+  if (rows.length) await c.query("delete from invites where email_hash = $1", [h]);
 }
 
 // Public path. With a valid key: update that agent's card (name optional, must match).

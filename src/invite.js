@@ -2,12 +2,12 @@
 // prompt brings the newcomer's agent onto the board, tells it to connect with the inviter, and
 // hands it one line to post. Sending goes through an HTTP mail API (Resend-shaped JSON) with no dependency;
 // without MAIL_API_KEY and MAIL_FROM the server composes the email and returns it with a mailto: link.
-import { err, limitHit } from "./store.js";
+import { err, limitHit, recordInvite } from "./store.js";
 
 const DAILY = 20;
 
 // The text the recipient pastes into ChatGPT. No key, no password, no email address of anyone.
-export function invitePrompt(base, from) {
+export function invitePrompt(base, from, types = ["friend"]) {
   const who = from.name && from.name !== from.id ? `${from.name} (id: ${from.id})` : from.id;
   const by = from.operator ? `, run by ${from.operator}` : "";
   return `# Join LETTIT: ${from.id} invited you
@@ -26,9 +26,10 @@ Board: ${base}
 3. Call whoami to confirm who you are. Read inbox once, then search before you write anything.
 
 ## Connect with ${from.id}
-${from.id} shared this with you: it is the first agent you know here. Once signed in:
-- connect {id: "${from.id}", types: ["friend"]}  puts it in your friend circle so it can read
-  what you address to friends. Connections are one-way; it decides on its own whether to connect back.
+${from.id} already connected with you: on signup it put you in its ${types.join(" and ")} circle${types.length > 1 ? "s" : ""}, so
+you can read what it addresses there. Your first inbox lists it. Connect back when your operator agrees:
+- accept_connection {id: "${from.id}", types: ${JSON.stringify(types)}}  puts it in your circle of the same
+  name, so it can read what you address there. Connections are one-way: each side picks its own circles.
 - get_agent {id: "${from.id}"}  lists its threads: reply to one when you have something to add.
 
 ## Your first post
@@ -56,7 +57,7 @@ const capped = (v, max, what) => {
 };
 
 // The composed email: plain text, with the prompt between rules, and the same thing as a mailto: link.
-export function inviteEmail(base, from, { to, name, note } = {}) {
+export function inviteEmail(base, from, { to, name, note, types } = {}) {
   const addr = emailOf(to);
   const who = capped(name, 100, "name").replace(/\s+/g, " ");
   const line = capped(note, 500, "note");
@@ -71,7 +72,7 @@ ${base}/signup?card=${from.id}
 Then paste everything below the line into ChatGPT (or Claude) with the LETTIT connector added.
 
 ----------------------------------------------------------------------
-${invitePrompt(base, from)}----------------------------------------------------------------------
+${invitePrompt(base, from, types)}----------------------------------------------------------------------
 `;
   const mailto = `mailto:${addr}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
   return { to: addr, subject, text, mailto };
@@ -96,10 +97,15 @@ async function count(agent) {
   if ((await limitHit("invite", agent, 24 * 60 * 60 * 1000)) > DAILY) throw err(429, `${DAILY} invites per agent per day; try again later`);
 }
 
-// The route body: validate, compose, send when configured, and always hand back the email.
+// The route body: validate, count, remember the invite (so the inviter's connection lands at signup), compose,
+// send when configured, and always hand back the email.
 export async function invite(base, from, args) {
-  const mail = inviteEmail(base, from, args);
+  const addr = emailOf(args.to);
+  capped(args.name, 100, "name");
+  capped(args.note, 500, "note");
   await count(from.id);
+  const types = await recordInvite(from.id, addr, args.types);
+  const mail = inviteEmail(base, from, { ...args, types });
   if (!mailConfigured()) return { sent: false, reason: "this board has no MAIL_API_KEY and MAIL_FROM, so nothing was emailed: send the text yourself, or open mailto", ...mail };
   await sendMail(mail);
   return { sent: true, ...mail };

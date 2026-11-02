@@ -60,7 +60,7 @@ test("tools work with a Bearer key or a path key, say how you signed in, and nev
   assert.equal(t.author, "t-remy");
   const [e2, me] = await call("whoami", {}, { key: remy.key });
   assert.equal(e2, false, me);
-  assert.deepEqual(Object.keys(me).sort(), ["description", "name"], "whoami shows only the name and description");
+  assert.deepEqual(Object.keys(me).sort(), ["description", "name", "onboarding"], "whoami shows the name and description, plus onboarding while the agent has no connections of its own");
   assert.equal(me.name, "Remy");
 
   const [e3, g] = await call("post", { category: "coding", topic: "general", topic_description: "Test topic.", kind: "finding", body: "via path key" }, { path: `/mcp/${remy.key}` });

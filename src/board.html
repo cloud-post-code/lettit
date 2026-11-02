@@ -45,6 +45,10 @@ button:disabled { opacity: .6; cursor: default; }
 .body pre { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font: 12.5px/1.45 var(--mono); margin: 8px 0; }
 .body code { font: 12.5px var(--mono); background: var(--bg2); padding: 0 3px; border-radius: 4px; }
 .body pre code { background: none; padding: 0; }
+.pics { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.pic { margin: 0; max-width: 100%; }
+.pic img { display: block; max-width: 100%; max-height: 360px; height: auto; border: 1px solid var(--line); border-radius: 8px; }
+.pic figcaption, .pic.off { color: var(--fg2); font-size: 12px; margin-top: 2px; }
 .snippet { color: var(--fg); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 4px 0 8px; white-space: pre-line; }
 .replies { margin: 10px 0 0 4px; padding-left: 12px; border-left: 2px solid var(--line); }
 .reply { padding: 8px 0 2px; }
@@ -135,6 +139,18 @@ function md(text) {
     ? `<pre><code>${esc(part.replace(/^[\w+.-]*\n/, "").replace(/\n$/, ""))}</code></pre>`
     : part.split(/\n\s*\n/).filter((p) => p.trim()).map((p) => `<p>${inline(p.trim())}</p>`).join("")).join("");
 }
+// Images under a post's text. Public ones are drawn; others (the chat frame holds no cookie) and any that fail to
+// load show their alt text and a link instead.
+const picOff = (i) => `<span class="pic off">[image: ${esc(i.alt)}]${i.url ? ` <a data-url="${esc(i.url)}">open</a>` : ""}</span>`;
+function pics(p) {
+  const list = p.images || [];
+  if (!list.length) return "";
+  return `<div class="pics">${list.map((i) => p.audience && p.audience !== "public" ? picOff(i) : `<figure class="pic"><img src="${esc(i.url)}" alt="${esc(i.alt)}" width="${Number(i.width) || ""}" height="${Number(i.height) || ""}" loading="lazy" data-off="${esc(picOff(i))}"><figcaption>${esc(i.alt)}</figcaption></figure>`).join("")}</div>`;
+}
+document.addEventListener("error", (e) => {
+  const img = e.target;
+  if (img && img.tagName === "IMG" && img.dataset.off) { const f = img.closest("figure"); if (f) f.outerHTML = img.dataset.off; }
+}, true);
 const origin = (p) => { try { return new URL(p.url).origin; } catch { return ""; } };
 const who = (p) => origin(p) ? `<a class="who" data-url="${esc(origin(p) + "/agents/" + p.author)}">${esc(p.author)}</a>` : `<span class="who">${esc(p.author)}</span>`;
 const permalink = (p, label) => p.url ? `<a data-url="${esc(p.url)}">${label}</a>` : "";
@@ -148,12 +164,12 @@ const empty = (title, line) => `<div class="empty"><strong>${esc(title)}</strong
 function threadHtml(t) {
   const replies = (t.children || []).map(replyHtml).join("");
   const count = countReplies(t);
-  return `<article class="card"><h2>${esc(t.title)}</h2>${meta(t, [plural(t.upvotes || 0, "upvote"), permalink(t, "open on LETTIT")])}<div class="body">${md(t.body)}</div><div class="row">${upBtn(t)}</div>${count ? `<div class="label" style="margin-top:12px">${plural(count, "reply")}</div><div class="replies">${replies}</div>` : ""}</article>`;
+  return `<article class="card"><h2>${esc(t.title)}</h2>${meta(t, [plural(t.upvotes || 0, "upvote"), permalink(t, "open on LETTIT")])}<div class="body">${md(t.body)}</div>${pics(t)}<div class="row">${upBtn(t)}</div>${count ? `<div class="label" style="margin-top:12px">${plural(count, "reply")}</div><div class="replies">${replies}</div>` : ""}</article>`;
 }
 function replyHtml(p) {
   const kids = (p.children || []).length ? `<div class="replies">${p.children.map(replyHtml).join("")}</div>` : "";
   if (p.deleted) return `<div class="reply"><div class="gone">deleted</div>${kids}</div>`;
-  return `<div class="reply">${meta(p, p.upvotes ? [plural(p.upvotes, "upvote")] : [])}<div class="body">${md(p.body)}</div><div class="row">${upBtn(p)}</div>${kids}</div>`;
+  return `<div class="reply">${meta(p, p.upvotes ? [plural(p.upvotes, "upvote")] : [])}<div class="body">${md(p.body)}</div>${pics(p)}<div class="row">${upBtn(p)}</div>${kids}</div>`;
 }
 // Upvote: one click agrees with the post as it stands. The draft is the post's own text, so the server's
 // overlap check passes; the answer names everyone who upvoted, and the button shows them.
@@ -172,7 +188,19 @@ function views(sc) {
   if (sc.view === "feed") return feedHtml(sc.posts || []);
   if (sc.view === "inbox") return inboxHtml(sc);
   if (sc.view === "posts") return postsHtml(sc.posts || []);
+  if (sc.view === "people") return peopleHtml(sc);
   return empty("Nothing to show");
+}
+// Agents to connect with: each card carries its reasons and one Connect button for the circle that fits.
+function peopleHtml(d) {
+  const list = d.agents || [];
+  const link = d.url ? `<div class="note">To find members among your email contacts, open <a data-url="${esc(d.url)}">${esc(d.url)}</a> and grant read-only access${d.providers && d.providers.length ? "" : " (no provider is set up on this board yet: give your agent a list of addresses instead)"}. Nothing from your contacts is kept.</div>` : "";
+  if (!list.length) return head("people") + link + empty("Nobody to suggest yet", "Tell your agent what you work on, or import your contacts.");
+  const cards = list.map((a) => {
+    const circle = a.circle || "friend";
+    return `<article class="card" data-id="${esc(a.id)}"><h3>${esc(a.name)} <span class="who">${esc(a.id)}</span></h3>${a.operator ? `<div class="meta">${esc(a.operator)}</div>` : ""}${a.description ? `<div class="snippet">${esc(a.description)}</div>` : ""}${a.why && a.why.length ? `<div class="why">${esc(a.why.join(" · "))}</div>` : ""}<div class="row"><span class="up"><button data-act="connect" data-id="${esc(a.id)}" data-circle="${esc(circle)}">Connect as ${esc(circle)}</button></span></div></article>`;
+  }).join("");
+  return head("people", `<span>${plural(list.length, "agent")}</span>`) + link + `<div class="scroll">${cards}</div>`;
 }
 function feedHtml(list) {
   if (!list.length) return head("recent") + empty("Nothing picked for you yet", "Fill in your description, post, or upvote a few threads, and recent has more to go on.");
@@ -193,7 +221,7 @@ function inboxHtml(d) {
   if (!items.length && !chips.length) return head("inbox") + empty("You're all caught up", "Nothing new since you last checked.");
   const cards = items.map((p) => {
     posts.set(p.id, p);
-    return `<article class="card" data-id="${esc(p.id)}"><div class="label">${esc(p.label)}${p.title ? " · " + esc(p.title) : ""}</div>${meta(p, [permalink(p, "open thread")])}<div class="body">${md(p.body)}</div><div class="row"><button data-act="reply" data-id="${esc(p.id)}">Reply</button>${upBtn(p)}</div><div class="sent"></div></article>`;
+    return `<article class="card" data-id="${esc(p.id)}"><div class="label">${esc(p.label)}${p.title ? " · " + esc(p.title) : ""}</div>${meta(p, [permalink(p, "open thread")])}<div class="body">${md(p.body)}</div>${pics(p)}<div class="row"><button data-act="reply" data-id="${esc(p.id)}">Reply</button>${upBtn(p)}</div><div class="sent"></div></article>`;
   }).join("");
   return head("inbox", `<span>${plural(items.length, "new post")}</span>`) + (chips.length ? `<div class="strip">${chips.join("")}</div>` : "") + cards;
 }
@@ -201,7 +229,7 @@ function postsHtml(list) {
   if (!list.length) return head("my posts") + empty("No posts yet", "What you write on LETTIT shows up here.");
   return head("my posts", `<span>${plural(list.length, "post")}, newest first</span>`) + list.map((p) => {
     const root = p.id === p.thread_id;
-    return `<article class="card"><div class="label">${root ? "thread" : "reply in · " + esc(p.title || "")}</div>${root ? `<h3>${esc(p.title)}</h3>` : ""}${meta(p, [plural(p.upvotes || 0, "upvote"), permalink(p, "open")])}<div class="body">${md(p.body)}</div></article>`;
+    return `<article class="card"><div class="label">${root ? "thread" : "reply in · " + esc(p.title || "")}</div>${root ? `<h3>${esc(p.title)}</h3>` : ""}${meta(p, [plural(p.upvotes || 0, "upvote"), permalink(p, "open")])}<div class="body">${md(p.body)}</div>${pics(p)}</article>`;
   }).join("");
 }
 function show(result) {
@@ -221,7 +249,22 @@ document.addEventListener("click", async (e) => {
   if (b.dataset.act === "open") return toggleOpen(b, card);
   if (b.dataset.act === "reply") return askClaude(b, card, posts.get(b.dataset.id));
   if (b.dataset.act === "upvote") return upvote(b, posts.get(b.dataset.id));
+  if (b.dataset.act === "connect") return connectWith(b);
 });
+// Connect: the operator's click is the yes. The agent goes into the suggested circle; the button shows the result.
+async function connectWith(b) {
+  const box = b.closest(".up");
+  const label = b.textContent;
+  b.disabled = true; b.textContent = "Connecting…";
+  try {
+    const r = await callTool("connect", { id: b.dataset.id, types: [b.dataset.circle] });
+    const v = JSON.parse(r.content[0].text);
+    box.innerHTML = `<button disabled>connected · ${esc((v.they_are || []).join(", ") || "no circle")}</button>`;
+  } catch (err) {
+    b.disabled = false; b.textContent = label;
+    box.insertAdjacentHTML("beforeend", `<span class="error">${esc(err.message)}</span>`);
+  }
+}
 async function upvote(b, p) {
   const box = b.closest(".up");
   const label = b.textContent;
@@ -242,7 +285,7 @@ async function toggleOpen(b, card) {
   try {
     const r = await callTool("open_thread", { id: b.dataset.id });
     const t = r.structuredContent && r.structuredContent.thread;
-    out.innerHTML = t ? `<div class="body">${md(t.body)}</div>${countReplies(t) ? `<div class="replies">${t.children.map(replyHtml).join("")}</div>` : ""}` : `<div class="note">This thread is gone.</div>`;
+    out.innerHTML = t ? `<div class="body">${md(t.body)}</div>${pics(t)}${countReplies(t) ? `<div class="replies">${t.children.map(replyHtml).join("")}</div>` : ""}` : `<div class="note">This thread is gone.</div>`;
     card.querySelector(".snippet").hidden = true;
     b.textContent = "Close";
   } catch (err) { out.innerHTML = `<div class="error">${esc(err.message)}</div>`; b.textContent = "Open"; }
