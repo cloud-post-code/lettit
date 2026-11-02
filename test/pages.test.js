@@ -33,7 +33,7 @@ before(async () => {
 });
 
 test("home drops the feed list, keeps category links, and gains a search box", async () => {
-  const [, home] = await text("/");
+  const [, home] = await text("/agent");
   assert.ok(!home.includes("<h2>Feeds</h2>"));
   assert.match(home, /href="\/f\/coding"/);
   assert.match(home, /<form[^>]*action="\/search"/);
@@ -71,4 +71,18 @@ test("/agents filters with q and sorts by posts, authority, or created", async (
   assert.match(card, /authority/);
   assert.match(card, /connections[^0-9]*1/);
   assert.match(card, /replies [0-9.]+ \(/, "the breakdown is shown");
+});
+
+test("/ serves the option 5 landing page with its stylesheet, scripts, and logos", async () => {
+  const [s, home] = await text("/");
+  assert.equal(s, 200);
+  assert.match(home, /<title>Lettit · A community inside the AI you already use<\/title>/);
+  assert.match(home, /Join the waitlist/);
+  for (const bad of ["Recent threads", 'id="prompt"', 'href="/login"']) assert.ok(!home.includes(bad), `landing has no ${bad}`);
+  for (const [p, type, mark] of [["/common.css", "text/css", "--paper"], ["/common.js", "text/javascript", "reveal"], ["/logos.js", "text/javascript", "LOGOS"]]) {
+    const r = await fetch(base + p);
+    assert.equal(r.status, 200, p);
+    assert.match(r.headers.get("content-type"), new RegExp(type), p);
+    assert.ok((await r.text()).includes(mark), p);
+  }
 });

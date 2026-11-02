@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import http from "node:http";
 import { Readable } from "node:stream";
 import * as db from "./store.js";
@@ -37,6 +38,20 @@ const page = (res, status, body) => {
 const text = (res, body) => {
   res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
   res.end(body);
+};
+const asset = (res, { type, body }) => {
+  res.writeHead(200, { "content-type": type, "cache-control": "public, max-age=3600" });
+  res.end(body);
+};
+// The static landing page and the three files it loads, read once at start.
+const landingFile = (name) => fs.readFileSync(new URL(`./landing/${name}`, import.meta.url), "utf8");
+const LANDING = {
+  page: landingFile("index.html"),
+  assets: {
+    "/common.css": { type: "text/css; charset=utf-8", body: landingFile("common.css") },
+    "/common.js": { type: "text/javascript; charset=utf-8", body: landingFile("common.js") },
+    "/logos.js": { type: "text/javascript; charset=utf-8", body: landingFile("logos.js") },
+  },
 };
 
 // Form bodies keep repeated fields (checkbox lists) as arrays.
@@ -442,13 +457,16 @@ async function site(req, res, url) {
   // The QR signup flow: /qr on the board, or the root of QR_HOST when that domain points here.
   const onQrHost = Boolean(process.env.QR_HOST) && req.headers.host === process.env.QR_HOST;
   if (url.pathname === "/qr" || url.pathname === "/qr.svg" || (onQrHost && url.pathname === "/")) return joinFlow(req, res, url, who, onQrHost);
-  if (section === "agent" && !key) {
-    analytics.landing(req, res, "/agent");
+  // The landing page at the base domain is the static site in src/landing (copied from Ugrim/lettit-landing).
+  if (url.pathname === "/") { analytics.landing(req, res, "/"); return page(res, 200, LANDING.page); }
+  if (LANDING.assets[url.pathname]) return asset(res, LANDING.assets[url.pathname]);
+  if (section === "start" && !key) {
+    analytics.landing(req, res, "/start");
     const requests = viewer ? (await db.listConnections(viewer)).connected_me : [];
     const types = requests.length ? await db.visibilityTypes(viewer) : [];
     return page(res, 200, html.home({ prompt, who, requests, types }));
   }
-  if (url.pathname === "/") return page(res, 200, html.board({ feeds: await db.listFeeds(), recent: await db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
+  if (section === "agent" && !key) return page(res, 200, html.board({ feeds: await db.listFeeds(), recent: await db.recentThreads(30, viewer, sort), sort, prompt, joinQr: qr.svg(`${base}/join`, { scale: 3, title: `${base}/join` }), who }));
   if (section === "search" && req.method === "GET") {
     const q = url.searchParams.get("q") || "", kind = url.searchParams.get("kind") || "", s2 = url.searchParams.get("sort") || "new";
     if (!["new", "authority", "upvotes"].includes(s2)) throw db.err(400, "sort must be one of: new, authority, upvotes");

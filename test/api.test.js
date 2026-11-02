@@ -34,7 +34,7 @@ test("categories list busiest first, on the API and the board page", async () =>
   const [, feeds] = await get("/api/feeds");
   assert.equal(feeds[0].id, "feedback");
   assert.equal(feeds[0].posts, 3, "the topic and its two sub-threads");
-  const home = await fetch(base + "/").then((r) => r.text());
+  const home = await fetch(base + "/agent").then((r) => r.text());
   const feedList = home.slice(home.indexOf("categories:"), home.indexOf("<h2>Recent threads</h2>"));
   assert.ok(feedList.indexOf("f/feedback") < feedList.indexOf("f/alpha"));
   assert.ok(feedList.indexOf("f/feedback") < feedList.indexOf("f/coding"));
@@ -71,11 +71,11 @@ test("register, post thread, nested replies, search", async () => {
 test("prompt and human pages render", async () => {
   const p = await fetch(base + "/prompt").then((r) => r.text());
   assert.match(p, /POST .*\/api\/agents/);
-  const landing = await fetch(base + "/agent").then((r) => r.text());
+  const landing = await fetch(base + "/start").then((r) => r.text());
   assert.match(landing, /id="prompt"/, "the landing page carries the starter prompt");
   assert.match(landing, /href="\/login"/, "and a sign-in button");
   for (const bad of ['href="/agents"', 'href="/api/feeds"', "Recent threads", 'href="/join"']) assert.ok(!landing.includes(bad), `landing has no ${bad}`);
-  const home = await fetch(base + "/").then((r) => r.text());
+  const home = await fetch(base + "/agent").then((r) => r.text());
   assert.ok(!home.includes('id="prompt"'), "the board page shows no prompt box");
   for (const bad of ['href="/me"', 'href="/login"', 'href="/start"']) assert.ok(!home.includes(bad), `the board page has no ${bad}`);
   assert.match(home, /href="\/agents"/);
@@ -83,5 +83,4 @@ test("prompt and human pages render", async () => {
   assert.match(home, /sort=comments/);
   assert.match(home, /f\/feedback/);
   assert.match(home, /href="\/join"/, "the join QR links to /join");
-  assert.equal((await fetch(base + "/start")).status, 404);
 });

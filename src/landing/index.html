@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lettit · A community inside the AI you already use</title>
+<meta name="description" content="Lettit is a community that lives inside the AI you already use. See what your friends are actually doing with AI.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4a12 12 0 1 0 10.39 18' fill='none' stroke='%232B3FEB' stroke-width='3.4' stroke-linecap='round'/%3E%3Ccircle cx='26.5' cy='12.5' r='3.6' fill='%23FF6A3D'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gabarito:wght@400..900&display=swap">
+<link rel="stylesheet" href="common.css">
+<style>
+  /* OPTION 5 — "People first". Lead with the communities and the posts, then show them landing inside the AI. */
+  body { background: var(--paper); color: var(--ink); }
+  header.top { color: var(--ink); }
+  header.top.on-dark { color: var(--paper); }
+  section { padding: 110px 20px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 22px; }
+  .wrap { width: 100%; max-width: 1080px; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+
+  /* hero: community wall */
+  #hero { min-height: 100svh; justify-content: center; padding-top: 120px; gap: 24px; overflow: hidden; }
+  .wall { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; width: 100%; max-width: 980px; margin-top: 18px; text-align: left; }
+  .cm { background: #fff; border-radius: 18px; padding: 16px 16px 14px; box-shadow: 0 1px 0 rgba(18,23,58,.06), 0 24px 60px -44px rgba(18,23,58,.5); display: flex; flex-direction: column; gap: 10px; transform: rotate(var(--r, 0deg)); }
+  .cm .top { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 800; color: var(--muted); }
+  .cm .top .cmn { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); }
+  .cm .top .cmn i { width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--coral)); display: block; }
+  .cm .top .n { opacity: .8; }
+  .cm .who { margin: 0; }
+  .cm q { font-size: 15px; line-height: 1.4; font-weight: 500; quotes: "“" "”"; }
+  .cm .meta { font-size: 12px; font-weight: 700; color: var(--muted); display: flex; gap: 12px; }
+  .cm .meta b { color: var(--coral); }
+  @media (max-width: 820px) { .wall { grid-template-columns: 1fr 1fr; } .wall .cm:nth-child(n+5) { display: none; } }
+  @media (max-width: 540px) { .wall { grid-template-columns: 1fr; } .wall .cm:nth-child(n+4) { display: none; } }
+
+  /* now inside your AI */
+  #inside { background: var(--ink); color: var(--paper); }
+  .tabs { display: inline-flex; padding: 4px; border-radius: 999px; background: rgba(246,244,236,.1); gap: 4px; }
+  .tabs button { font: inherit; font-size: 14px; font-weight: 800; border: 0; background: transparent; color: rgba(246,244,236,.7); padding: 9px 16px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+  .tabs button.on { background: var(--coral); color: var(--paper); }
+  .tabs button svg { width: 14px; height: 14px; }
+  .ai { display: grid; }
+  .ai > div { grid-area: 1 / 1; transition: opacity .35s, transform .35s, filter .35s; }
+  .ai .new { opacity: 0; transform: translateY(-8px); }
+  .on-with .ai .old { opacity: 0; transform: translateY(8px); filter: blur(4px); }
+  .on-with .ai .new { opacity: 1; transform: none; }
+  .win-badge .on { display: none; }
+  .on-with .win-badge { background: var(--coral); color: var(--paper); }
+  .on-with .win-badge .on { display: inline-flex; align-items: center; gap: 6px; } .on-with .win-badge .off { display: none; }
+  .win-badge { transition: background .3s, color .3s; }
+  .on-with .win { box-shadow: 0 0 0 2px var(--coral), 0 40px 90px -40px rgba(255,106,61,.5); }
+  .win { transition: box-shadow .4s; }
+
+  /* works everywhere */
+  .every { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; width: 100%; max-width: 820px; }
+  .ev { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-radius: 14px; background: #fff; box-shadow: 0 0 0 1px var(--line); font-weight: 800; font-size: 16px; text-align: left; }
+  .ev img { width: 24px; height: 24px; object-fit: contain; }
+  .ev .ini { width: 24px; height: 24px; border-radius: 6px; background: var(--ink); color: var(--paper); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+  .ev .ok { margin-left: auto; width: 20px; height: 20px; border-radius: 50%; background: var(--mint); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; }
+  .ev .ok svg { width: 12px; height: 12px; }
+  .ev.more { background: transparent; border: 2px dashed var(--line); box-shadow: none; color: var(--muted); }
+  .ev.more .ini { background: var(--coral); }
+  @media (max-width: 720px) { .every { grid-template-columns: 1fr 1fr; } }
+  .follow { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; padding: 12px 18px; border-radius: 999px; background: #fff; box-shadow: 0 0 0 1px var(--line); font-weight: 700; font-size: 15px; }
+  .follow .pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: var(--coral); color: var(--paper); font-size: 13px; font-weight: 800; }
+  .follow .pill svg { width: 13px; height: 13px; }
+  .follow .ap { display: inline-flex; gap: 4px; }
+  .follow .ap img { width: 20px; height: 20px; object-fit: contain; }
+
+  /* join with community picks */
+  .picks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 620px; }
+  .picks button { font: inherit; font-size: 14px; font-weight: 800; border: 2px solid rgba(246,244,236,.6); background: transparent; color: var(--paper); padding: 8px 14px; border-radius: 999px; cursor: pointer; }
+  .picks button.on { background: var(--paper); color: var(--coral); border-color: var(--paper); }
+</style>
+</head>
+<body>
+<header class="top" id="hdr">
+  <a class="logo" href="#top" aria-label="Lettit home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4a12 12 0 1 0 10.39 18" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><circle cx="26.5" cy="12.5" r="3.6" fill="currentColor"/></svg>Lettit</a>
+  <a class="cta" href="#join">Join waitlist</a>
+</header>
+
+<section id="hero"><div class="wrap" id="top">
+  <h1 class="h xl reveal">Advice from <span class="coral">people</span>, not the internet.</h1>
+  <p class="s reveal" data-d="1">Lettit is a set of small communities that show up inside your AI. Ask ChatGPT a question, and see what your friends actually did.</p>
+  <div class="btns reveal" data-d="2"><a class="btn" href="#join">Join the waitlist</a><a class="btn alt" href="#inside">See it in your AI</a></div>
+  <div class="wall" aria-label="Examples of community posts">
+    <div class="cm reveal" data-d="1" style="--r:-1deg;--c:#FF6A3D"><div class="top"><span class="cmn"><i></i>Travel</span><span class="n">412 people</span></div><div class="who"><span class="av">A</span>Arjun</div><q>5 days Tokyo + Kyoto, $870 all-in. Skip the rail pass, a Suica plus one Shinkansen ticket saved me $120.</q><div class="meta"><b>Worked</b><span>March</span></div></div>
+    <div class="cm reveal" data-d="2" style="--r:1deg;--c:#2B3FEB"><div class="top"><span class="cmn"><i></i>Running</span><span class="n">1.2k people</span></div><div class="who"><span class="av" style="background:#2B3FEB">P</span>Priya</div><q>Flat feet. Brooks Adrenaline on sale for $89, six weeks in, zero knee pain. Don't bother with the pricier ones.</q><div class="meta"><b>Worked</b><span>Last month</span></div></div>
+    <div class="cm reveal" data-d="3" style="--r:-0.5deg;--c:#12173A"><div class="top"><span class="cmn"><i></i>Indie hackers</span><span class="n">388 people</span></div><div class="who"><span class="av" style="background:#12173A">M</span>Mateo</div><q>Launched on a Tuesday, not a weekend. 3x the signups of my last launch. Posted the exact timeline.</q><div class="meta"><b>Worked</b><span>2 weeks ago</span></div></div>
+    <div class="cm reveal" data-d="2" style="--r:0.8deg;--c:#B9F0D6"><div class="top"><span class="cmn"><i></i>Budget cooking</span><span class="n">906 people</span></div><div class="who"><span class="av" style="background:#5B5E78">S</span>Sana</div><q>Meal-prepped 5 lunches for $14. Chickpeas, rice, one roast tray. Recipe and the grocery list inside.</q><div class="meta"><b>Worked</b><span>Sunday</span></div></div>
+    <div class="cm reveal" data-d="3" style="--r:-1.2deg;--c:#FF6A3D"><div class="top"><span class="cmn"><i></i>New parents</span><span class="n">254 people</span></div><div class="who"><span class="av">J</span>Jess</div><q>Tried the 2-3-4 nap schedule for a week. Night wakings went from four to one. Didn't work for everyone here though.</q><div class="meta"><b>Mostly worked</b><span>This week</span></div></div>
+    <div class="cm reveal" data-d="4" style="--r:0.6deg;--c:#2B3FEB"><div class="top"><span class="cmn"><i></i>Home espresso</span><span class="n">171 people</span></div><div class="who"><span class="av" style="background:#2B3FEB">D</span>Dev</div><q>Returned the $600 machine. The $180 one plus a decent grinder pulls better shots. Here's my grind settings.</q><div class="meta"><b>Worked</b><span>Yesterday</span></div></div>
+  </div>
+</div></section>
+
+<section id="inside"><div class="wrap" id="demo">
+  <p class="tag reveal">Now inside your AI</p>
+  <h2 class="h lg reveal" data-d="1">Those posts show up where you already ask.</h2>
+  <div class="tabs reveal" data-d="2" role="tablist">
+    <button class="on" id="tabOff" role="tab" aria-selected="true">Without Lettit</button>
+    <button id="tabOn" role="tab" aria-selected="false"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4a12 12 0 1 0 10.39 18" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><circle cx="26.5" cy="12.5" r="3.6" fill="currentColor"/></svg>With Lettit</button>
+  </div>
+  <div class="win reveal" data-d="3">
+    <div class="win-bar"><span class="win-dots"><i></i><i></i><i></i></span><span class="win-title" data-logo="chatgpt"><img alt="" hidden>ChatGPT</span><span class="win-badge off"><span class="off">Lettit off</span><span class="on"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4a12 12 0 1 0 10.39 18" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><circle cx="26.5" cy="12.5" r="3.6" fill="currentColor"/></svg>Lettit on</span></span></div>
+    <div class="win-body">
+      <div class="b me">Plan me 5 days in Japan on a tight budget.</div>
+      <div class="b ai">
+        <div class="old">Here's a budget-friendly 5-day itinerary:
+          <ul><li><b>Day 1–2 · Tokyo:</b> Senso-ji, Shibuya Crossing, Meiji Shrine</li><li><b>Day 3–4 · Kyoto:</b> Fushimi Inari, Arashiyama, Gion</li><li><b>Day 5 · Osaka:</b> Dotonbori street food, Osaka Castle</li><li><b>Tips:</b> rail pass, hostels, convenience-store meals</li></ul></div>
+        <div class="new"><span class="from"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4a12 12 0 1 0 10.39 18" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><circle cx="26.5" cy="12.5" r="3.6" fill="currentColor"/></svg>From your Travel community</span><br>Arjun did exactly this in March:
+          <div class="post"><div class="who"><span class="av">A</span>Arjun · Travel</div>“5 days, Tokyo + Kyoto, $870 all-in. Skip the rail pass — a Suica plus one Shinkansen ticket saved me $120. Here's the exact plan and the two hostels I'd book again.”</div></div>
+      </div>
+    </div>
+    <div class="win-input">Ask anything…<i></i></div>
+  </div>
+  <p class="s reveal" data-d="3">Your AI still answers. Lettit adds the person who already did it.</p>
+</div></section>
+
+<section id="every"><div class="wrap">
+  <p class="tag reveal">Works everywhere</p>
+  <h2 class="h lg reveal" data-d="1">Nothing new to open.</h2>
+  <p class="s reveal" data-d="2">Add Lettit once. It shows up inside the AI you already use.</p>
+  <div class="every reveal" data-d="2">
+    <span class="ev" data-logo="chatgpt"><img alt="" hidden><span class="ini">G</span>ChatGPT<span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span>
+    <span class="ev" data-logo="claude"><img alt="" hidden><span class="ini">C</span>Claude<span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span>
+    <span class="ev" data-logo="gemini"><img alt="" hidden><span class="ini">G</span>Gemini<span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span>
+    <span class="ev" data-logo="grok"><img alt="" hidden><span class="ini">G</span>Grok<span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span>
+    <span class="ev" data-logo="perplexity"><img alt="" hidden><span class="ini">P</span>Perplexity<span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span>
+    <span class="ev" data-logo="muse"><img alt="" hidden><span class="ini">M</span>Muse<span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span>
+    <span class="ev" data-logo="instinct"><img alt="" hidden><span class="ini">I</span>Instinct<span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span>
+    <span class="ev more"><span class="ini">+</span>Anything else</span>
+  </div>
+  <div class="follow reveal" data-d="3"><span class="pill"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4a12 12 0 1 0 10.39 18" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><circle cx="26.5" cy="12.5" r="3.6" fill="currentColor"/></svg>Your communities</span><span>follow you across</span><span class="ap"><span data-logo="chatgpt"><img alt="" hidden></span><span data-logo="claude"><img alt="" hidden></span><span data-logo="gemini"><img alt="" hidden></span></span><span>and everything else.</span></div>
+</div></section>
+
+<section id="a5">
+  <h2 class="h xl">Let people in.</h2>
+  <p class="s">We're opening Lettit to a few communities at a time. Which ones are you here for?</p>
+  <div class="picks" aria-label="Communities you're interested in">
+    <button type="button">Travel</button><button type="button">Running</button><button type="button">Budget cooking</button><button type="button">Indie hackers</button><button type="button">New parents</button><button type="button">Home espresso</button><button type="button">Something else</button>
+  </div>
+  <form class="join" id="join" novalidate>
+    <div class="row" id="emailRow"><input type="email" id="email" placeholder="you@email.com" autocomplete="email" aria-label="Email" required><button class="btn" type="submit">Join the waitlist</button></div>
+    <div class="row" id="codeRow" hidden><input type="text" id="code" placeholder="Invite code" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Invite code"><button class="btn" type="button" id="codeBtn">Use invite</button></div>
+    <button type="button" class="ghost" id="toggle">Have an invite? Enter your code</button>
+    <p class="msg" id="msg" aria-live="polite"></p>
+    <p class="done" id="done" hidden><svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="12" fill="currentColor" opacity="0.2"/><path d="M7 13.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="doneText"></span></p>
+  </form>
+  <footer>Lettit · Built for people who actually use AI.</footer>
+</section>
+
+<script src="logos.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  var demo = document.getElementById('demo'), off = document.getElementById('tabOff'), on = document.getElementById('tabOn');
+  function set(w) { demo.classList.toggle('on-with', w); off.classList.toggle('on', !w); on.classList.toggle('on', w); off.setAttribute('aria-selected', !w); on.setAttribute('aria-selected', w); }
+  off.addEventListener('click', function () { set(false); }); on.addEventListener('click', function () { set(true); });
+  // flip to "with" once the window scrolls into view, so the comparison plays itself
+  if ('IntersectionObserver' in window) {
+    var seen = false, io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting && !seen) { seen = true; setTimeout(function () { set(true); }, 1400); io.disconnect(); } }); }, { threshold: 0.6 });
+    io.observe(demo.querySelector('.win'));
+  }
+  document.querySelectorAll('.picks button').forEach(function (b) { b.addEventListener('click', function () { b.classList.toggle('on'); }); });
+  var hdr = document.getElementById('hdr'), dark = ['inside', 'a5'].map(function (id) { return document.getElementById(id); });
+  function tick() { var y = window.scrollY + 40, d = false; dark.forEach(function (s) { if (y >= s.offsetTop && y < s.offsetTop + s.offsetHeight) d = true; }); hdr.classList.toggle('on-dark', d); }
+  window.addEventListener('scroll', tick, { passive: true }); window.addEventListener('resize', tick); tick();
+})();
+</script>
+</body>
+</html>

@@ -56,7 +56,7 @@ test("without ADMIN_USER and ADMIN_PASSWORD the page says it is not configured",
 
 test("one journey shows up in the funnel, the breakdowns, the questions, and the agent list", async () => {
   // A human lands, signs up, connects through the hosted endpoint, asks a question, comes back a week later.
-  const land = await fetch(base + "/agent", { headers: { "user-agent": BROWSER } });
+  const land = await fetch(base + "/", { headers: { "user-agent": BROWSER } });
   const cookie = land.headers.get("set-cookie").split(";")[0];
   await fetch(base + "/api/operators", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "t-journey@x.io", password: "test-password-10" }) });
   // The claim comes from the same browser (the starter prompt pasted into a tool that reads the cookie's page), so the visitor merges into the agent.

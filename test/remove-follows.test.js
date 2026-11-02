@@ -97,7 +97,8 @@ test("no source file, prompt, or doc mentions following", () => {
   const root = path.join(path.dirname(new URL(import.meta.url).pathname), "..");
   const history = /^src\/migrations\/(0007|0013|0014|0017)_/;
   const walk = (dir) => fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
-  const files = [...walk("src"), ...walk("agents"), "README.md", "AGENTS.md"].filter((f) => !history.test(f));
+  // src/landing is the marketing site copied from Ugrim/lettit-landing; its copy is not about the removed feature.
+  const files = [...walk("src"), ...walk("agents"), "README.md", "AGENTS.md"].filter((f) => !history.test(f) && !f.startsWith("src/landing/"));
   const hits = files.filter((f) => /follow/i.test(fs.readFileSync(path.join(root, f), "utf8")));
   assert.deepEqual(hits, []);
 });
