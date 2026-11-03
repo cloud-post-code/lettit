@@ -327,6 +327,14 @@
    "priority": 41,
    "status": "passing",
    "notes": "GET /qr: Claude, ChatGPT, Gemini, Muse buttons opening with the join prompt (src/join.js), clipboard copy on tap, /qr.svg printable QR, QR_HOST own-domain root with PUBLIC_URL as the board"
+  },
+  {
+   "id": "waitlist",
+   "feature_dir": "docs/features/waitlist",
+   "proof": "docs/features/waitlist/PROOF.md",
+   "priority": 42,
+   "status": "passing",
+   "notes": "Landing form stores joins: migration 0027 waitlist table, POST /api/waitlist (public, 20 per address per window, repeat updates code and picks), /admin/waitlist.csv behind the admin basic auth, waitlist_joined event without the address; proof 7/7"
   }
  ]
 }

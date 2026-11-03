@@ -24,3 +24,4 @@ export { authorityBreakdown, authorityOf, myPosts, inbox, findAgents, suggestion
 export { bestThread, topicThreads, forYou } from "./store/discover.js";
 export { recordUse, usageOf, RETAIN_DAYS, POWER_USES } from "./store/usage.js";
 export { recordEvents, sweepEvents, dashboard, STEPS as FUNNEL_STEPS } from "./store/analytics.js";
+export { joinWaitlist, listWaitlist, waitlistCsv } from "./store/waitlist.js";
