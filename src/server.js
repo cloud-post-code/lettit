@@ -156,6 +156,16 @@ async function api(req, res, url) {
   if (resource === "me") return meApi(req, res, q, key, action);
   if (resource === "operators" && m === "POST" && !key) { const b = await readBody(req); const o = await db.createOperator(b.email, b.password); analytics.capture(res.visitor?.id, "signed_up", { method: "api" }); return json(res, 201, o); }
   if (resource === "operators") return json(res, 404, { error: "POST /api/operators {email, password} creates an operator account; everything else is on /me" });
+  // The landing page waitlist: no key, 20 joins per address per hour, one row per email. Read at /admin.
+  if (resource === "waitlist" && m === "POST" && !key) {
+    const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket?.remoteAddress || "";
+    if ((await db.limitHit("waitlist", ip, 60 * 60 * 1000)) > WAITLIST_PER_HOUR) throw db.err(429, "too many signups from this address; try again in an hour");
+    const b = await readBody(req);
+    const row = await db.joinWaitlist({ ...b, visitor: res.visitor?.id, referrer: req.headers.referer || req.headers.referrer });
+    analytics.capture(res.visitor?.id, row.already ? "waitlist_rejoined" : "waitlist_joined", { communities: row.communities, invite_code: Boolean(row.code) });
+    return json(res, row.already ? 200 : 201, { ok: true, email: row.email, communities: row.communities, code: row.code, already: row.already });
+  }
+  if (resource === "waitlist") return json(res, 404, { error: "POST /api/waitlist {email, communities?, code?} joins the waitlist; the list is on /admin" });
 
   if (resource === "images") return imagesApi(req, res, key);
 
@@ -375,7 +385,8 @@ async function use(agentId, p) {
 }
 // Every /api/* request by HTTP (the stdio bridge, curl, scripts): reported like a tool call, with the bridge's
 // tool name when it says one. Health, the prompt, sign-up, the connected ping, and image bytes are left out.
-const UNTRACKED = new Set(["health", "prompt", "operators", "images"]);
+const UNTRACKED = new Set(["health", "prompt", "operators", "images", "waitlist"]);
+const WAITLIST_PER_HOUR = 20;
 async function apiTracked(req, res, url) {
   const resource = url.pathname.split("/")[2];
   if (!analytics.enabled() || UNTRACKED.has(resource) || url.pathname === "/api/me/connected") return api(req, res, url);
@@ -666,9 +677,18 @@ async function adminPage(req, res, url) {
   }
   const days = Math.min(365, Math.max(1, num(url.searchParams.get("days"), 30)));
   const by = ["visitor", "client", "transport"].includes(url.searchParams.get("by")) ? url.searchParams.get("by") : "visitor";
+  // ?export=waitlist: the whole list as CSV, for a mail merge or a spreadsheet.
+  if (url.searchParams.get("export") === "waitlist") {
+    const rows = await db.listWaitlist({ limit: 5000 });
+    const cell = (v) => { const s = v == null ? "" : Array.isArray(v) ? v.join("; ") : v instanceof Date ? v.toISOString() : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const csv = ["email,communities,invite_code,joins,joined_at,last_seen_at", ...rows.map((r) => [r.email, r.communities, r.code, r.joins, r.created, r.updated].map(cell).join(","))].join("\r\n") + "\r\n";
+    res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="lettit-waitlist-${new Date().toISOString().slice(0, 10)}.csv"`, "cache-control": "no-store" });
+    return res.end(csv);
+  }
   const data = await db.dashboard({ days, by });
+  const waitlist = { rows: await db.listWaitlist({ limit: 200 }), totals: await db.waitlistTotals({ days }), communities: await db.waitlistCommunities() };
   res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-  return res.end(html.admin({ data, base: baseUrl(req) }));
+  return res.end(html.admin({ data, waitlist, base: baseUrl(req) }));
 }
 
 // Console actions call the same store functions the API does.
