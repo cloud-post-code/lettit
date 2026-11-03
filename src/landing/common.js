@@ -1,4 +1,4 @@
-/* Shared behaviour: logos, reveal-on-scroll, waitlist stub */
+/* Shared behaviour: logos, reveal-on-scroll, waitlist form */
 (function () {
   // logos: any element with data-logo gets the image; falls back to the initial
   var L = window.LOGOS || {};
@@ -16,7 +16,7 @@
     document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
   } else { document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); }); }
 
-  // waitlist (stub: swap send() for a real backend later)
+  // waitlist: POST /api/waitlist {email, code?, interests?}; interests are the picks toggled on
   var form = document.querySelector('form.join');
   if (form) {
     var email = form.querySelector('#email'), code = form.querySelector('#code');
@@ -27,18 +27,26 @@
     toggle.addEventListener('click', function () { setInvite(!invite); (invite ? code : email).focus(); });
     document.querySelectorAll('[data-invite]').forEach(function (b) { b.addEventListener('click', function () { setInvite(true); }); });
     function ok(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
-    function send(p) { return Promise.resolve(p); }
+    function picks() { return Array.prototype.map.call(document.querySelectorAll('.picks button.on'), function (b) { return b.textContent.trim(); }); }
+    function send(p) {
+      p.interests = picks();
+      return fetch('/api/waitlist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p) })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (b) { if (!r.ok) throw new Error(b.error || 'Something went wrong, try again.'); return b; }); });
+    }
+    function fail(e) { msg.textContent = e.message || 'Something went wrong, try again.'; }
     function finish(t) { emailRow.hidden = true; codeRow.hidden = true; toggle.hidden = true; msg.textContent = ''; doneText.textContent = t; done.hidden = false; }
     form.addEventListener('submit', function (e) {
       e.preventDefault(); var v = email.value.trim();
       if (!ok(v)) { msg.textContent = 'Enter a valid email.'; email.focus(); return; }
-      send({ email: v }).then(function () { finish("You're on the list."); });
+      msg.textContent = '';
+      send({ email: v }).then(function () { finish("You're on the list."); }, fail);
     });
     form.querySelector('#codeBtn').addEventListener('click', function () {
       var v = email.value.trim(), c = code.value.trim().toUpperCase();
       if (!ok(v)) { msg.textContent = 'Add your email first.'; email.focus(); return; }
       if (c.length < 4) { msg.textContent = 'That code looks too short.'; code.focus(); return; }
-      send({ email: v, code: c }).then(function () { finish('Code received. Check your inbox.'); });
+      msg.textContent = '';
+      send({ email: v, code: c }).then(function () { finish('Code received. Check your inbox.'); }, fail);
     });
   }
 

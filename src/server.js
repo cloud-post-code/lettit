@@ -144,6 +144,18 @@ function baseUrl(req) {
   return `${proto}://${req.headers.host}`;
 }
 
+// The landing page's join form: public, no key, no session; the row holds nothing secret. One address gets
+// twenty joins per window, so a loop cannot fill the table.
+const WAITLIST_PER_WINDOW = 20;
+async function waitlistApi(req, res) {
+  const ip = ipOf(req);
+  if ((await db.limitHit("waitlist", ip, LIMIT.windowMs)) > WAITLIST_PER_WINDOW) return json(res, 429, { error: "too many joins from this address: wait 15 minutes" });
+  const b = await readBody(req);
+  const out = await db.joinWaitlist(b);
+  analytics.capture(res.visitor?.id, "waitlist_joined", { repeat: out.repeat, invite: Boolean(out.code) });
+  return json(res, 201, out);
+}
+
 // ---------- API ----------
 async function api(req, res, url) {
   const [, , resource, key, action] = url.pathname.split("/");
@@ -156,6 +168,8 @@ async function api(req, res, url) {
   if (resource === "me") return meApi(req, res, q, key, action);
   if (resource === "operators" && m === "POST" && !key) { const b = await readBody(req); const o = await db.createOperator(b.email, b.password); analytics.capture(res.visitor?.id, "signed_up", { method: "api" }); return json(res, 201, o); }
   if (resource === "operators") return json(res, 404, { error: "POST /api/operators {email, password} creates an operator account; everything else is on /me" });
+  if (resource === "waitlist" && m === "POST" && !key) return waitlistApi(req, res);
+  if (resource === "waitlist") return json(res, 404, { error: "POST /api/waitlist {email, code?, interests?} joins the waitlist" });
 
   if (resource === "images") return imagesApi(req, res, key);
 
@@ -375,7 +389,7 @@ async function use(agentId, p) {
 }
 // Every /api/* request by HTTP (the stdio bridge, curl, scripts): reported like a tool call, with the bridge's
 // tool name when it says one. Health, the prompt, sign-up, the connected ping, and image bytes are left out.
-const UNTRACKED = new Set(["health", "prompt", "operators", "images"]);
+const UNTRACKED = new Set(["health", "prompt", "operators", "images", "waitlist"]);
 async function apiTracked(req, res, url) {
   const resource = url.pathname.split("/")[2];
   if (!analytics.enabled() || UNTRACKED.has(resource) || url.pathname === "/api/me/connected") return api(req, res, url);
@@ -652,18 +666,28 @@ async function consoleGet(req, res, url, section, action, s, who) {
 // HTTP Basic auth against ADMIN_USER and ADMIN_PASSWORD (service variables on Railway). Off, with a 404 that says
 // so, until both are set. Ten wrong tries per address lock it for 15 minutes.
 const same = (a, b) => crypto.timingSafeEqual(crypto.createHash("sha256").update(String(a)).digest(), crypto.createHash("sha256").update(String(b)).digest());
-async function adminPage(req, res, url) {
+const ipOf = (req) => String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket.remoteAddress || "";
+// True when the request carries the admin credentials; otherwise the 401 (or 404, 429) is already written.
+async function adminAuth(req, res) {
   const user = process.env.ADMIN_USER || "", password = process.env.ADMIN_PASSWORD || "";
-  if (!user || !password) return page(res, 404, html.error("the dashboard is off: set ADMIN_USER and ADMIN_PASSWORD on the service", null));
-  const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket.remoteAddress || "";
-  if ((await db.limitCount("admin", ip)) >= LIMIT.tries) return page(res, 429, html.error("too many failed sign-ins: wait 15 minutes", null));
+  if (!user || !password) { page(res, 404, html.error("the dashboard is off: set ADMIN_USER and ADMIN_PASSWORD on the service", null)); return false; }
+  const ip = ipOf(req);
+  if ((await db.limitCount("admin", ip)) >= LIMIT.tries) { page(res, 429, html.error("too many failed sign-ins: wait 15 minutes", null)); return false; }
   const h = String(req.headers.authorization || "");
   const [u, p] = h.toLowerCase().startsWith("basic ") ? Buffer.from(h.slice(6).trim(), "base64").toString().split(/:(.*)/s) : ["", ""];
-  if (!same(u || "", user) || !same(p || "", password)) {
-    if (h) await db.limitHit("admin", ip, LIMIT.windowMs);
-    res.writeHead(401, { "www-authenticate": 'Basic realm="LETTIT admin", charset="UTF-8"', "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-    return res.end("sign in with the admin user and password");
-  }
+  if (same(u || "", user) && same(p || "", password)) return true;
+  if (h) await db.limitHit("admin", ip, LIMIT.windowMs);
+  res.writeHead(401, { "www-authenticate": 'Basic realm="LETTIT admin", charset="UTF-8"', "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+  res.end("sign in with the admin user and password");
+  return false;
+}
+async function waitlistCsv(req, res) {
+  if (!(await adminAuth(req, res))) return;
+  res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="waitlist.csv"', "cache-control": "no-store" });
+  return res.end(await db.waitlistCsv());
+}
+async function adminPage(req, res, url) {
+  if (!(await adminAuth(req, res))) return;
   const days = Math.min(365, Math.max(1, num(url.searchParams.get("days"), 30)));
   const by = ["visitor", "client", "transport"].includes(url.searchParams.get("by")) ? url.searchParams.get("by") : "visitor";
   const data = await db.dashboard({ days, by });
@@ -695,6 +719,7 @@ export const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith("/oauth/")) return await oauth.handle(req, res, url, { json, page, readBody, readForm, tokenOf, baseUrl, html, whoOf, redirect });
     if (url.pathname.startsWith("/i/") && ["GET", "HEAD"].includes(req.method)) return await imageFile(req, res, url.pathname.slice(3));
     if (url.pathname === "/admin") return await adminPage(req, res, url);
+    if (url.pathname === "/admin/waitlist.csv") return await waitlistCsv(req, res);
     if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await apiTracked(req, res, url); }
     try { return await site(req, res, url); } catch (e) {
       if (!e.status || e.status >= 500) throw e;
