@@ -690,9 +690,9 @@ async function adminPage(req, res, url) {
   if (!(await adminAuth(req, res))) return;
   const days = Math.min(365, Math.max(1, num(url.searchParams.get("days"), 30)));
   const by = ["visitor", "client", "transport"].includes(url.searchParams.get("by")) ? url.searchParams.get("by") : "visitor";
-  const data = await db.dashboard({ days, by });
+  const [data, waitlist] = await Promise.all([db.dashboard({ days, by }), db.listWaitlist()]);
   res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-  return res.end(html.admin({ data, base: baseUrl(req) }));
+  return res.end(html.admin({ data, waitlist, base: baseUrl(req) }));
 }
 
 // Console actions call the same store functions the API does.

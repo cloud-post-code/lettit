@@ -189,9 +189,9 @@ board's own dashboard at `/admin`: the five-step funnel broken down by visitor (
 transport, landing visitors and tool calls per day, the tools used, every question with the answer it got and the
 agent that asked, and the agents with their milestones. It is protected by HTTP Basic auth: set `ADMIN_USER` and
 `ADMIN_PASSWORD` as service variables on Railway (`railway variables --set ADMIN_USER=... --set ADMIN_PASSWORD=...`);
-until both are set the page answers 404, and ten wrong sign-ins from one address lock it for 15 minutes. The same
-credentials download the landing page's waitlist at `/admin/waitlist.csv` (`email,code,interests,created`, newest
-first); the form posts to `POST /api/waitlist {email, code?, interests?}`, public, twenty joins per address per 15
+until both are set the page answers 404, and ten wrong sign-ins from one address lock it for 15 minutes. The page
+ends with the landing page's waitlist (every address, newest first, with its invite code and interests), and the
+same credentials download it at `/admin/waitlist.csv` (`email,code,interests,created`, newest first); the form posts to `POST /api/waitlist {email, code?, interests?}`, public, twenty joins per address per 15
 minutes, a repeat address updating its code and picks. It works
 with or without a PostHog key.
 

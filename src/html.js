@@ -352,15 +352,15 @@ export function notFound(who = null, message = "nothing here") {
 }
 
 // The operator's journey dashboard at /admin (HTTP Basic auth). One page, no scripts: the funnel per segment,
-// the last weeks as small charts, the tools, every question with its answer, and the agents.
+// the last weeks as small charts, the tools, every question with its answer, the agents, and the waitlist.
 const n = (v) => Number(v || 0).toLocaleString("en-US");
 const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "–");
 const INK = { human: "#2563eb", agent: "#d97706", calls: "#2563eb", active: "#059669" };
-export function admin({ data, base = "" }) {
+export function admin({ data, waitlist = [], base = "" }) {
   const { days, by, steps, daily, tools, questions, agents, totals } = data;
   const funnel = data.funnel.length ? data.funnel : [{ segment: "nobody yet" }];
   const opt = (name, value, label) => (String(value) === String(name === "by" ? by : days) ? `<b>${label}</b>` : `<a href="/admin?${new URLSearchParams({ days, by, [name]: value })}">${label}</a>`);
-  const tiles = [["Visitors", totals.visitors], ["Connected to MCP", totals.connected], ["Active agents", totals.active], ["Tool calls", totals.calls], ["Questions asked", totals.questions]]
+  const tiles = [["Visitors", totals.visitors], ["Connected to MCP", totals.connected], ["Active agents", totals.active], ["Tool calls", totals.calls], ["Questions asked", totals.questions], ["Waitlist", waitlist.length]]
     .map(([l, v]) => `<div class="tile"><div class="v">${n(v)}</div><div class="l">${l}</div></div>`).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>LETTIT journey</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>:root{--ink:#111;--muted:#667;--line:#e5e7eb;--bg:#fff;--card:#fafafa}@media(prefers-color-scheme:dark){:root{--ink:#eee;--muted:#9aa;--line:#333;--bg:#111;--card:#1a1a1a}}
@@ -386,6 +386,9 @@ ${chart("Tool calls and active agents", daily, [["calls", INK.calls, "tool calls
 <table><tr><th>when</th><th>agent</th><th>tool</th><th>question</th><th>answer</th></tr>${questions.map((x) => `<tr><td class="mono">${when(x.created)}</td><td><a href="${base}/agents/${esc(x.person)}">${esc(x.person)}</a><div class="legend">${esc(x.transport || "")} ${esc(x.client || "")}</div></td><td class="mono">${esc(x.tool)}</td><td class="q">${esc(x.query)}</td><td class="a">${x.ok === false ? '<span class="err">error: </span>' : ""}${answerDigest(x.answer)}</td></tr>`).join("") || "<tr><td colspan=5>none yet</td></tr>"}</table>
 <h2>Agents</h2>
 <table><tr><th>agent</th><th>client</th><th>first seen</th><th>last seen</th><th>uses</th><th>connected</th><th>week one</th><th>50 a week</th></tr>${agents.map((a) => `<tr><td><a href="${base}/agents/${esc(a.person)}">${esc(a.person)}</a></td><td>${esc(a.client || "")}</td><td class="mono">${when(a.first_seen)}</td><td class="mono">${when(a.last_seen)}</td><td>${n(a.uses)}</td><td>${a.connected ? '<span class="ok">yes</span>' : "no"}</td><td>${a.retained ? '<span class="ok">yes</span>' : "no"}</td><td>${a.power ? '<span class="ok">yes</span>' : "no"}</td></tr>`).join("") || "<tr><td colspan=8>none yet</td></tr>"}</table>
+<h2>Waitlist</h2>
+<div class="bar"><span>${n(waitlist.length)} ${waitlist.length === 1 ? "address" : "addresses"}, newest first</span><span><a href="/admin/waitlist.csv">download CSV</a></span></div>
+<table><tr><th>joined</th><th>email</th><th>invite code</th><th>interests</th></tr>${waitlist.map((w) => `<tr><td class="mono">${when(new Date(w.created).toISOString())}</td><td>${esc(w.email)}</td><td class="mono">${esc(w.code || "")}</td><td>${(w.interests || []).map(esc).join(" · ")}</td></tr>`).join("") || "<tr><td colspan=4>nobody yet</td></tr>"}</table>
 </body></html>`;
 }
 // A tool's answer as the model got it is JSON: show what it amounts to, with the raw text behind a disclosure.
