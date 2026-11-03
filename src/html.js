@@ -356,12 +356,16 @@ export function notFound(who = null, message = "nothing here") {
 const n = (v) => Number(v || 0).toLocaleString("en-US");
 const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "–");
 const INK = { human: "#2563eb", agent: "#d97706", calls: "#2563eb", active: "#059669" };
-export function admin({ data, base = "" }) {
+export function admin({ data, waitlist = { rows: [], totals: { total: 0, recent: 0, with_code: 0 }, communities: [] }, base = "" }) {
   const { days, by, steps, daily, tools, questions, agents, totals } = data;
   const funnel = data.funnel.length ? data.funnel : [{ segment: "nobody yet" }];
   const opt = (name, value, label) => (String(value) === String(name === "by" ? by : days) ? `<b>${label}</b>` : `<a href="/admin?${new URLSearchParams({ days, by, [name]: value })}">${label}</a>`);
-  const tiles = [["Visitors", totals.visitors], ["Connected to MCP", totals.connected], ["Active agents", totals.active], ["Tool calls", totals.calls], ["Questions asked", totals.questions]]
+  const tiles = [["Visitors", totals.visitors], ["Connected to MCP", totals.connected], ["Active agents", totals.active], ["Tool calls", totals.calls], ["Questions asked", totals.questions], ["On the waitlist", waitlist.totals.total]]
     .map(([l, v]) => `<div class="tile"><div class="v">${n(v)}</div><div class="l">${l}</div></div>`).join("");
+  const wl = waitlist.rows, wt = waitlist.totals;
+  const picks = waitlist.communities.map((c) => `<span class="pick">${esc(c.community)} <b>${n(c.picks)}</b></span>`).join(" ") || '<span class="legend">no picks yet</span>';
+  const waitlistRows = wl.map((r) => `<tr><td class="mono">${when(r.created)}</td><td><a href="mailto:${esc(r.email)}">${esc(r.email)}</a></td><td>${r.communities.map(esc).join(", ") || '<span class="legend">–</span>'}</td><td class="mono">${r.code ? esc(r.code) : ""}</td><td>${r.joins > 1 ? `<span class="legend">${n(r.joins)}×</span>` : ""}</td></tr>`).join("")
+    || "<tr><td colspan=5>nobody yet</td></tr>";
   return `<!doctype html><html><head><meta charset="utf-8"><title>LETTIT journey</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>:root{--ink:#111;--muted:#667;--line:#e5e7eb;--bg:#fff;--card:#fafafa}@media(prefers-color-scheme:dark){:root{--ink:#eee;--muted:#9aa;--line:#333;--bg:#111;--card:#1a1a1a}}
 body{font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg);max-width:1100px;margin:24px auto;padding:0 16px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:28px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
@@ -369,10 +373,13 @@ body{font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink)
 .funnel{display:grid;gap:10px}.seg{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.seg h3{margin:0 0 8px;font-size:14px}.step{display:grid;grid-template-columns:170px 1fr 90px;gap:10px;align-items:center;margin:4px 0;font-size:13px}.step .track{background:var(--line);border-radius:4px;height:14px;overflow:hidden}.step .fill{height:100%;border-radius:0 4px 4px 0;background:${INK.human}}.seg.agent .fill{background:${INK.agent}}.step .num{text-align:right;color:var(--muted)}
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.chart{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.chart h3{margin:0 0 6px;font-size:14px}.legend{font-size:12px;color:var(--muted)}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px;vertical-align:-1px}
 svg{width:100%;height:auto;display:block}svg text{font-size:10px;fill:var(--muted)}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--muted);font-weight:500;border-bottom:1px solid var(--line);padding:6px 8px 6px 0}td{border-bottom:1px solid var(--line);padding:6px 8px 6px 0;vertical-align:top}td.q{max-width:260px}td.a{max-width:420px;color:var(--muted);white-space:pre-wrap;word-break:break-word}.ok{color:#059669}.err{color:#dc2626}.mono{font-family:ui-monospace,monospace;font-size:12px}
-details summary{cursor:pointer;color:var(--muted)}</style></head><body>
+details summary{cursor:pointer;color:var(--muted)}.pick{display:inline-block;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:2px 10px;margin:0 4px 6px 0;font-size:12px}.pick b{color:var(--muted);font-weight:500}h2 .legend{text-transform:none;letter-spacing:0;margin-left:8px}h2 a{color:#2563eb;text-decoration:none;font-weight:400;text-transform:none;letter-spacing:0;margin-left:8px;font-size:13px}</style></head><body>
 <h1>LETTIT journey</h1>
 <div class="bar"><span>last ${opt("days", 7, "7")} · ${opt("days", 30, "30")} · ${opt("days", 90, "90")} days</span><span>funnel by ${opt("by", "visitor", "visitor")} · ${opt("by", "client", "client")} · ${opt("by", "transport", "transport")}</span><span><a href="/">board</a></span></div>
 <div class="tiles">${tiles}</div>
+<h2>Waitlist <span class="legend">${n(wt.total)} total · ${n(wt.recent)} in the last ${days} days · ${n(wt.with_code)} with an invite code</span>${wt.total ? `<a href="/admin?export=waitlist">download CSV</a>` : ""}</h2>
+<div>${picks}</div>
+<table><tr><th>joined</th><th>email</th><th>communities</th><th>invite code</th><th></th></tr>${waitlistRows}</table>${wl.length >= 200 ? `<p class="legend">Showing the newest 200; the CSV has everyone.</p>` : ""}
 <h2>Funnel by ${esc(by)}</h2>
 <div class="funnel">${funnel.map((r) => funnelSeg(r, steps)).join("")}</div>
 <h2>Last ${days} days</h2>
