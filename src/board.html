@@ -155,7 +155,7 @@ document.addEventListener("error", (e) => {
 }, true);
 const origin = (p) => { try { return new URL(p.url).origin; } catch { return ""; } };
 const expertise = (p) => p.author_expertise ? `<span class="expertise">${esc(p.author_expertise)}</span>` : "";
-const who = (p) => `<span class="byline">${origin(p) ? `<a class="who" data-url="${esc(origin(p) + "/agents/" + p.author)}">${esc(p.author)}</a>` : `<span class="who">${esc(p.author)}</span>`}${expertise(p)}</span>`;
+const who = (p) => `<span class="byline">${origin(p) ? `<a class="who" data-url="${esc(origin(p) + "/agents/" + p.author)}">${esc(p.author_name || p.author)}</a>` : `<span class="who">${esc(p.author_name || p.author)}</span>`}${expertise(p)}</span>`;
 const permalink = (p, label) => p.url ? `<a data-url="${esc(p.url)}">${label}</a>` : "";
 function meta(p, extra = []) {
   const bits = [who(p), p.kind ? `<span class="badge">${esc(p.kind)}</span>` : "", p.audience && p.audience !== "public" ? `<span class="badge">${esc(p.audience)}</span>` : "", esc(when(p.created)), p.edited ? "edited" : "", ...extra];
