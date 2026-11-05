@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import * as db from "./store.js";
 import { mcpMessage } from "./remote.js";
 import * as html from "./html.js";
+import * as adminHtml from "./admin-html.js";
 import { setupPrompt, starterPrompt } from "./prompt.js";
 import { joinPrompt, joinLinks } from "./join.js";
 import { seed } from "./seed.js";
@@ -376,7 +377,7 @@ async function reportMcp(who, signIn, one, r, duration_ms) {
   const name = String(one.params?.name || "");
   const text = (r?.result?.content || []).map((c) => c.text).filter(Boolean).join("\n") || (r?.error ? r.error.message : "");
   const ok = !r?.error && r?.result?.isError !== true;
-  await use(who, { tool: name, kind: WRITES.has(name) ? "write" : "read", transport: "hosted", via: signIn.via, client, input: one.params?.arguments, answer: text, ok, duration_ms, error: ok ? undefined : text });
+  await use(who, { tool: name, kind: WRITES.has(name) ? "write" : "read", transport: "hosted", via: signIn.via, client, input: one.params?.arguments, answer: text, ok, status: ok ? 200 : r?.result?._meta?.status || r?.error?.code || 500, duration_ms, error: ok ? undefined : text });
 }
 // One tool call by an identified agent: the event, and the use count with its two one-time milestones.
 async function use(agentId, p) {
@@ -591,7 +592,7 @@ async function consolePost(req, res, section, action, s, who, b) {
   if (section === "logout") { await db.dropSession(token); return redirect(res, "/", cookieHeader("", 0)); }
   if (section === "me" && action === "attach") { await db.attachFromSession(token, String(b.key || "")); return redirect(res, "/me"); }
   if (section === "me" && action === "account") return accountPost(req, res, b, who);
-  if (section === "me" && !action) { await db.updateFromSession(token, { operator: b.operator, contact: b.contact, description: b.description }); return redirect(res, "/me/profile"); }
+  if (section === "me" && !action) { await db.updateFromSession(token, { operator: b.operator, contact: b.contact, description: b.description, expertise: b.expertise }); return redirect(res, "/me/profile"); }
   if (section === "me" && action === "rotate") { const r = await db.rotateFromSession(token); return page(res, 200, html.rotated({ agent: r, key: r.key, who })); }
   if (section === "me" && action === "connector") {
     const r = await db.rotateFromSession(token);
@@ -686,13 +687,23 @@ async function waitlistCsv(req, res) {
   res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="waitlist.csv"', "cache-control": "no-store" });
   return res.end(await db.waitlistCsv());
 }
+// The overview and its sub pages. days and by are read on every page and carried into every link between them.
+const ADMIN_PAGES = {
+  acquisition: (o) => db.adminAcquisition(o), waitlist: (o) => db.adminWaitlist(o), agents: (o, url) => db.adminAgents({ q: url.searchParams.get("q") || "", sort: url.searchParams.get("sort") || "uses" }),
+  content: (o) => db.adminContent(o), search: (o) => db.adminSearch(o), tools: (o) => db.adminTools(o), auth: (o) => db.adminAuth(o), retention: () => db.adminRetention(),
+};
 async function adminPage(req, res, url) {
+  const name = url.pathname.slice("/admin".length).replace(/^\//, "");
+  if (name && !ADMIN_PAGES[name]) return page(res, 404, html.notFound(null));
   if (!(await adminAuth(req, res))) return;
-  const days = Math.min(365, Math.max(1, num(url.searchParams.get("days"), 30)));
+  const days = [7, 30, 90].includes(num(url.searchParams.get("days"), 30)) ? num(url.searchParams.get("days"), 30) : 30;
   const by = ["visitor", "client", "transport"].includes(url.searchParams.get("by")) ? url.searchParams.get("by") : "visitor";
-  const [data, waitlist] = await Promise.all([db.dashboard({ days, by }), db.listWaitlist()]);
+  const base = baseUrl(req);
+  let out;
+  if (!name) out = adminHtml.overview({ data: await db.adminOverview({ days, by }), base, sim: { enabled: Boolean(process.env.LETTIT_SIM_EVERY) } });
+  else out = adminHtml[name]({ data: await ADMIN_PAGES[name]({ days, by }, url), days, by, base });
   res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-  return res.end(html.admin({ data, waitlist, base: baseUrl(req) }));
+  return res.end(out);
 }
 
 // Console actions call the same store functions the API does.
@@ -718,8 +729,8 @@ export const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith("/.well-known/oauth-")) return json(res, 200, oauth.discovery(baseUrl(req), url.pathname.split("/")[2]));
     if (url.pathname.startsWith("/oauth/")) return await oauth.handle(req, res, url, { json, page, readBody, readForm, tokenOf, baseUrl, html, whoOf, redirect });
     if (url.pathname.startsWith("/i/") && ["GET", "HEAD"].includes(req.method)) return await imageFile(req, res, url.pathname.slice(3));
-    if (url.pathname === "/admin") return await adminPage(req, res, url);
     if (url.pathname === "/admin/waitlist.csv") return await waitlistCsv(req, res);
+    if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return await adminPage(req, res, url);
     if (url.pathname.startsWith("/api/")) { res.pretty = url.searchParams.get("pretty") === "1"; return await apiTracked(req, res, url); }
     try { return await site(req, res, url); } catch (e) {
       if (!e.status || e.status >= 500) throw e;

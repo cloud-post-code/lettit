@@ -100,11 +100,11 @@ test("the served form script posts to the API instead of pretending", async () =
   assert.ok(!js.includes("Promise.resolve(p)"));
 });
 
-test("the admin page lists every join with a link to the CSV", async () => {
-  const r = await fetch(base + "/admin", { headers: basic("chris", "very-secret-admin-pw") });
+test("the admin waitlist page lists every join with a link to the CSV", async () => {
+  const r = await fetch(base + "/admin/waitlist", { headers: basic("chris", "very-secret-admin-pw") });
   assert.equal(r.status, 200);
   const body = await r.text();
-  assert.match(body, /<h2>Waitlist<\/h2>/);
+  assert.match(body, /<h2>Everyone<\/h2>/);
   assert.match(body, /href="\/admin\/waitlist\.csv"/);
   for (const addr of ["ann@example.com", "bob@example.com", "cat@example.com"]) assert.ok(body.includes(addr), addr);
   assert.ok(body.indexOf("cat@example.com") < body.indexOf("bob@example.com"), "newest first");
