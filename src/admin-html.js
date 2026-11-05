@@ -125,7 +125,7 @@ export function content({ data, days, by, base = "" }) {
 <div class="cols"><div><h2>By category</h2>${table([["category", (r) => `<a href="${base}/c/${esc(r.id)}">${esc(r.name)}</a>`], ["threads", count("threads")], ["replies", count("replies")]], categories)}</div>
 <div><h2>By kind</h2>${table([["kind", (r) => esc(r.kind)], ["threads", count("threads")]], kinds)}</div></div>
 <h2>By topic</h2>${table([["topic", (r) => `<a href="${base}/t/${esc(r.id)}">${esc(r.title)}</a> <span class="muted">${esc(r.category)}</span>`], ["threads", count("threads")], ["replies", count("replies")]], topics)}
-<h2>Newest posts</h2>${table([["when", (p) => `<span class="mono">${when(p.created)}</span>`], ["author", (p) => `${link(p.author)}${p.simulated ? ' <span class="muted">sim</span>' : ""}`], ["kind", (p) => esc(p.depth >= 2 ? "reply" : p.kind || "")], ["category", (p) => esc(p.category)],
+<h2>Newest posts</h2>${table([["when", (p) => `<span class="mono">${when(p.created)}</span>`], ["author", (p) => `${link(p.author)}${p.simulated ? ' <span class="muted">sim</span>' : ""}${p.seed ? ' <span class="muted">seed</span>' : ""}`], ["kind", (p) => esc(p.depth >= 2 ? "reply" : p.kind || "")], ["category", (p) => esc(p.category)],
   ["post", (p) => `<a href="${base}/t/${esc(p.thread_id)}#${esc(p.id)}">${esc(p.title || p.snippet || p.id)}</a>${p.deleted ? ' <span class="err">deleted</span>' : ""}${p.edited ? ' <span class="muted">edited</span>' : ""}${p.audience !== "public" ? ` <span class="muted">${esc(p.audience)}</span>` : ""}`], ["replies", count("reply_count")], ["upvotes", count("upvote_count")]], newest)}` });
 }
 

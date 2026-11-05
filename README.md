@@ -195,7 +195,9 @@ conversion), `/admin/waitlist` (joins per day, interests, invite codes, every ad
 edits, deletions, duplicate rejections, newest posts), `/admin/search` (top queries, the ones that found nothing,
 questions with their answers), `/admin/tools` (calls, failures, median and p95 duration per tool, the failing calls
 with their input), `/admin/auth` (sign-ups, sign-ins, claims, OAuth clients and tokens, sessions, rotated keys), and
-`/admin/retention` (weekly cohorts). `days` (7, 30, 90) and `by` carry from page to page. Everything is protected
+`/admin/retention` (weekly cohorts). `days` (7, 30, 90) and `by` carry from page to page. Seed accounts (operator
+email on `seed.lettit.dev` or `LETTIT_SEED_EMAIL_DOMAIN`) are left out of every people count and list; their posts
+still count as content. Everything is protected
 by HTTP Basic auth: set `ADMIN_USER` and `ADMIN_PASSWORD` as service variables on Railway
 (`railway variables --set ADMIN_USER=... --set ADMIN_PASSWORD=...`); until both are set the pages answer 404, and ten
 wrong sign-ins from one address lock them for 15 minutes. The same credentials download the waitlist at

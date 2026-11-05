@@ -5,11 +5,19 @@ import { STEPS, BREAKDOWNS } from "./analytics.js";
 
 // Events between $1 and $2 days ago (the current window is [$1, 0], the one before it [$1*2, $1]), with every
 // anonymous visitor resolved to the agent it was merged into ($identify).
+// Seed accounts are not real agents: an operator email on the seed domain (seed.lettit.dev, and the domain the
+// hosted seed used when LETTIT_SEED_EMAIL_DOMAIN names one) keeps the agent, its events, its tokens, its sessions,
+// and its waitlist row out of every people-centric number and list. Its posts still count as content.
+const DOMAIN_OK = /^[a-z0-9.-]+$/i;
+export const SEED_DOMAINS = [...new Set(["seed.lettit.dev", process.env.LETTIT_SEED_EMAIL_DOMAIN].filter((d) => d && DOMAIN_OK.test(d)))];
+const seedEmail = (col) => `${col} ~* '@(${SEED_DOMAINS.map((d) => d.replace(/\./g, "\\.")).join("|")})$'`;
+const SEED_AGENTS = `(select id from agents where ${seedEmail("operator_email")})`;
+
 // One agent per anonymous id (the first it was merged into): a shared anonymous id, such as a seed script's, must
 // not multiply every event it produced by the number of agents it claimed.
 const E = `with alias as (select distinct on (properties->>'$anon_distinct_id') properties->>'$anon_distinct_id' as anon, distinct_id as agent from events where event = '$identify' and properties->>'$anon_distinct_id' is not null order by 1, created),
 e as (select coalesce(a.agent, ev.distinct_id) as person, ev.event, ev.properties, ev.created from events ev left join alias a on a.anon = ev.distinct_id
-  where ev.created > now() - ($1::int || ' days')::interval and ev.created <= now() - ($2::int || ' days')::interval)`;
+  where ev.created > now() - ($1::int || ' days')::interval and ev.created <= now() - ($2::int || ' days')::interval and coalesce(a.agent, ev.distinct_id) not in ${SEED_AGENTS})`;
 const win = (a = "") => `${a}created > now() - ($1::int || ' days')::interval and ${a}created <= now() - ($2::int || ' days')::interval`;
 const WIN = win();
 const num = (r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v]));
@@ -44,7 +52,7 @@ async function health() {
     (select count(*) from events where event = 'tool_called' and created > now() - interval '24 hours' and (properties->>'ok')::boolean = false) as failed_24h,
     (select count(*) from sim_runs where started > now() - interval '24 hours') as sim_runs_24h,
     (select max(started) from sim_runs) as sim_last,
-    (select count(*) from agents) as agents,
+    (select count(*) from agents where id not in ${SEED_AGENTS}) as agents,
     (select count(*) from posts where deleted is null) as live_posts`);
   const backfill = await one("select name, week, posts, runs, done, config, updated from sim_backfill order by updated desc limit 1");
   return { ...h, backfill };
@@ -64,17 +72,17 @@ const cards = (days) => row(`${E} select
   (select count(*) from e where event = 'landing_viewed') as landing_views,
   (select count(*) from waitlist) as waitlist_total,
   (select count(*) from waitlist where ${WIN}) as waitlist_joins,
-  (select count(*) from agents) as agents_total,
-  (select count(*) from agents where last_seen > now() - ($1::int || ' days')::interval) as agents_seen,
+  (select count(*) from agents where id not in ${SEED_AGENTS}) as agents_total,
+  (select count(*) from agents where last_seen > now() - ($1::int || ' days')::interval and id not in ${SEED_AGENTS}) as agents_seen,
   (select count(*) from posts where ${WIN} and depth = 1) as threads,
   (select count(*) from posts where ${WIN} and depth >= 2) as replies,
   (select count(*) from e where event = 'search_performed' or (event = 'tool_called' and properties->>'query' is not null)) as searches,
   (select count(*) from e where event = 'tool_called' and (properties->>'ok')::boolean = false) as failed_calls,
-  (select count(*) from oauth_tokens where expires > now()) as tokens,
-  (select count(*) from sessions where expires > now()) as sessions,
-  (select count(*) from e where event in ('signed_up', 'agent_claimed')) as signups,
-  (select count(distinct date_trunc('week', at)) from agent_first_use) as cohorts,
-  (select count(*) from agent_first_use where retained_at is not null) as retained`, [days, 0]);
+  (select count(*) from oauth_tokens where expires > now() and agent_id not in ${SEED_AGENTS}) as tokens,
+  (select count(*) from sessions where expires > now() and not ${seedEmail('operator_email')}) as sessions,
+  (select count(*) from operators where ${WIN} and not ${seedEmail('email')}) + (select count(*) from agents where ${WIN} and id not in ${SEED_AGENTS}) as signups,
+  (select count(distinct date_trunc('week', at)) from agent_first_use where agent_id not in ${SEED_AGENTS}) as cohorts,
+  (select count(*) from agent_first_use where retained_at is not null and agent_id not in ${SEED_AGENTS}) as retained`, [days, 0]);
 
 export async function adminOverview({ days = 30, by = "visitor" } = {}) {
   const [now, before, h, daily, c, f] = await Promise.all([kpis(days, 0), kpis(days * 2, days), health(), pulse(days), cards(days), funnel(days, by)]);
@@ -94,11 +102,11 @@ export async function adminAcquisition({ days = 30, by = "visitor" } = {}) {
 
 export async function adminWaitlist({ days = 30 } = {}) {
   const [daily, interests, codes, totals, list] = await Promise.all([
-    rows(`select to_char(created, 'YYYY-MM-DD') as day, count(*) as joins from waitlist where ${WIN} group by 1 order by 1`, [days, 0]),
-    rows("select i as interest, count(*) as people from waitlist, unnest(interests) i group by 1 order by 2 desc, 1"),
-    rows("select coalesce(code, 'none') as code, count(*) as people from waitlist group by 1 order by 2 desc, 1"),
-    row(`select count(*) as total, count(*) filter (where ${WIN}) as joins, count(*) filter (where updated > created and updated > now() - ($1::int || ' days')::interval) as repeats, count(*) filter (where code is not null) as with_code from waitlist`, [days, 0]),
-    q("select email, code, interests, created, updated from waitlist order by created desc, email"),
+    rows(`select to_char(created, 'YYYY-MM-DD') as day, count(*) as joins from waitlist where ${WIN} and not ${seedEmail('email')} group by 1 order by 1`, [days, 0]),
+    rows(`select i as interest, count(*) as people from waitlist, unnest(interests) i where not ${seedEmail("email")} group by 1 order by 2 desc, 1`),
+    rows(`select coalesce(code, 'none') as code, count(*) as people from waitlist where not ${seedEmail("email")} group by 1 order by 2 desc, 1`),
+    row(`select count(*) as total, count(*) filter (where ${WIN}) as joins, count(*) filter (where updated > created and updated > now() - ($1::int || ' days')::interval) as repeats, count(*) filter (where code is not null) as with_code from waitlist where not ${seedEmail('email')}`, [days, 0]),
+    q(`select email, code, interests, created, updated from waitlist where not ${seedEmail("email")} order by created desc, email`),
   ]);
   return { days, daily, interests, codes, totals, list };
 }
@@ -115,9 +123,9 @@ export async function adminAgents({ q: needle = "", sort = "uses" } = {}) {
     exists (select 1 from sim_personas s where s.agent_id = a.id) as simulated,
     (select properties->>'client' from events x where x.distinct_id = a.id and x.event = 'mcp_connected' order by created desc limit 1) as client
     from agents a left join agent_first_use f on f.agent_id = a.id
-    where $1 = '' or a.id ilike '%' || $1 || '%' or a.name ilike '%' || $1 || '%' or a.operator_email ilike '%' || $1 || '%') x
+    where a.id not in ${SEED_AGENTS} and ($1 = '' or a.id ilike '%' || $1 || '%' or a.name ilike '%' || $1 || '%' or a.operator_email ilike '%' || $1 || '%')) x
     order by ${order}, id limit 500`, [String(needle).trim()]);
-  const totals = await row("select count(*) as total, count(*) filter (where exists (select 1 from sim_personas s where s.agent_id = a.id)) as simulated, count(*) filter (where last_seen > now() - interval '7 days') as seen_week from agents a");
+  const totals = await row(`select count(*) as total, count(*) filter (where exists (select 1 from sim_personas s where s.agent_id = a.id)) as simulated, count(*) filter (where last_seen > now() - interval '7 days') as seen_week from agents a where a.id not in ${SEED_AGENTS}`);
   return { q: needle, sort: AGENT_SORTS[sort] ? sort : "uses", sorts: Object.keys(AGENT_SORTS), list, totals };
 }
 
@@ -135,7 +143,7 @@ export async function adminContent({ days = 30 } = {}) {
       (select count(*) from e where event = 'tool_called' and properties->>'status' = '409') as duplicates,
       (select count(*) from upvotes where ${WIN}) as upvotes`, [days, 0]),
     rows(`select p.id, p.thread_id, p.depth, p.title, left(regexp_replace(p.body, '\\s+', ' ', 'g'), 90) as snippet, p.kind, p.feed_id as category, p.author_id as author, p.created, p.reply_count, p.upvote_count, p.deleted is not null as deleted, p.edited is not null as edited, p.audience,
-      exists (select 1 from sim_personas s where s.agent_id = p.author_id) as simulated from posts p where p.depth >= 1 order by p.created desc limit 50`),
+      exists (select 1 from sim_personas s where s.agent_id = p.author_id) as simulated, p.author_id in ${SEED_AGENTS} as seed from posts p where p.depth >= 1 order by p.created desc limit 50`),
   ]);
   return { days, categories, topics, kinds, totals, newest };
 }
@@ -173,16 +181,16 @@ export async function adminTools({ days = 30 } = {}) {
 export async function adminAuth({ days = 30 } = {}) {
   const [clients, tokens, daily, totals] = await Promise.all([
     rows("select c.client_id, c.client_name, c.token_endpoint_auth_method as auth, c.created, count(t.id) filter (where t.expires > now()) as active, count(t.id) filter (where t.expires <= now()) as expired, max(t.last_used) as last_used from oauth_clients c left join oauth_tokens t using (client_id) group by c.client_id order by 5 desc, c.created"),
-    rows("select agent_id, operator_email, count(*) filter (where expires > now()) as active, count(*) as total, max(last_used) as last_used from oauth_tokens group by 1, 2 order by 3 desc, 1 limit 50"),
+    rows(`select agent_id, operator_email, count(*) filter (where expires > now()) as active, count(*) as total, max(last_used) as last_used from oauth_tokens where agent_id not in ${SEED_AGENTS} group by 1, 2 order by 3 desc, 1 limit 50`),
     rows(`${E} select to_char(created, 'YYYY-MM-DD') as day,
       count(*) filter (where event = 'signed_up' and properties->>'method' = 'form') as signup_form, count(*) filter (where event = 'signed_up' and properties->>'method' = 'api') as signup_api,
       count(*) filter (where event = 'signed_in') as signins, count(*) filter (where event = 'agent_claimed') as claims, count(*) filter (where event = 'oauth_approved') as approvals
       from e where event in ('signed_up', 'signed_in', 'agent_claimed', 'oauth_approved') group by 1 order by 1`, [days, 0]),
     row(`${E} select
-      (select count(*) from e where event = 'signed_up') as signups, (select count(*) from e where event = 'signed_in') as signins,
-      (select count(*) from e where event = 'agent_claimed') as claims, (select count(*) from e where event = 'oauth_approved') as approvals,
-      (select count(*) from sessions where expires > now()) as sessions, (select count(*) from operators) as operators,
-      (select count(*) from oauth_tokens where expires > now()) as tokens, (select count(*) from e where event = 'tool_called' and properties->>'tool' = 'rotate_key' and (properties->>'ok')::boolean) as rotated`, [days, 0]),
+      (select count(*) from operators where ${WIN} and not ${seedEmail('email')}) as signups, (select count(*) from e where event = 'signed_in') as signins,
+      (select count(*) from agents where ${WIN} and id not in ${SEED_AGENTS}) as claims, (select count(*) from e where event = 'oauth_approved') as approvals,
+      (select count(*) from sessions where expires > now() and not ${seedEmail('operator_email')}) as sessions, (select count(*) from operators where not ${seedEmail('email')}) as operators,
+      (select count(*) from oauth_tokens where expires > now() and agent_id not in ${SEED_AGENTS}) as tokens, (select count(*) from e where event = 'tool_called' and properties->>'tool' = 'rotate_key' and (properties->>'ok')::boolean) as rotated`, [days, 0]),
   ]);
   return { days, clients, tokens, daily, totals };
 }
@@ -192,6 +200,6 @@ export async function adminAuth({ days = 30 } = {}) {
 export async function adminRetention() {
   const used = (n) => `count(*) filter (where exists (select 1 from agent_usage u where u.agent_id = f.agent_id and u.week = (date_trunc('week', f.at)::date + ${n * 7})))`;
   const cohorts = await rows(`select to_char(date_trunc('week', f.at), 'YYYY-MM-DD') as week, count(*) as size, ${used(1)} as w1, ${used(2)} as w2, ${used(4)} as w4,
-    count(*) filter (where f.retained_at is not null) as retained from agent_first_use f group by date_trunc('week', f.at) order by 1 desc limit 26`);
+    count(*) filter (where f.retained_at is not null) as retained from agent_first_use f where f.agent_id not in ${SEED_AGENTS} group by date_trunc('week', f.at) order by 1 desc limit 26`);
   return { cohorts };
 }

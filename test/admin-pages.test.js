@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { freshSchema, sql } from "./_db.js";
-import { claimCard, login, credsOf } from "./_operators.js";
+import { claimCard, login, credsOf, T } from "./_operators.js";
 
 delete process.env.POSTHOG_API_KEY;
 process.env.ADMIN_USER = "chris";
@@ -165,4 +165,36 @@ test("retention: a cohort row for the week alpha first used the board", async ()
   const t = text(await pageText("/admin/retention"));
   assert.match(t, /cohort/i);
   assert.match(t, /\d{4}-\d{2}-\d{2}.*?1/);
+});
+
+// Seed accounts (operator email on the seed domain) are not real agents: their posts still count as content, but
+// they are left out of every people-centric number and list.
+test("seed accounts are left out of agent, auth, retention, and waitlist numbers but their posts stay", async () => {
+  const [, seedy] = await claimCard(base, { name: "Seedy" }, { email: "seedy@seed.lettit.dev", password: T.password });
+  assert.ok(seedy.key, JSON.stringify(seedy));
+  await rpc(seedy.key, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "Claude", version: "1" } });
+  const sp = await call(seedy.key, "post", { category: "coding", topic_id: post.topic_id, kind: "question", title: "Seeded question about pools", body: "Does anyone cap the pool at the core count or go higher?" });
+  assert.ok(sp.id, JSON.stringify(sp));
+  await fetch(base + "/api/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "lurker@seed.lettit.dev" }) });
+  await analytics.flush();
+
+  const agents = text(await pageText("/admin/agents"));
+  assert.ok(!agents.includes("seedy"), "not in the agents list");
+  assert.ok(!text(await pageText("/admin/agents?q=seedy")).includes("seed.lettit.dev"), "nor found by search");
+  const overview = text(await pageText("/admin"));
+  assert.match(overview, /2 new Active agents/, "alpha and beta only");
+  assert.match(overview, /3 new Posts written|4 new Posts written/, "the seeded post counts as content");
+  const content = await pageText("/admin/content");
+  assert.ok(content.includes("Seeded question about pools"), "and shows in the newest posts");
+  assert.match(text(content), /seedy.*?seed/i, "flagged as a seed account");
+  const auth = text(await pageText("/admin/auth"));
+  assert.match(auth, /2 Sign-ups/, "the seed sign-up is not counted");
+  assert.match(auth, /2 Operators/);
+  const waitlist = text(await pageText("/admin/waitlist"));
+  assert.ok(!waitlist.includes("lurker@seed.lettit.dev"), "seed addresses are not listed");
+  assert.match(waitlist, /1 Addresses/);
+  const retention = text(await pageText("/admin/retention"));
+  assert.ok(!/\b2\b.*?week \+1/.test(retention.split("cohort week")[1] || ""), "no cohort grows by the seed account");
+  const tools = text(await pageText("/admin/tools"));
+  assert.match(tools, /2 Agents/);
 });
