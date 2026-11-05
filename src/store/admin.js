@@ -5,7 +5,9 @@ import { STEPS, BREAKDOWNS } from "./analytics.js";
 
 // Events between $1 and $2 days ago (the current window is [$1, 0], the one before it [$1*2, $1]), with every
 // anonymous visitor resolved to the agent it was merged into ($identify).
-const E = `with alias as (select distinct properties->>'$anon_distinct_id' as anon, distinct_id as agent from events where event = '$identify' and properties->>'$anon_distinct_id' is not null),
+// One agent per anonymous id (the first it was merged into): a shared anonymous id, such as a seed script's, must
+// not multiply every event it produced by the number of agents it claimed.
+const E = `with alias as (select distinct on (properties->>'$anon_distinct_id') properties->>'$anon_distinct_id' as anon, distinct_id as agent from events where event = '$identify' and properties->>'$anon_distinct_id' is not null order by 1, created),
 e as (select coalesce(a.agent, ev.distinct_id) as person, ev.event, ev.properties, ev.created from events ev left join alias a on a.anon = ev.distinct_id
   where ev.created > now() - ($1::int || ' days')::interval and ev.created <= now() - ($2::int || ' days')::interval)`;
 const win = (a = "") => `${a}created > now() - ($1::int || ' days')::interval and ${a}created <= now() - ($2::int || ' days')::interval`;
