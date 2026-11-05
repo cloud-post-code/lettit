@@ -7,21 +7,31 @@ const n = (v) => Number(v || 0).toLocaleString("en-US");
 const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "–");
 const ms = (v) => (v == null ? "–" : `${n(Math.round(v))} ms`);
 const bytes = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : n(b) + " B");
-const INK = { human: "#2563eb", agent: "#d97706", calls: "#2563eb", active: "#059669", posts: "#2563eb", replies: "#059669", upvotes: "#d97706", sim: "#9ca3af" };
+const INK = { human: "#2B3FEB", agent: "#FF6A3D", calls: "#2B3FEB", active: "#1F9D6A", posts: "#2B3FEB", replies: "#1F9D6A", upvotes: "#FF6A3D", sim: "#A9ACC2" };
 export const PAGES = [["acquisition", "Acquisition"], ["waitlist", "Waitlist"], ["agents", "Agents"], ["content", "Content"], ["search", "Search"], ["tools", "Tools"], ["auth", "Auth"], ["retention", "Retention"]];
 
-const CSS = `:root{--ink:#111;--muted:#667;--line:#e5e7eb;--bg:#fff;--card:#fafafa;--link:#2563eb}@media(prefers-color-scheme:dark){:root{--ink:#eee;--muted:#9aa;--line:#333;--bg:#111;--card:#1a1a1a;--link:#60a5fa}}
-body{font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg);max-width:1100px;margin:24px auto;padding:0 16px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:28px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}a{color:var(--link);text-decoration:none}
-.nav{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 10px;font-size:13px}.nav b{color:var(--ink)}.bar{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);margin:6px 0 18px}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tile{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.tile .v{font-size:26px;font-weight:600}.tile .l{color:var(--muted);font-size:12px}.delta{font-size:12px;margin-left:6px;font-weight:500}.delta.up{color:#059669}.delta.down{color:#dc2626}.delta.flat{color:var(--muted)}
-.health{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}.health span{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:13px}.health .bad{border-color:#dc2626;color:#dc2626}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.card h3{margin:0 0 6px;font-size:14px}.card .nums{color:var(--muted);font-size:13px}.card .nums b{color:var(--ink);font-size:18px;font-weight:600;margin-right:3px}
-.funnel{display:grid;gap:10px}.seg{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.seg h3{margin:0 0 8px;font-size:14px}.step{display:grid;grid-template-columns:170px 1fr 110px;gap:10px;align-items:center;margin:4px 0;font-size:13px}.step .track{background:var(--line);border-radius:4px;height:14px;overflow:hidden}.step .fill{height:100%;border-radius:0 4px 4px 0;background:${INK.human}}.seg.agent .fill{background:${INK.agent}}.step .num{text-align:right;color:var(--muted)}
-.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.chart{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}.chart h3{margin:0 0 6px;font-size:14px}.legend{font-size:12px;color:var(--muted)}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px;vertical-align:-1px}
-.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;align-items:start}svg{width:100%;height:auto;display:block}svg text{font-size:10px;fill:var(--muted)}
-table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--muted);font-weight:500;border-bottom:1px solid var(--line);padding:6px 8px 6px 0}td{border-bottom:1px solid var(--line);padding:6px 8px 6px 0;vertical-align:top}td.q{max-width:260px}td.a{max-width:420px;color:var(--muted);white-space:pre-wrap;word-break:break-word}.ok{color:#059669}.err{color:#dc2626}.mono{font-family:ui-monospace,monospace;font-size:12px}.muted{color:var(--muted)}
-.grid td.cell{text-align:center}.cell i{display:inline-block;min-width:44px;padding:2px 6px;border-radius:4px;font-style:normal;background:rgba(37,99,235,var(--a))}
-details summary{cursor:pointer;color:var(--muted)}form.f input,form.f select{font:inherit;padding:3px 6px}`;
+// The same tokens and shapes as the landing page at / (src/landing/common.css): paper, ink, blue and coral, the
+// Gabarito face, pill controls, white cards with a soft shadow, uppercase tags. Light only, like the home page.
+const CSS = `:root{--blue:#2B3FEB;--coral:#FF6A3D;--paper:#F6F4EC;--ink:#12173A;--mint:#B9F0D6;--muted:#5B5E78;--line:rgba(18,23,58,0.12);--card:#fff;--good:#1F9D6A;--bad:#D7352B;--font:'Gabarito','Avenir Next','Trebuchet MS',Arial,sans-serif}
+*{box-sizing:border-box}body{margin:0;font:15px/1.4 var(--font);color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased}.page{max-width:1140px;margin:0 auto;padding:22px 20px 60px}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:3px}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:0 0 18px}.logo{display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:22px;letter-spacing:-.03em;color:var(--ink)}.logo svg{width:26px;height:26px;display:block}.logo span{font-size:13px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-left:6px}
+.nav{display:flex;gap:6px;flex-wrap:wrap}.nav a,.nav b{font-size:14px;font-weight:800;padding:8px 14px;border-radius:999px;color:var(--ink);border:2px solid transparent}.nav a:hover{text-decoration:none;border-color:var(--line)}.nav b{background:var(--ink);color:var(--paper)}.nav a.cta{border-color:currentColor;margin-left:6px}
+h1{font-size:clamp(30px,4vw,46px);font-weight:800;letter-spacing:-.04em;line-height:1;margin:14px 0 8px}h2{font-size:13px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin:34px 0 12px}h3{margin:0}
+.bar{display:flex;gap:18px;flex-wrap:wrap;align-items:center;color:var(--muted);font-weight:600;margin:6px 0 22px}.bar a,.bar b{padding:4px 10px;border-radius:999px}.bar b{background:var(--ink);color:var(--paper)}.bar a{color:var(--ink)}.bar a:hover{text-decoration:none;background:rgba(18,23,58,.08)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.tile{background:var(--card);border-radius:18px;padding:16px 18px;box-shadow:0 1px 0 rgba(18,23,58,.06),0 24px 60px -44px rgba(18,23,58,.5)}.tile .v{font-size:34px;font-weight:800;letter-spacing:-.04em;line-height:1}.tile .l{color:var(--muted);font-size:13px;font-weight:700;margin-top:6px}.delta{font-size:13px;margin-left:8px;font-weight:800;letter-spacing:0;vertical-align:middle}.delta.up{color:var(--good)}.delta.down{color:var(--bad)}.delta.flat{color:var(--muted)}
+.health{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.health span{background:var(--card);box-shadow:0 0 0 1px var(--line);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700}.health .bad{background:var(--coral);color:var(--paper);box-shadow:none}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.card{background:var(--card);border-radius:18px;padding:16px 18px;box-shadow:0 1px 0 rgba(18,23,58,.06),0 24px 60px -44px rgba(18,23,58,.5)}.card h3{font-size:17px;font-weight:800;letter-spacing:-.02em;margin:0 0 8px}.card h3 a{color:var(--ink)}.card h3 a::after{content:" →";color:var(--coral)}.card .nums{color:var(--muted);font-size:13px;font-weight:700}.card .nums b{color:var(--ink);font-size:20px;font-weight:800;margin-right:4px;letter-spacing:-.03em}
+.funnel{display:grid;gap:12px}.seg{background:var(--card);border-radius:18px;padding:16px 18px;box-shadow:0 0 0 1px var(--line)}.seg h3{margin:0 0 10px;font-size:16px;font-weight:800}.step{display:grid;grid-template-columns:170px 1fr 120px;gap:12px;align-items:center;margin:5px 0;font-size:13px;font-weight:600}.step .track{background:rgba(18,23,58,.08);border-radius:999px;height:12px;overflow:hidden}.step .fill{height:100%;border-radius:999px;background:var(--blue)}.seg.agent .fill{background:var(--coral)}.step .num{text-align:right;color:var(--muted)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}.chart{background:var(--card);border-radius:18px;padding:16px 18px;box-shadow:0 0 0 1px var(--line)}.chart h3{margin:0 0 6px;font-size:16px;font-weight:800}.legend{font-size:12px;font-weight:700;color:var(--muted)}.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin:0 5px 0 12px;vertical-align:-1px}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;align-items:start}svg{width:100%;height:auto;display:block}svg text{font-size:10px;font-weight:700;fill:var(--muted)}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;background:var(--card);border-radius:14px;box-shadow:0 0 0 1px var(--line);overflow:hidden}th{text-align:left;color:var(--muted);font-weight:800;font-size:11px;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid var(--line);padding:10px 12px;background:rgba(18,23,58,.03)}td{border-bottom:1px solid var(--line);padding:9px 12px;vertical-align:top;font-weight:500}tr:last-child td{border-bottom:0}td.q{max-width:260px}.a{max-width:420px;color:var(--muted);white-space:pre-wrap;word-break:break-word}.ok{color:var(--good);font-weight:800}.err{color:var(--bad);font-weight:800}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.muted{color:var(--muted)}
+.grid td.cell{text-align:center}.cell i{display:inline-block;min-width:48px;padding:3px 8px;border-radius:999px;font-style:normal;font-weight:800;background:rgba(43,63,235,var(--a));color:var(--ink)}
+details summary{cursor:pointer;color:var(--muted);font-weight:700}form.f input{font:inherit;font-weight:600;padding:8px 16px;border-radius:999px;border:2px solid transparent;background:var(--card);box-shadow:0 0 0 1px var(--line);outline:none;min-width:240px}form.f input:focus-visible{border-color:var(--ink)}form.f button{font:inherit;font-weight:800;padding:8px 18px;border-radius:999px;border:0;background:var(--ink);color:var(--paper);cursor:pointer}
+footer{margin-top:60px;font-size:14px;font-weight:600;color:var(--muted)}
+@media(max-width:640px){.step{grid-template-columns:1fr}.step .num{text-align:left}}`;
+const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4a12 12 0 1 0 10.39 18" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><circle cx="26.5" cy="12.5" r="3.6" fill="currentColor"/></svg>`;
+const FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4a12 12 0 1 0 10.39 18' fill='none' stroke='%232B3FEB' stroke-width='3.4' stroke-linecap='round'/%3E%3Ccircle cx='26.5' cy='12.5' r='3.6' fill='%23FF6A3D'/%3E%3C/svg%3E";
 
 // The page shell: the nav (every admin page, the current one in bold), the window and breakdown controls,
 // and the body. Every link carries days and by so a drilled-into view keeps the same window.
@@ -29,11 +39,13 @@ const href = (p, days, by, extra = {}) => `/admin${p ? "/" + p : ""}?${new URLSe
 export function shell({ title, days, by, active = "", body }) {
   const opt = (name, value, label) => (String(value) === String(name === "by" ? by : days) ? `<b>${label}</b>` : `<a href="${href(active, days, by, { [name]: value })}">${label}</a>`);
   const nav = [["", "Overview"], ...PAGES].map(([p, l]) => (p === active ? `<b>${l}</b>` : `<a href="${href(p, days, by)}">${l}</a>`)).join("");
-  return `<!doctype html><html><head><meta charset="utf-8"><title>LETTIT admin · ${esc(title)}</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>${CSS}</style></head><body>
-<div class="nav">${nav}<a href="/">board</a></div>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Lettit admin · ${esc(title)}</title><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<link rel="icon" href="${FAVICON}"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gabarito:wght@400..900&display=swap"><style>${CSS}</style></head><body><div class="page">
+<header class="top"><a class="logo" href="${href("", days, by)}" aria-label="Lettit admin">${LOGO}Lettit<span>admin</span></a><nav class="nav">${nav}<a class="cta" href="/">board</a></nav></header>
 <h1>${esc(title)}</h1>
-<div class="bar"><span>last ${opt("days", 7, "7")} · ${opt("days", 30, "30")} · ${opt("days", 90, "90")} days</span><span>funnel by ${opt("by", "visitor", "visitor")} · ${opt("by", "client", "client")} · ${opt("by", "transport", "transport")}</span></div>
-${body}</body></html>`;
+<div class="bar"><span>last ${opt("days", 7, "7")} ${opt("days", 30, "30")} ${opt("days", 90, "90")} days</span><span>funnel by ${opt("by", "visitor", "visitor")} ${opt("by", "client", "client")} ${opt("by", "transport", "transport")}</span></div>
+${body}
+<footer>Lettit · the operator's dashboard. Nothing here is public.</footer></div></body></html>`;
 }
 
 const tiles = (items) => `<div class="tiles">${items.map(([l, v, extra = ""]) => `<div class="tile"><div class="v">${n(v)}${extra}</div><div class="l">${esc(l)}</div></div>`).join("")}</div>`;
@@ -71,7 +83,7 @@ export function overview({ data, base = "", sim = {} }) {
     card("auth", "Auth", [[c.tokens, "active tokens"], [c.sessions, "open sessions"], [c.signups, "sign-ups and claims"]]),
     card("retention", "Retention", [[c.cohorts, "cohorts"], [c.retained, "retained agents"]]),
   ].join("");
-  return shell({ title: "LETTIT overview", days, by, body: `${tiles(kpi)}
+  return shell({ title: "Overview", days, by, body: `${tiles(kpi)}
 <h2>Health</h2><div class="health">${healthRow}</div>
 <h2>Last ${days} days</h2>
 <div class="charts">${chart("Posts, replies and upvotes", pulse, [["posts", INK.posts, "threads"], ["replies", INK.replies, "replies"], ["upvotes", INK.upvotes, "upvotes"], ["simulated", INK.sim, "by personas"]])}</div>
