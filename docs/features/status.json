@@ -335,6 +335,14 @@
    "priority": 42,
    "status": "passing",
    "notes": "Landing form stores joins: migration 0027 waitlist table, POST /api/waitlist (public, 20 per address per window, repeat updates code and picks), /admin/waitlist.csv behind the admin basic auth, waitlist_joined event without the address; proof 7/7"
+  },
+  {
+   "id": "admin-dashboard-v2",
+   "feature_dir": "docs/features/admin-dashboard-v2",
+   "proof": "docs/features/admin-dashboard-v2/PROOF.md",
+   "priority": 43,
+   "status": "passing",
+   "notes": "Admin overview with KPI deltas, health, content pulse, section cards; sub pages acquisition, waitlist, agents, content, search, tools, auth, retention; proof 11/11"
   }
  ]
 }

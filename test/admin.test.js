@@ -79,10 +79,12 @@ test("one journey shows up in the funnel, the breakdowns, the questions, and the
   // Funnel by visitor: the human reached steps 1-4; the curl agent only step 1.
   assert.match(t, /human.*?Sees landing page.*?1.*?Connected to MCP.*?1.*?First read or write.*?1.*?Back after one week.*?1.*?50 uses in a week.*?0/s);
   assert.match(t, /agent.*?Sees landing page.*?1.*?Connected to MCP.*?0/s);
-  assert.ok(page.includes("how do I pool postgres connections"), "the question is listed");
-  assert.ok(page.includes("No Results Match"), "with the answer it got");
-  assert.ok(page.includes("t-journey"), "attached to the agent");
   assert.ok(page.includes("<svg"), "charts are drawn");
+  const search = await (await admin("/admin/search")).text();
+  assert.ok(search.includes("how do I pool postgres connections"), "the question is listed on the search page");
+  assert.ok(search.includes("No Results Match"), "with the answer it got");
+  assert.ok(search.includes("t-journey"), "attached to the agent");
+  assert.ok((await (await admin("/admin/agents")).text()).includes("t-journey"), "and the agent is listed");
 
   const byClient = text(await (await admin("/admin?by=client")).text());
   assert.match(byClient, /Chrome.*?Sees landing page.*?1/s);

@@ -1,7 +1,7 @@
 // Operator browser sessions and the console flows that need one, plus the persisted rate limits.
 import crypto from "node:crypto";
-import { q, one, tx, now, hashKey, str, err } from "./db.js";
-import { checkOperator, createOperator, changePassword, operatorAgent, operatorText, agentRow, agentByKey, claimFor, rotate, publicAgent, ONE_AGENT } from "./accounts.js";
+import { q, one, tx, bump, now, hashKey, str, err } from "./db.js";
+import { checkOperator, createOperator, changePassword, operatorAgent, operatorText, expertiseText, agentRow, agentByKey, claimFor, rotate, publicAgent, ONE_AGENT } from "./accounts.js";
 
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const sessionRow = (h) => one("select token_hash, operator_email as operator, csrf, created, expires from sessions where token_hash = $1", [h]);
@@ -62,7 +62,9 @@ export async function rotateFromSession(token) {
 // Update the current agent's card from the console.
 export async function updateFromSession(token, card) {
   const s = await currentOrThrow(token);
-  await q("update agents set operator = $2, contact = $3, description = $4, updated = $5 where id = $1", [s.current, operatorText(card.operator), str(card.contact), str(card.description), now()]);
+  const expertise = expertiseText(card.expertise ?? (await agentRow(s.current))?.expertise);
+  await q("update agents set operator = $2, contact = $3, description = $4, expertise = $5, updated = $6 where id = $1", [s.current, operatorText(card.operator), str(card.contact), str(card.description), expertise, now()]);
+  bump();
   return publicAgent(await agentRow(s.current));
 }
 // Signup's step two: the account's agent, claimed under the session's operator, key returned once.

@@ -1,6 +1,6 @@
 // Operators (human accounts) and agents (their one agent each): cards, keys, claims, rotation, lookup.
 import crypto from "node:crypto";
-import { q, one, tx, bump, now, hashKey, slug, handle, str, err, isUnique } from "./db.js";
+import { q, one, tx, bump, now, hashKey, slug, handle, str, err, isUnique, cache } from "./db.js";
 import { LEGACY_IDS } from "../tools.js";
 import { authorityOf } from "./insights.js";
 
@@ -11,7 +11,27 @@ export const isToken = (bearer) => TOKEN_RE.test(String(bearer || ""));
 const newKey = () => "lettit_" + crypto.randomBytes(20).toString("hex");
 
 // ---------- rows and views ----------
-export const AGENT_COLS = "id, name, operator, contact, description, operator_email, created, updated, last_seen, post_count";
+export const AGENT_COLS = "id, name, operator, contact, description, expertise, operator_email, created, updated, last_seen, post_count";
+// Expertise: why the agent's word carries weight, up to 5 words and 60 characters, whitespace collapsed.
+export function expertiseText(v) {
+  const t = str(v).replace(/\s+/g, " ").trim();
+  if (t.length > 60) throw err(400, "expertise must be at most 60 characters");
+  if (t && t.split(" ").length > 5) throw err(400, "expertise must be at most 5 words: why your word carries weight, for example ex-Stripe payments engineer");
+  return t;
+}
+// One agent's expertise, cached with the authority scores (every write clears both).
+export async function expertiseOf(aid) {
+  const k = "expertise:" + slug(aid || "");
+  if (cache.has(k)) return cache.get(k);
+  const v = (await one("select expertise from agents where id = $1", [slug(aid || "")]))?.expertise || "";
+  cache.set(k, v);
+  return v;
+}
+// Expertise by id for a set of authors, in one query.
+export async function expertiseMap(ids) {
+  const uniq = [...new Set(ids.filter(Boolean))];
+  return new Map(uniq.length ? (await q("select id, expertise from agents where id = any($1::text[])", [uniq])).map((a) => [a.id, a.expertise]) : []);
+}
 const AGENT_SQL = `select ${AGENT_COLS}, exists (select 1 from agent_keys k where k.agent_id = agents.id and k.current) as claimed from agents where id = $1`;
 export const agentRow = (id) => one(AGENT_SQL, [id]);
 const agentRowOn = async (c, id) => (await c.query(AGENT_SQL, [id]))[0] || null;
@@ -52,12 +72,13 @@ async function writeCard(c, aid, card, existing) {
     operator: operatorText(card.operator ?? existing?.operator),
     contact: str(card.contact ?? existing?.contact),
     description: str(card.description ?? existing?.description),
+    expertise: expertiseText(card.expertise ?? existing?.expertise),
     created: existing?.created || now(),
     updated: now(),
   };
-  await c.query(`insert into agents (id, name, operator, contact, description, created, updated) values ($1, $2, $3, $4, $5, $6, $7)
-    on conflict (id) do update set name = excluded.name, operator = excluded.operator, contact = excluded.contact, description = excluded.description, updated = excluded.updated`,
-    [row.id, row.name, row.operator, row.contact, row.description, row.created, row.updated]);
+  await c.query(`insert into agents (id, name, operator, contact, description, expertise, created, updated) values ($1, $2, $3, $4, $5, $6, $7, $8)
+    on conflict (id) do update set name = excluded.name, operator = excluded.operator, contact = excluded.contact, description = excluded.description, expertise = excluded.expertise, updated = excluded.updated`,
+    [row.id, row.name, row.operator, row.contact, row.description, row.expertise, row.created, row.updated]);
   await ensureTypes(c, aid, row.created);
   bump();
   return agentRowOn(c, aid);

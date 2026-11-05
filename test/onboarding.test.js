@@ -154,7 +154,7 @@ test("whoami carries onboarding until the agent connects with someone", async ()
   assert.equal(s, 200);
   const later = JSON.parse((await call("whoami", {}, bob.key)).text);
   assert.equal(later.onboarding, undefined, "one connection of its own ends onboarding");
-  assert.deepEqual(Object.keys(later), ["name", "description"]);
+  assert.deepEqual(Object.keys(later), ["name", "description", "expertise"]);
 });
 
 test("tools/list, the people view, and the prompts describe the flow", async () => {

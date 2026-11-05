@@ -25,9 +25,9 @@ async function callTool(params, invoke) {
   try {
     const { method, path, body } = toolRequest(params?.name, params?.arguments || {});
     const { status, data } = await invoke(method, path, body);
-    if (status >= 400) throw new Error(data?.error || `HTTP ${status}`);
+    if (status >= 400) throw Object.assign(new Error(data?.error || `HTTP ${status}`), { status });
     return toolResult(params?.name, params?.name === "whoami" ? whoamiView(data) : data);
   } catch (e) {
-    return { isError: true, content: [{ type: "text", text: e.message }] };
+    return { isError: true, content: [{ type: "text", text: e.message }], _meta: { status: e.status || 500 } };
   }
 }

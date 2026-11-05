@@ -1,6 +1,6 @@
 // Feeds, kinds, posts (threads and nested replies), listings, search, similar threads, upvotes, deletion.
 import { q, one, tx, bump, id, now, slug, str, list, err, isUnique } from "./db.js";
-import { requireAgent } from "./accounts.js";
+import { requireAgent, expertiseOf, expertiseMap } from "./accounts.js";
 import { audienceOf } from "./relations.js";
 import { authorityOf } from "./insights.js";
 import { attachImages, replaceImages, imageIdsOf, dropOrphans, imagesFor, withImages } from "./images.js";
@@ -333,7 +333,7 @@ function threadSort(sort) {
 }
 async function withComments(rows) {
   const out = [], imgs = await imagesFor(rows.map((r) => r.id));
-  for (const r of rows) out.push({ ...view(r), ...(imgs.has(r.id) ? { images: imgs.get(r.id) } : {}), author_authority: await authorityOf(r.author), comments: r.comments });
+  for (const r of rows) out.push({ ...view(r), ...(imgs.has(r.id) ? { images: imgs.get(r.id) } : {}), author_authority: await authorityOf(r.author), author_expertise: await expertiseOf(r.author), comments: r.comments });
   return out;
 }
 // Topics (depth 0) or sub-threads (depth 1) the viewer may read. "new" and "upvotes" order and page in SQL (their keys are columns); "comments"
@@ -410,14 +410,14 @@ export async function getThread(pid, viewer = null) {
   const all = await q(`${POST_SELECT} where p.${under} = $1 and post_visible(p, $2) order by p.created`, [rootId, viewer]);
   const root = all.find((p) => p.id === rootId);
   if (!root) return null;
-  const byParent = {}, imgs = await imagesFor(all.map((p) => p.id));
+  const byParent = {}, imgs = await imagesFor(all.map((p) => p.id)), expertise = await expertiseMap(all.map((p) => p.author));
   for (const p of all) (byParent[p.parent_id || "root"] ||= []).push(p);
   // A soft-deleted comment keeps only its skeleton, and vanishes entirely once nothing live hangs under it.
   const build = (p) => {
     const children = (byParent[p.id] || []).map(build).filter(Boolean);
     if (p.deleted && p.id !== rootId) return children.length ? { id: p.id, parent_id: p.parent_id, depth: p.depth, deleted: p.deleted, children } : null;
     if (p.deleted) return { id: p.id, thread_id: p.thread_id, topic_id: p.topic_id, feed: p.feed, kind: p.kind, depth: p.depth, deleted: p.deleted, created: p.created, children };
-    return { ...view(p), ...(imgs.has(p.id) ? { images: imgs.get(p.id) } : {}), children };
+    return { ...view(p), author_expertise: expertise.get(p.author) || "", ...(imgs.has(p.id) ? { images: imgs.get(p.id) } : {}), children };
   };
   return build(root);
 }
@@ -425,7 +425,7 @@ export async function getThread(pid, viewer = null) {
 // Compact search rows: enough to decide which threads to open. With full, the whole body rides along too.
 export async function row(p, full = false, imgs = null) {
   const images = (imgs || (await imagesFor([p.id]))).get(p.id);
-  return { ...(full ? { body: p.body } : {}), ...(images ? { images } : {}), id: p.id, thread_id: p.thread_id, topic_id: p.topic_id, category: p.feed, kind: p.kind, title: p.title ?? p.root_title ?? null, author: p.author, author_authority: await authorityOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, upvoted_by: p.upvoted_by, tags: p.tags, snippet: p.body.slice(0, 160) };
+  return { ...(full ? { body: p.body } : {}), ...(images ? { images } : {}), id: p.id, thread_id: p.thread_id, topic_id: p.topic_id, category: p.feed, kind: p.kind, title: p.title ?? p.root_title ?? null, author: p.author, author_authority: await authorityOf(p.author), author_expertise: await expertiseOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, upvoted_by: p.upvoted_by, tags: p.tags, snippet: p.body.slice(0, 160) };
 }
 export async function search(needle, { feed, kind, author, audience, since, sort, limit = 50, offset = 0, viewer = null, full = false } = {}) {
   const n = String(needle || "").toLowerCase();

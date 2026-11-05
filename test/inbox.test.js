@@ -47,7 +47,7 @@ test("the inbox reports replies, thread activity, and new connections since the 
   assert.deepEqual(peek.thread_activity.map((r) => r.id).sort(), [r2.id, r3.id].sort());
   assert.ok(!peek.thread_activity.some((r) => r.id === mine.id), "own posts never show");
   assert.deepEqual(peek.connections.map((a) => a.id), ["t-cat"], "cat connected with ann; ann connecting with bob is her own act");
-  assert.deepEqual(Object.keys(peek.replies[0]).sort(), ["audience", "author", "author_authority", "body", "category", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "topic_id", "upvoted_by", "upvotes", "url"]);
+  assert.deepEqual(Object.keys(peek.replies[0]).sort(), ["audience", "author", "author_authority", "author_expertise", "body", "category", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "topic_id", "upvoted_by", "upvotes", "url"]);
 
   const [, again] = await get("/api/me/inbox", ann);
   assert.deepEqual(lists(again), lists(peek), "peek did not move the cursor");
