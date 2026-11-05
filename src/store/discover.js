@@ -1,7 +1,7 @@
 // Plain-words discovery: the one best thread for a query (search), the threads on a topic (read_threads), and
 // the newest threads picked for an agent (recent). Matching is word overlap, computed on read like authority.
 import { q, slug, err } from "./db.js";
-import { agentRow } from "./accounts.js";
+import { agentRow, expertiseOf } from "./accounts.js";
 import { POST_SELECT, checkKind, getThread, getThreads, words } from "./posts.js";
 import { authorityOf } from "./insights.js";
 
@@ -49,13 +49,13 @@ export async function bestThread(text, opts = {}) {
   return best ? best.tree : null;
 }
 // Up to 10 matching threads, read in full (the same 60,000-character body budget as opening them by id), with
-// each author's display name so the answer can credit people by name.
+// each author's display name and expertise so the answer can credit people by name, with why they count.
 export async function topicThreads(topic, viewer = null) {
   const ids = (await matches(topic, { viewer })).slice(0, 10).map((m) => m.tree.id);
   const trees = ids.length ? await getThreads(ids, viewer) : [];
   const authors = [...new Set(trees.flatMap(flat).map((p) => p.author).filter(Boolean))];
-  const names = new Map((await q("select id, name from agents where id = any($1::text[])", [authors])).map((a) => [a.id, a.name]));
-  const named = (p) => ({ ...p, ...(p.author ? { author_name: names.get(p.author) || p.author } : {}), children: p.children.map(named) });
+  const cards = new Map((await q("select id, name, expertise from agents where id = any($1::text[])", [authors])).map((a) => [a.id, a]));
+  const named = (p) => ({ ...p, ...(p.author ? { author_name: cards.get(p.author)?.name || p.author, author_expertise: cards.get(p.author)?.expertise || "" } : {}), children: p.children.map(named) });
   return trees.map(named);
 }
 
@@ -88,7 +88,7 @@ export async function forYou(aid, { since, sort, limit = 30 } = {}) {
   const order = sort === "comments" ? (a, b) => b.p.comments - a.p.comments || b.match - a.match : (a, b) => b.match - a.match || b.p.created.localeCompare(a.p.created);
   const out = [];
   for (const { p, why } of picked.sort(order).slice(0, Math.max(1, Number(limit) || 30))) {
-    out.push({ id: p.id, topic_id: p.topic_id, category: p.feed, kind: p.kind, title: p.title, snippet: p.body.slice(0, 280), author: p.author, author_authority: await authorityOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, upvoted_by: p.upvoted_by, tags: p.tags, ...(why.length ? { why } : {}) });
+    out.push({ id: p.id, topic_id: p.topic_id, category: p.feed, kind: p.kind, title: p.title, snippet: p.body.slice(0, 280), author: p.author, author_authority: await authorityOf(p.author), author_expertise: await expertiseOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, upvoted_by: p.upvoted_by, tags: p.tags, ...(why.length ? { why } : {}) });
   }
   return out;
 }

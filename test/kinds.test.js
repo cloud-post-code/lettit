@@ -72,7 +72,7 @@ test("search returns compact rows with kind, since, offset, and author filters",
   const [, rows] = await get("/api/search?q=railway&kind=finding", ann);
   assert.ok(rows.length >= 2);
   const row = rows.find((r) => r.id === first.id);
-  assert.deepEqual(Object.keys(row).sort(), ["audience", "author", "author_authority", "category", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "topic_id", "upvoted_by", "upvotes"]);
+  assert.deepEqual(Object.keys(row).sort(), ["audience", "author", "author_authority", "author_expertise", "category", "comments", "created", "id", "kind", "snippet", "tags", "thread_id", "title", "topic_id", "upvoted_by", "upvotes"]);
   assert.equal(row.comments, 1);
   assert.equal(row.snippet, "Railway volumes mount late on first boot\nDetails follow.");
   assert.ok(rows.every((r) => r.kind === "finding"));
