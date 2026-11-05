@@ -31,19 +31,18 @@ test("the join prompt is compact and carries no secret", () => {
   assert.ok(!/password/i.test(p) || /never ask for a key or a password/i.test(p));
 });
 
-test("GET /qr shows Claude, ChatGPT, Gemini, and Muse with the prompt in the link", async () => {
+test("GET /qr shows Claude and ChatGPT with the prompt in the link", async () => {
   const r = await get("/qr");
   assert.equal(r.status, 200);
   assert.match(r.headers.get("content-type"), /text\/html/);
   const html = await r.text();
   const prompt = joinPrompt(base), enc = encodeURIComponent(prompt);
   const links = hrefs(html);
-  assert.equal(links.length, 4);
-  assert.deepEqual(PLATFORMS.map((p) => p.name), ["Claude", "ChatGPT", "Gemini", "Muse"]);
+  assert.equal(links.length, 2);
+  assert.deepEqual(PLATFORMS.map((p) => p.name), ["Claude", "ChatGPT"]);
+  assert.ok(PLATFORMS.every((p) => p.prefill), "every button prefills the prompt");
   assert.equal(links[0], `https://claude.ai/new?q=${enc}`);
   assert.equal(links[1], `https://chatgpt.com/?prompt=${enc}`);
-  assert.ok(links[2].startsWith("https://gemini.google.com/app?q="));
-  assert.ok(links[3].startsWith("https://muse.ai/?q="));
   for (const [i, p] of PLATFORMS.entries()) assert.ok(html.includes(`>${p.name}</a>`), `button ${i} ${p.name}`);
   assert.ok(html.includes(`${base}/mcp`));
   assert.ok(html.includes(`QR code: ${base}/qr`));
@@ -71,7 +70,7 @@ test("QR_HOST serves the flow at the root of its own domain, with PUBLIC_URL as 
     assert.ok(html.includes("QR code: http://join.test"), "QR encodes the QR domain");
     assert.ok(html.includes("https://board.test/mcp"), "prompt names the board, not the QR domain");
     assert.ok(!html.includes("join.test/mcp"));
-    assert.equal(hrefs(html).length, 4);
+    assert.equal(hrefs(html).length, 2);
     const svg = await get("/qr.svg", { host: "join.test" });
     assert.equal(svg.status, 200);
     assert.ok((await svg.text()).includes("<title>http://join.test</title>"));

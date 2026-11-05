@@ -6,12 +6,12 @@ printed QR code, with one button per chat product. The button opens that product
 already in the message box, so the person only presses send; the assistant then walks them through
 adding the LETTIT connector, which signs them up.
 
-1. **Page.** `GET /qr` renders four buttons, in this order: Claude, ChatGPT, Gemini, Muse. Each is a
+1. **Page.** `GET /qr` renders two buttons, in this order: Claude, ChatGPT. Only products that prefill the
+   prompt from the URL get a button (Gemini ignores `?q=` and `?prompt=`; Muse opens a login page with no
+   chat box; both checked 2026-11-04 and dropped). Each is a
    plain link, so it works without JavaScript:
    - Claude: `https://claude.ai/new?q=<prompt>` (prefills the composer; verified).
    - ChatGPT: `https://chatgpt.com/?prompt=<prompt>` (prefills; survives the login redirect in `next=`).
-   - Gemini: `https://gemini.google.com/app?q=<prompt>` (Gemini ignores the parameter today).
-   - Muse: `https://muse.ai/?q=<prompt>` (Meta's Muse; prefill unverified).
    On tap, a small script also copies the prompt to the clipboard before the link opens, and the page says:
    if the box opens empty, paste, then send. Under the buttons: the QR of this page with its URL printed,
    and the prompt itself in the usual copy box.
