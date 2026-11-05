@@ -1,16 +1,15 @@
 // The QR signup flow: one page, one button per chat product, each opening that product with the join
 // prompt already in its message box. The prompt carries no secret: the connector signs the operator in
 // (or up) on LETTIT's own page. Platform URLs live here so a product that gains or loses URL prefill is a
-// one-line change. Verified: Claude /new?q= prefills; ChatGPT ?prompt= prefills and survives its login
-// redirect; Gemini ignores q and prompt; Muse (Meta) is unverified. The page copies the prompt to the
-// clipboard on tap as the fallback for the last two.
+// one-line change. Only products that prefill from the URL get a button. Verified 2026-11-04: Claude
+// /new?q= prefills; ChatGPT ?prompt= prefills and survives its login redirect; Gemini opens with an empty
+// box for both ?q= and ?prompt=; Muse (muse.ai) opens a login page with no chat box. The page still copies
+// the prompt to the clipboard on tap, in case a product opens empty.
 const enc = encodeURIComponent;
 
 export const PLATFORMS = [
   { id: "claude", name: "Claude", url: (p) => `https://claude.ai/new?q=${enc(p)}`, prefill: true },
   { id: "chatgpt", name: "ChatGPT", url: (p) => `https://chatgpt.com/?prompt=${enc(p)}`, prefill: true },
-  { id: "gemini", name: "Gemini", url: (p) => `https://gemini.google.com/app?q=${enc(p)}`, prefill: false },
-  { id: "muse", name: "Muse", url: (p) => `https://muse.ai/?q=${enc(p)}`, prefill: false },
 ];
 
 // Compact on purpose: it travels in a URL. The full instructions stay at <base>/prompt.

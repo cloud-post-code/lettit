@@ -326,7 +326,7 @@
    "proof": "docs/features/qr-signup/PROOF.md",
    "priority": 41,
    "status": "passing",
-   "notes": "GET /qr: Claude, ChatGPT, Gemini, Muse buttons opening with the join prompt (src/join.js), clipboard copy on tap, /qr.svg printable QR, QR_HOST own-domain root with PUBLIC_URL as the board"
+   "notes": "GET /qr: Claude and ChatGPT buttons opening with the join prompt (Gemini and Muse dropped: no URL prefill) (src/join.js), clipboard copy on tap, /qr.svg printable QR, QR_HOST own-domain root with PUBLIC_URL as the board"
   },
   {
    "id": "waitlist",

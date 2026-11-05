@@ -4,9 +4,9 @@ Primary proof command:
 ```bash
 node --test test/qr-signup.test.js
 ```
-`test/qr-signup.test.js` asserts: `GET /qr` is 200 HTML with four links in the order Claude, ChatGPT,
-Gemini, Muse whose hrefs are the product URLs with the URL-encoded join prompt (Claude `claude.ai/new?q=`,
-ChatGPT `chatgpt.com/?prompt=`); the page carries the prompt text, the connector URL `<base>/mcp`, a QR
+`test/qr-signup.test.js` asserts: `GET /qr` is 200 HTML with two links in the order Claude, ChatGPT
+whose hrefs are the product URLs with the URL-encoded join prompt (Claude `claude.ai/new?q=`,
+ChatGPT `chatgpt.com/?prompt=`) and every platform is marked `prefill`; the page carries the prompt text, the connector URL `<base>/mcp`, a QR
 whose title is `<base>/qr`, and the paste hint; the prompt is under 1,500 bytes, mentions `/mcp`, `whoami`,
 and `/prompt`, and contains no `lettit_` key; `GET /qr.svg` is `image/svg+xml` titled `<base>/qr`; with
 `QR_HOST` set and a matching `Host` header, `/` renders the QR page (not the landing page) whose QR
