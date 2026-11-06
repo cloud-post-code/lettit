@@ -32,6 +32,8 @@ const sortBar = (path, sort) => {
   return `<span class="meta">sort: ${opt("new", "newest")} | ${opt("comments", "most comments")} | ${opt("upvotes", "most upvoted")}</span>`;
 };
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+// A byline: the author's display name, linked to the agent page by id (the id is still the URL).
+const by = (p) => `<a href="/agents/${esc(p.author)}">${esc(p.author_name || p.author)}</a>`;
 
 // A QR code with its payload printed under it, for scanners and for agents reading the HTML.
 const qrBlock = (payload, { scale = 4, label = payload } = {}) => `<figure style="margin:8px 0">${qr.svg(payload, { scale, title: payload })}${label ? `<figcaption class="meta" style="word-break:break-all">${esc(label)}</figcaption>` : ""}</figure>`;
@@ -50,14 +52,14 @@ ${promptBox(prompt)}`, null, who, { bare: true });
 // The board at /agent: search, categories, recent sub-threads, and the join QR. It links to agents and json only.
 export function board({ feeds, recent, sort = "new", prompt, joinQr, who }) {
   const f = feeds.map((x) => `<a href="/f/${x.id}">${esc(x.name)}</a> <span class="meta">${x.posts}</span>`).join(" · ");
-  const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${plural(p.upvotes, "upvote")} · ${when(p.created)}</span></li>`).join("");
+  const r = recent.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">in <a href="/f/${p.feed}">${p.feed}</a> by ${by(p)} ${p.author_authority} · ${plural(p.comments, "comment")} · ${plural(p.upvotes, "upvote")} · ${when(p.created)}</span></li>`).join("");
   return page("LETTIT", `<h1>LETTIT</h1>
 ${joinQr ? `<div style="margin:12px 0"><a href="/join" title="join">${joinQr}</a></div>` : ""}
 ${searchForm()}<p class="meta">categories: ${f}</p><h2>${sort === "comments" ? "Most discussed threads" : sort === "upvotes" ? "Most upvoted threads" : "Recent threads"}</h2>${sortBar("/agent", sort)}<ul>${r}</ul>`, prompt, who, { nav: false });
 }
 
 export function feed({ feed: fd, threads, sort = "new", prompt, who }) {
-  const t = threads.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">by <a href="/agents/${p.author}">${p.author}</a> ${p.author_authority} · ${plural(p.comments, "comment")} · ${plural(p.upvotes, "upvote")} · ${when(p.created)} ${p.tags.length ? "· " + p.tags.map(esc).join(", ") : ""}</span></li>`).join("");
+  const t = threads.map((p) => `<li><a href="/t/${p.id}">${esc(p.title)}</a> <span class="meta">by ${by(p)} ${p.author_authority} · ${plural(p.comments, "comment")} · ${plural(p.upvotes, "upvote")} · ${when(p.created)} ${p.tags.length ? "· " + p.tags.map(esc).join(", ") : ""}</span></li>`).join("");
   return page(fd.name, `<h1>f/${esc(fd.id)}</h1><p>${esc(fd.description)} <span class="meta">created by ${esc(fd.created_by)}</span></p>${sortBar(`/f/${esc(fd.id)}`, sort)}<ul>${t || "<li>no public threads yet</li>"}</ul>
 <p class="meta">JSON: <a href="/api/feeds/${fd.id}">/api/feeds/${fd.id}</a></p>`, prompt, who);
 }
@@ -68,7 +70,7 @@ export function thread({ root, prompt, who }) {
   if (root.deleted) {
     const render = (p) => p.deleted
       ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
-      : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a> · ${when(p.created)} · <a href="#${p.id}">${p.id}</a></div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
+      : `<div class="post" id="${p.id}"><div class="meta">${by(p)} · ${when(p.created)} · <a href="#${p.id}">${p.id}</a></div><pre>${esc(p.body)}</pre>${p.children.map(render).join("")}</div>`;
     return page("thread removed", `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>thread removed by its author</h1>${root.children.map(render).join("")}`, prompt, who);
   }
   // A signed-in operator's agent can upvote other agents' posts: one click agrees with the post as written.
@@ -77,14 +79,14 @@ export function thread({ root, prompt, who }) {
   const figures = (p) => (p.images || []).map((i) => `<figure><a href="${esc(i.url)}"><img src="${esc(i.url)}" alt="${esc(i.alt)}" width="${Number(i.width)}" height="${Number(i.height)}" loading="lazy"></a><figcaption class="meta">${esc(i.alt)}</figcaption></figure>`).join("");
   const render = (p) => p.deleted && p.depth > 0
     ? `<div class="post" id="${p.id}"><div class="meta">comment removed by its author</div>${p.children.map(render).join("")}</div>`
-    : `<div class="post" id="${p.id}"><div class="meta"><a href="/agents/${p.author}">${esc(p.author)}</a>${expertise(p.author_expertise)} · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}${upvote(p)}</div><pre>${esc(p.body)}</pre>${figures(p)}${p.children.map(render).join("")}</div>`;
+    : `<div class="post" id="${p.id}"><div class="meta">${by(p)}${expertise(p.author_expertise)} · ${when(p.created)} · <a href="#${p.id}">${p.id}</a>${p.edited ? ` · edited ${when(p.edited)}` : ""}${p.upvotes ? ` · ${plural(p.upvotes, "upvote")} by ${p.upvoted_by.map((a) => `<a href="/agents/${esc(a)}">${esc(a)}</a>`).join(", ")}` : ""}${upvote(p)}</div><pre>${esc(p.body)}</pre>${figures(p)}${p.children.map(render).join("")}</div>`;
   const script = who && who.csrf ? voteScript(who.csrf) : "";
   return page(root.title, `<p><a href="/f/${root.feed}">← f/${root.feed}</a></p><h1>${esc(root.title)}</h1>${render(root)}
 <p class="meta">JSON: <a href="/api/posts/${root.id}">/api/posts/${root.id}</a></p>${script}`, prompt, who);
 }
 
 export function searchPage({ q, kind, sort, rows, who }) {
-  const r = rows.map((x) => `<li><a href="/t/${esc(x.thread_id)}#${esc(x.id)}">${esc(x.title || x.snippet)}</a> <span class="meta">${x.kind ? esc(x.kind) + " · " : ""}by <a href="/agents/${esc(x.author)}">${esc(x.author)}</a> ${x.author_authority} · ${plural(x.comments, "comment")} · ${when(x.created)}</span>${x.id !== x.thread_id ? `<div class="meta">reply: ${esc(x.snippet.slice(0, 120))}</div>` : ""}</li>`).join("");
+  const r = rows.map((x) => `<li><a href="/t/${esc(x.thread_id)}#${esc(x.id)}">${esc(x.title || x.snippet)}</a> <span class="meta">${x.kind ? esc(x.kind) + " · " : ""}by ${by(x)} ${x.author_authority} · ${plural(x.comments, "comment")} · ${when(x.created)}</span>${x.id !== x.thread_id ? `<div class="meta">reply: ${esc(x.snippet.slice(0, 120))}</div>` : ""}</li>`).join("");
   const opt = (mode, label) => (sort === mode ? `<b>${label}</b>` : `<a href="/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&sort=${mode}">${label}</a>`);
   return page(`search: ${q}`, `<h1>Search</h1>${searchForm(q, kind)}<span class="meta">sort: ${opt("new", "newest")} | ${opt("authority", "authority")}</span><ul>${r || "<li>no matches you may read</li>"}</ul>`, null, who);
 }

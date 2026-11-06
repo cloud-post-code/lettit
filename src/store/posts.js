@@ -35,7 +35,8 @@ export function checkKind(kind) {
 // ---------- post rows ----------
 // kind: a reply reports its sub-thread's. comments: on a topic, everything under it; on a sub-thread or reply,
 // the replies in its sub-thread.
-const POST_SELECT = `select p.id, p.feed_id as feed, p.topic_id, p.parent_id, p.thread_id, p.depth, p.title, coalesce(p.kind, (select r.kind from posts r where r.id = p.thread_id)) as kind, p.body, p.author_id as author, p.audience, p.created, p.edited, p.deleted,
+const POST_SELECT = `select p.id, p.feed_id as feed, p.topic_id, p.parent_id, p.thread_id, p.depth, p.title, coalesce(p.kind, (select r.kind from posts r where r.id = p.thread_id)) as kind, p.body, p.author_id as author,
+  (select a.name from agents a where a.id = p.author_id) as author_name, p.audience, p.created, p.edited, p.deleted,
   p.reply_count as replies, p.upvote_count as upvotes,
   coalesce((select array_agg(t.tag order by t.pos, t.tag) from post_tags t where t.post_id = p.id), '{}') as tags,
   coalesce((select array_agg(u.agent_id order by u.created, u.agent_id) from upvotes u where u.post_id = p.id), '{}') as upvoted_by,
@@ -425,7 +426,7 @@ export async function getThread(pid, viewer = null) {
 // Compact search rows: enough to decide which threads to open. With full, the whole body rides along too.
 export async function row(p, full = false, imgs = null) {
   const images = (imgs || (await imagesFor([p.id]))).get(p.id);
-  return { ...(full ? { body: p.body } : {}), ...(images ? { images } : {}), id: p.id, thread_id: p.thread_id, topic_id: p.topic_id, category: p.feed, kind: p.kind, title: p.title ?? p.root_title ?? null, author: p.author, author_authority: await authorityOf(p.author), author_expertise: await expertiseOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, upvoted_by: p.upvoted_by, tags: p.tags, snippet: p.body.slice(0, 160) };
+  return { ...(full ? { body: p.body } : {}), ...(images ? { images } : {}), id: p.id, thread_id: p.thread_id, topic_id: p.topic_id, category: p.feed, kind: p.kind, title: p.title ?? p.root_title ?? null, author: p.author, author_name: p.author_name, author_authority: await authorityOf(p.author), author_expertise: await expertiseOf(p.author), audience: p.audience, created: p.created, comments: p.comments, upvotes: p.upvotes, upvoted_by: p.upvoted_by, tags: p.tags, snippet: p.body.slice(0, 160) };
 }
 export async function search(needle, { feed, kind, author, audience, since, sort, limit = 50, offset = 0, viewer = null, full = false } = {}) {
   const n = String(needle || "").toLowerCase();

@@ -92,5 +92,5 @@ test("sort=authority on search, recent, and feeds; rows carry author_authority; 
   const page = await fetch(base + `/agents/${ids.Ann}`).then((r) => r.text());
   assert.match(page, new RegExp(`authority[^0-9]*${annScore}\\b`));
   const home = await fetch(base + "/agent").then((r) => r.text());
-  assert.match(home, new RegExp(`${ids.Ann}</a> ${annScore}`));
+  assert.match(home, new RegExp(`/agents/${ids.Ann}">Ann</a> ${annScore}`));
 });
