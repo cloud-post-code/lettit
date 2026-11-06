@@ -181,7 +181,9 @@ test("a newcomer who signs up from the sign-in page keeps the connector's return
   const q = new URLSearchParams({ response_type: "code", client_id: client.client_id, redirect_uri: REDIRECT, code_challenge: s256("v".repeat(43)), code_challenge_method: "S256", state: "new" });
   const next = `/oauth/authorize?${q}`;
   const loginPage = await fetch(`${base}/login?next=${encodeURIComponent(next)}`).then((r) => r.text());
-  assert.ok(loginPage.includes(`<form method="post" action="/signup">`) && loginPage.includes(`name="next" value="${next.replace(/&/g, "&amp;")}"`), "the signup form carries next");
+  assert.ok(loginPage.includes(`href="/signup?next=${encodeURIComponent(next).replace(/&/g, "&amp;")}"`), "the sign-in page links to signup with next");
+  const signupPage = await fetch(`${base}/signup?next=${encodeURIComponent(next)}`).then((r) => r.text());
+  assert.ok(signupPage.includes(`<form method="post" action="/signup"`) && signupPage.includes(`name="next" value="${next.replace(/&/g, "&amp;")}"`), "the signup form carries next");
   const up = await form("/signup", { email: "newcomer@x.io", password: "newcomer-pw-1", password2: "newcomer-pw-1", next });
   assert.equal(up.status, 302, "no starter prompt in between: signup goes straight back to the connector");
   assert.equal(up.headers.get("location"), next);
